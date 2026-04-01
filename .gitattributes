@@ -1,0 +1,7 @@
+* text=auto
+
+*.R text eol=lf
+*.md text eol=lf
+*.Rproj text eol=lf
+*.txt text eol=lf
+*.csv text eol=lf

@@ -1,0 +1,45 @@
+# R / RStudio
+.Rproj.user/
+.Rhistory
+.RData
+.Ruserdata
+**/.Rhistory
+**/.RData
+**/.Ruserdata
+
+# OS / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local project state
+projects_settings/
+
+# Large generated outputs
+results/**
+!results/README.md
+
+figures/**
+!figures/README.md
+
+# Local data and external dependencies
+data/**
+!data/README.md
+
+external/**
+!external/README.md
+
+# Local manuscript binaries / scratch notes
+Text/**
+!Text/README.md
+
+# Scratch exports at repository root
+accuracy_stupid_extract.txt
+cong_extract.txt
+paper_extract.txt
+wadoux_extract.txt
+
+# Temporary files
+*.tmp
+*.bak
+*.log
