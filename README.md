@@ -20,7 +20,7 @@
 local raster context (2D CNN), global covariate structure (tabular MLP), geographic encoding,
 and a differentiable anisotropic kriging correction into a single end-to-end trainable model.
 
-[Architecture](#%EF%B8%8F-architecture) · [Math](#-mathematical-formulation) · [Results](#-benchmark-results) · [Usage](#-quick-start) · [Citation](#-citation)
+[DeepSCORPAN](#-from-scorpan-to-deepscorpan) · [Architecture](#%EF%B8%8F-architecture) · [Math](#-mathematical-formulation) · [Results](#-benchmark-results) · [Usage](#-quick-start) · [Citation](#-citation)
 
 </div>
 
@@ -39,6 +39,96 @@ Classical geostatistical kriging interpolates spatial fields elegantly — but i
 - 🎯 **Distance-aware gate** — automatically suppresses kriging correction when no nearby reference points exist, making predictions robust under spatial extrapolation
 
 The result: a model that achieves **design-based RMSE competitive with or better than RF** on the Wadoux et al. (2021) benchmark while being fully differentiable and end-to-end trainable.
+
+---
+
+## 🌱 From SCORPAN to DeepSCORPAN
+
+### The SCORPAN Framework
+
+Digital Soil Mapping is formally grounded in the **SCORPAN** framework (McBratney, Mendonça Santos & Minasny, 2003), which generalises Jenny's (1941) soil-forming factors into a spatial inference function:
+
+$$S(\mathbf{s}) = f\!\bigl(S_a,\; C,\; O,\; R,\; P,\; A,\; N\bigr) + \varepsilon(\mathbf{s})$$
+
+| Symbol | Factor | Examples |
+|:---:|---|---|
+| **S** | Soil (prior) | Legacy profiles, spectral soil indices, texture classes |
+| **C** | Climate | Mean annual rainfall, temperature, PET, seasonality |
+| **O** | Organisms | NDVI, EVI, LAI, land use, biological activity |
+| **R** | Relief | DEM, slope, aspect, curvature, TWI, valley depth |
+| **P** | Parent material | Geology, lithology, geochemistry, radiometrics |
+| **A** | Age | Land use history, pedogenic time |
+| **N** | s**N**ace (position) | Geographic coordinates, spatial basis functions |
+
+The term $\varepsilon(\mathbf{s})$ captures the **spatially structured residual** — what the covariate model cannot explain but the landscape still holds through spatial autocorrelation. In classical regression-kriging, this term is modelled separately via a variogram and kriging interpolation:
+
+$$\hat{S}(\mathbf{s}_0) = \underbrace{\hat{f}(\mathbf{x}_0)}_{\text{trend model}} + \underbrace{\sum_{i=1}^{n} \lambda_i(\mathbf{s}_0)\,\hat{\varepsilon}(\mathbf{s}_i)}_{\text{kriged residual}}$$
+
+where $\lambda_i$ are kriging weights derived from the fitted variogram. This two-stage approach is statistically sound but **severs the feedback** between trend estimation and residual interpolation: the variogram is fitted after the trend, and the trend is estimated without knowing the spatial correlation structure of its errors.
+
+### DeepSCORPAN: A Unified End-to-End Architecture
+
+**GeoVersa proposes DeepSCORPAN** as a fully differentiable realisation of SCORPAN + geostatistics in a single neural network. The key insight is that every SCORPAN factor maps naturally onto a specialised encoder, and the geostatistical residual correction becomes a differentiable layer trained jointly with the trend:
+
+$$\boxed{\hat{S}(\mathbf{s}_0) = \underbrace{f_{\theta}\!\Bigl(\underbrace{\mathbf{x}_{\{S,C,O,R,P,A\}}}_{\text{tabular SCORPAN}},\; \underbrace{\mathbf{P}_{15\times15}^{\{O,R\}}}_{\text{local raster context (N)}},\; \underbrace{\mathbf{s}_0}_{N}\Bigr)}_{\text{DeepSCORPAN trend}} + \underbrace{\beta_{\text{eff}}(\mathbf{s}_0)\cdot\delta(\mathbf{s}_0)}_{\text{learned anisotropic kriging}}}$$
+
+```mermaid
+flowchart TD
+    subgraph SCORPAN_IN["🌱 SCORPAN Factors"]
+        S_f["S · prior soil\nlegacy profiles · soil indices"]
+        C_f["C · climate\nrainfall · temperature · PET"]
+        O_f["O · organisms\nNDVI · EVI · land use"]
+        R_f["R · relief\nDEM · slope · TWI · aspect"]
+        P_f["P · parent material\ngeology · radiometrics"]
+        A_f["A · age\nland use history"]
+        N_f["N · spatial position\ncoordinates (x, y)"]
+    end
+
+    subgraph ENCODERS_DS["🧠 DeepSCORPAN Encoders"]
+        TAB["📊 Tabular MLP\n← S, C, O, R, P, A\npoint-level covariate vector\n→ 256-dim embedding"]
+        PATCH["🗺️ 2D CNN PatchEncoder\n← O, R as raster channels\n15 × 15 pixel neighbourhood\n→ local spatial texture → 256-dim"]
+        COORD["📍 Coordinate MLP\n← N · geographic position\n→ 256-dim spatial embedding"]
+    end
+
+    subgraph DEEP_TREND["📈 DeepSCORPAN Trend  f_θ"]
+        FUSE["Fusion · concat → linear → GELU\n→ shared embedding  z  [256-dim]"]
+        BASE["Scalar Head → ŷ_base\n(SCORPAN trend prediction)"]
+    end
+
+    subgraph GEO["📐 Geostatistical Component"]
+        BANK["Memory Bank\nZ_mem · R_mem · C_mem\n(all training residuals)"]
+        KRIG_L["AnisotropicResidualKrigingLayer\nlearned ℓ_maj · ℓ_min · θ\nattention-weighted δ"]
+        GATE["Distance-aware gate  β_eff\nactive near training data\nsuppressed in spatial gaps"]
+    end
+
+    PRED["✅  Ŝ(s₀) = ŷ_base + β_eff · δ\nDeepSCORPAN prediction"]
+
+    S_f & C_f & P_f & A_f --> TAB
+    O_f & R_f --> TAB
+    O_f & R_f --> PATCH
+    N_f --> COORD
+    TAB & PATCH & COORD --> FUSE --> BASE
+    FUSE --> KRIG_L
+    BANK --> KRIG_L --> GATE
+    BASE & GATE --> PRED
+
+    style SCORPAN_IN fill:#1a2a1a,color:#eee,stroke:#40916c
+    style ENCODERS_DS fill:#1a1a2e,color:#eee,stroke:#4a90d9
+    style DEEP_TREND fill:#0f3460,color:#eee,stroke:#4a90d9
+    style GEO fill:#3d1f4e,color:#eee,stroke:#a855f7
+```
+
+### What DeepSCORPAN Advances Beyond Classical Approaches
+
+| Aspect | Regression-Kriging | Random Forest (ML) | **DeepSCORPAN** |
+|---|:---:|:---:|:---:|
+| SCORPAN factors (S,C,O,R,P,A) | ✅ (linear trend) | ✅ | ✅ (deep non-linear) |
+| Spatial position N | ✅ (kriging) | ❌ (ignored) | ✅ (coordinate MLP) |
+| Local raster texture | ❌ | ❌ | ✅ (2D CNN patch) |
+| Spatial autocorrelation | ✅ (fitted variogram) | ❌ | ✅ (learned in-model) |
+| Anisotropy | ⚠️ (manual) | ❌ | ✅ (learned θ, ℓ_maj, ℓ_min) |
+| Joint trend + residual training | ❌ (two-stage) | ❌ | ✅ (end-to-end) |
+| Robust to spatial gaps | ✅ (extrapolates) | ✅ (no kriging noise) | ✅ (dist-aware gate) |
 
 ---
 
@@ -228,26 +318,34 @@ $$\delta_i = \sum_{k=1}^{K} w_{ik} \cdot r_k, \quad r_k = y_k - \hat{y}_{\text{b
 
 ### Distance-Aware Gate
 
-The kriging mixing coefficient $\beta$ is modulated by the proximity of the nearest available neighbour:
+In classical kriging, the weight $\lambda_i$ assigned to a neighbour decays as its distance increases, reaching zero at the **variogram range** — the distance beyond which two locations are considered spatially independent. Beyond the range, kriging should not correct the trend prediction: the residual there carries no information about the unobserved location.
+
+ConvKrigingNet2D replicates this fundamental geostatistical principle differentiably. The **mixing coefficient** $\beta$ — which controls how much the kriging correction $\delta$ is blended into the final prediction — is modulated point-by-point by the proximity of the nearest available reference neighbour:
 
 $$d_i^{\min} = \min_{k \in \{1,\ldots,K\}} d_{ik}^{\text{aniso}}$$
 
-$$\beta_i^{\text{eff}} = \underbrace{\sigma(\text{logit}_{\beta})}_{\beta} \cdot \underbrace{\exp\!\left(-\frac{d_i^{\min}}{\tau}\right)}_{\text{dist-gate}}$$
+$$\underbrace{\beta_i^{\text{eff}}}_{\text{effective mixing}} = \underbrace{\sigma(\text{logit}_{\beta})}_{\substack{\beta \\ \text{global scalar}}} \cdot \underbrace{\exp\!\left(-\frac{d_i^{\min}}{\tau}\right)}_{\substack{\text{dist-gate} \\ \in\,(0,\,1]}}$$
 
 $$\hat{y}_i = \hat{y}_{\text{base},i} + \beta_i^{\text{eff}} \cdot \delta_i$$
 
-where $\tau > 0$ (`dist_scale`) is a fixed architectural constant that calibrates the gate's sensitivity. When all $K$ neighbours lie beyond the variogram range ($d^{\min} \gg \tau$), the gate $\to 0$ and the model degrades gracefully to its base prediction — critical for robustness under spatial cross-validation with large exclusion buffers.
+where $\tau > 0$ (`dist_scale`) is a fixed architectural constant analogous to the variogram range. The gate behaviour mirrors classical kriging:
+
+| Nearest-neighbour distance | dist-gate value | Kriging contribution |
+|:---:|:---:|---|
+| $d_i^{\min} \ll \tau$ | $\approx 1$ | Full correction — neighbour is within effective range |
+| $d_i^{\min} \approx \tau$ | $\approx 0.37$ | Partial correction — neighbour at the range boundary |
+| $d_i^{\min} \gg \tau$ | $\approx 0$ | Correction suppressed — neighbour is spatially independent |
+
+This is **architecturally guaranteed without any protocol-specific logic**: the same model that exploits close neighbours during design-based prediction gracefully falls back to $\hat{y}_{\text{base}}$ when no informative neighbour exists — exactly as a variogram-range-aware kriging system would.
 
 <details>
-<summary>📖 Why this gate matters: SpatialKFold stability</summary>
+<summary>📖 Geostatistical interpretation and SpatialKFold behaviour</summary>
 
-In **SpatialKFold** validation (Wadoux 2021), a 350 km spatial buffer is enforced between training and test sets. This means all $K$ nearest neighbours of any test point are geographically distant: their stored residuals $r_k$ have weak correlation with the true residual at the query point. Without the gate, $\beta \cdot \delta$ becomes noise that degrades the already-good base prediction.
+**Geostatistical interpretation.** In a Matérn or exponential variogram model, the kriging weight for a neighbour at distance $h$ drops approximately as $\exp(-h/a)$ where $a$ is the practical range. The dist-gate in ConvKrigingNet2D is structurally identical, applied to the anisotropic normalised distance $d^{\min}$ (already expressed in units of $\ell_{\text{maj}}/\ell_{\text{min}}$): when $d^{\min}/\tau = 1$ the gate is $e^{-1} \approx 0.37$, matching the conventional definition of the practical range (point at which the variogram reaches $\sim 63\%$ of the sill).
 
-With the gate, $d_i^{\min}$ is large for all spatial-fold test points → $\exp(-d^{\min}/\tau) \approx 0$ → the model automatically falls back to $\hat{y}_{\text{base}}$, preserving the quality of the CNN + MLP base rather than corrupting it.
+**SpatialKFold behaviour.** In SpatialKFold validation (Wadoux 2021), a 350 km spatial exclusion buffer is enforced between calibration and evaluation sets. All $K$ nearest neighbours of every test point therefore lie beyond this buffer: their stored residuals $r_k$ are spatially uncorrelated with the true residual at the query location. Without the gate, $\beta \cdot \delta$ injects pure noise into the already-good DeepSCORPAN trend prediction.
 
-During DesignBased and RandomKFold evaluation, neighbours are geographically close → $d_i^{\min}$ is small → gate $\approx 1$ → full kriging correction is active.
-
-This asymmetric behaviour is **architecturally guaranteed without any protocol-specific logic**, making ConvKrigingNet2D robust across all validation frameworks by design.
+With the gate, $d_i^{\min}$ is large for all spatial-fold test points → $\exp(-d^{\min}/\tau) \approx 0$ → the model automatically falls back to $\hat{y}_{\text{base}}$, preserving the full quality of the CNN + tabular trend. Wadoux et al. (2021) note that SpatialKFold systematically over-estimates errors for models that exploit spatial autocorrelation: the gate makes ConvKrigingNet2D robust to this artefact by construction.
 
 </details>
 
@@ -437,9 +535,11 @@ GeoVersa contains several experimental architectures beyond ConvKrigingNet2D:
 
 ## 📖 References
 
+- **McBratney, A.B., Mendonça Santos, M.L., Minasny, B.** (2003). On digital soil mapping. *Geoderma*, 117(1–2), 3–52. [doi:10.1016/S0016-7061(03)00223-4](https://doi.org/10.1016/S0016-7061(03)00223-4) — *SCORPAN framework*
+- **Jenny, H.** (1941). *Factors of Soil Formation: A System of Pedology*. McGraw-Hill, New York. — *Original clorpt factors*
 - **Wadoux, A.M.J.-C., Heuvelink, G.B.M., de Bruin, S., Brus, D.J.** (2021). Spatial cross-validation is not the right way to evaluate map accuracy. *Ecological Modelling*, 457, 109692. [doi:10.1016/j.ecolmodel.2021.109692](https://doi.org/10.1016/j.ecolmodel.2021.109692)
 - **Hengl, T., Nussbaum, M., Wright, M.N., Heuvelink, G.B.M., Gräler, B.** (2018). Random forest as a generic framework for predictive modeling of spatial and spatio-temporal variables. *PeerJ*, 6, e5518.
-- **Matheron, G.** (1963). Principles of geostatistics. *Economic Geology*, 58(8), 1246–1266.
+- **Matheron, G.** (1963). Principles of geostatistics. *Economic Geology*, 58(8), 1246–1266. — *Kriging foundations*
 - **He, K., Zhang, X., Ren, S., Sun, J.** (2016). Deep residual learning for image recognition. *CVPR 2016*.
 
 ---
