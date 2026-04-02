@@ -3,7 +3,6 @@ message: "If you use GeoVersa or ConvKrigingNet2D in your research, please cite 
 title: "GeoVersa: Spatial Intelligence Through Learned Anisotropic Kriging"
 version: 0.1.0
 date-released: 2026-04-01
-doi: 10.5281/zenodo.15139517
 url: https://github.com/HugoMachadoRodrigues/GeoVersa
 repository-code: https://github.com/HugoMachadoRodrigues/GeoVersa
 license: MIT

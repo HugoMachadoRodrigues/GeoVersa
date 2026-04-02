@@ -9,10 +9,6 @@
 [![Status: Research](https://img.shields.io/badge/status-research%20preview-orange)](https://github.com/HugoMachadoRodrigues/GeoVersa)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Pedometrics](https://img.shields.io/badge/domain-Pedometrics%20%7C%20DSM-2e8b57)](https://www.pedometrics.org/)
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.15139517.svg)](https://doi.org/10.5281/zenodo.15139517)
-
----
-
 [![ORCID](https://img.shields.io/badge/ORCID-0000--0002--8070--8126-A6CE39?style=flat&logo=orcid&logoColor=white)](https://orcid.org/0000-0002-8070-8126)
 [![Google Scholar](https://img.shields.io/badge/Google%20Scholar-Hugo%20Rodrigues-4285F4?style=flat&logo=googlescholar&logoColor=white)](https://scholar.google.com/citations?user=vu-Ka7wAAAAJ&sortby=pubdate)
 [![ResearchGate](https://img.shields.io/badge/ResearchGate-Hugo%20Rodrigues-00CCBB?style=flat&logo=researchgate&logoColor=white)](https://www.researchgate.net/profile/Hugo-Rodrigues-12)
@@ -457,7 +453,6 @@ If you use ConvKrigingNet2D or GeoVersa in your research, please cite:
   author    = {Rodrigues, Hugo},
   title     = {{GeoVersa}: Spatial Intelligence Through Learned Anisotropic Kriging},
   year      = {2026},
-  doi       = {10.5281/zenodo.15139517},
   url       = {https://github.com/HugoMachadoRodrigues/GeoVersa},
   note      = {Research preview — ConvKrigingNet2D architecture for Digital Soil Mapping}
 }
