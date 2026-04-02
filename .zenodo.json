@@ -1,0 +1,43 @@
+{
+  "title": "GeoVersa: Spatial Intelligence Through Learned Anisotropic Kriging",
+  "description": "GeoVersa implements ConvKrigingNet2D — a hybrid deep learning architecture for Digital Soil Mapping that fuses a 2D CNN raster-patch encoder, a tabular MLP, and a coordinate MLP through a differentiable anisotropic residual kriging layer. The kriging layer jointly learns the variogram range, anisotropy axes, and rotation from data gradients, and applies a distance-aware gate to suppress extrapolation noise under spatial cross-validation. Benchmarked against Random Forest using the Wadoux et al. (2021) design-based validation framework (n=500, Australia-wide soil organic carbon).",
+  "version": "0.1.0",
+  "upload_type": "software",
+  "access_right": "open",
+  "license": "MIT",
+  "publication_date": "2026-04-01",
+  "creators": [
+    {
+      "name": "Rodrigues, Hugo",
+      "orcid": "0000-0002-8070-8126",
+      "affiliation": ""
+    }
+  ],
+  "keywords": [
+    "Digital Soil Mapping",
+    "Pedometrics",
+    "Kriging",
+    "Deep Learning",
+    "Geostatistics",
+    "Spatial Statistics",
+    "Convolutional Neural Network",
+    "PyTorch",
+    "R",
+    "Anisotropy",
+    "Residual Kriging"
+  ],
+  "related_identifiers": [
+    {
+      "scheme": "url",
+      "identifier": "https://github.com/HugoMachadoRodrigues/GeoVersa",
+      "relation": "isSupplementTo"
+    },
+    {
+      "scheme": "doi",
+      "identifier": "10.1016/j.ecolmodel.2021.109692",
+      "relation": "references"
+    }
+  ],
+  "language": "eng",
+  "notes": "Research preview. ConvKrigingNet2D architecture for Digital Soil Mapping. Benchmark uses the Wadoux et al. (2021) design-based validation framework."
+}

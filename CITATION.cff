@@ -1,0 +1,49 @@
+cff-version: 1.2.0
+message: "If you use GeoVersa or ConvKrigingNet2D in your research, please cite it as below."
+title: "GeoVersa: Spatial Intelligence Through Learned Anisotropic Kriging"
+version: 0.1.0
+date-released: 2026-04-01
+doi: 10.5281/zenodo.15139517
+url: https://github.com/HugoMachadoRodrigues/GeoVersa
+repository-code: https://github.com/HugoMachadoRodrigues/GeoVersa
+license: MIT
+type: software
+abstract: >-
+  GeoVersa implements ConvKrigingNet2D — a hybrid deep learning architecture
+  for Digital Soil Mapping that fuses a 2D CNN raster-patch encoder, a tabular
+  MLP, and a coordinate MLP through a differentiable anisotropic residual
+  kriging layer. The kriging layer jointly learns the variogram range,
+  anisotropy axes, and rotation from data gradients, and applies a
+  distance-aware gate to suppress extrapolation noise under spatial
+  cross-validation. Benchmarked against Random Forest using the Wadoux et al.
+  (2021) design-based validation framework.
+keywords:
+  - Digital Soil Mapping
+  - Pedometrics
+  - Kriging
+  - Deep Learning
+  - Geostatistics
+  - Spatial Statistics
+  - Convolutional Neural Network
+  - R
+  - torch
+authors:
+  - family-names: Rodrigues
+    given-names: Hugo
+    orcid: https://orcid.org/0000-0002-8070-8126
+references:
+  - type: article
+    authors:
+      - family-names: Wadoux
+        given-names: "Alexandre M.J.-C."
+      - family-names: Heuvelink
+        given-names: "Gerard B.M."
+      - family-names: de Bruin
+        given-names: Sytze
+      - family-names: Brus
+        given-names: "Dick J."
+    title: "Spatial cross-validation is not the right way to evaluate map accuracy"
+    journal: "Ecological Modelling"
+    volume: 457
+    year: 2021
+    doi: 10.1016/j.ecolmodel.2021.109692
