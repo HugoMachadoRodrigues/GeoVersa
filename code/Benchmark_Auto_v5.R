@@ -13,7 +13,7 @@
 #
 # Comparison: RF vs ConvKrigingNet2D_Auto_v5
 # Protocols: DesignBased, RandomKFold, SpatialKFold
-# N_ITER: 1 (quick test)
+# N_ITER: 50 (paper-quality run)
 # =============================================================================
 
 Sys.setenv(
@@ -25,12 +25,12 @@ Sys.setenv(
   WADOUX_SCENARIO          = "random",
   WADOUX_PROTOCOLS         = "DesignBased,RandomKFold,SpatialKFold",
   WADOUX_INCLUDE_POPULATION = "FALSE",
-  WADOUX_N_ITER            = "1",        # Quick test with v5
+  WADOUX_N_ITER            = "50",       # Paper-quality: 50 independent iterations
   WADOUX_SAMPLE_SIZE       = "500",
   WADOUX_MODEL_PROFILE     = "n500",
   WADOUX_TRAIN_SEED        = "123",
   WADOUX_DEVICE            = "mps",
-  WADOUX_RESULTS_DIR       = "results/wadoux2021_auto_v5_quick"
+  WADOUX_RESULTS_DIR       = "results/wadoux2021_auto_v5_50iter"
 )
 
 source("code/run_wadoux_style_rf_conv_comparison.R")

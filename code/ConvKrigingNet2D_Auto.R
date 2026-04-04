@@ -1370,8 +1370,7 @@ train_convkrigingnet2d_auto_one_fold_v5 <- function(
       }
 
       if (cfg$lambda_cov > 0 && !is.null(xb)) {
-        x_mean <- torch_mean(xb, dim = 1L, keepdim = TRUE)
-        y_mean <- torch_mean(yb)
+        y_mean   <- torch_mean(yb)
         loss_cov <- torch_mean((out$base_pred - y_mean)^2)
         loss     <- loss + cfg$lambda_cov * loss_cov
       }

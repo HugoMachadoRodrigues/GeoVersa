@@ -154,8 +154,8 @@ cd GeoVersa
 source("code/Benchmark_Auto_v5.R")
 ```
 
-Runs 3 iterations of the Wadoux (2021) benchmark with full V5 auto-configuration.
-Results saved to `results/wadoux2021_auto_v5_quick/`.
+Runs 50 independent iterations of the Wadoux (2021) benchmark with full V5 auto-configuration.
+Results saved to `results/wadoux2021_auto_v5_50iter/`.
 
 ### Custom run
 
@@ -179,12 +179,15 @@ source("code/run_wadoux_style_rf_conv_comparison.R")
 ```
 GeoVersa/
 ├── code/
-│   ├── ConvKrigingNet2D.R                    # Core model architecture
-│   ├── ConvKrigingNet2D_Auto.R               # Training loop (V5 trainer)
+│   ├── ConvKrigingNet2D.R                    # Core model architecture (sources utilities below)
+│   ├── ConvKrigingNet2D_Auto.R               # Training loop (V5 trainer + V4 auto-config)
 │   ├── ConvKrigingNet2D_Auto_v5.R            # V5 auto-configuration functions
 │   ├── Benchmark_Auto_v5.R                   # ⭐ Entry point — run this
 │   ├── run_wadoux_style_rf_conv_comparison.R # Benchmark engine
-│   ├── wadoux2021_rf_reproduction_helpers.R  # Data loading, protocols, metrics
+│   ├── wadoux2021_rf_reproduction_helpers.R  # Data loading, protocols, Wadoux metrics
+│   ├── KrigingNet_PointPatchCNN.R            # Patch extraction + memory bank utilities
+│   ├── KrigingNet_DualFramework.R            # Context loaders (sim + Wadoux)
+│   ├── KrigingNet_WadouxComparison.R         # Foundational utilities (MLP, scalers, losses)
 │   ├── figures_wadoux_comparison.R           # Publication figures
 │   ├── figures_paper.R                       # Paper figures
 │   └── generate_wadoux_maps.R                # Prediction maps
@@ -194,6 +197,8 @@ GeoVersa/
 ├── figures/                                  # Generated figures
 └── README.md
 ```
+
+> **Note on dependency chain**: `ConvKrigingNet2D.R` sources `KrigingNet_PointPatchCNN.R`, which sources `KrigingNet_DualFramework.R`, which sources `KrigingNet_WadouxComparison.R`. All three utility files are required for the model to load. The `load_convkrigingnet2d_env()` runner function handles this chain automatically.
 
 ---
 

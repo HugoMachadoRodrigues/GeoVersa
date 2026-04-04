@@ -223,12 +223,12 @@ auto_coord_dim_from_anisotropy <- function(Ctr) {
 auto_weight_decay_from_capacity <- function(model) {
   cat("[Auto v5] ── Estimating weight decay ──\n")
   
-  # Count parameters safely
+  # Count parameters safely (number of scalar weights, not number of tensors)
   tryCatch({
     n_params <- 0L
     for (p in model$parameters()) {
       if (!is.null(p)) {
-        n_params <- n_params + 1L
+        n_params <- n_params + p$numel()
       }
     }
     total_params_m <- as.numeric(n_params) / 1e6
@@ -237,7 +237,7 @@ auto_weight_decay_from_capacity <- function(model) {
     return(1e-3)
   })
   
-  if (n_params < 10) {
+  if (n_params < 1000L) {
     cat("[Auto v5] ⚠️  Too few parameters counted, using fixed wd=1e-3\n")
     return(1e-3)
   }
