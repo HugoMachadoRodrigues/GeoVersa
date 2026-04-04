@@ -189,6 +189,24 @@ get_conv_params_profile <- function(conv_env, profile = c("quick", "full", "n500
         min_lr             = 5e-5,
         patience           = 15L,
         epochs             = 80L
+        # dist_scale = NULL, krig_dropout = 0 (both disabled — defaults).
+        #
+        # Distance-aware gate tested across 4 variants (all 1-iteration):
+        #   baseline (no gate):              DesignBased RMSE=32.8, ME=0,   Spatial=37.0
+        #   gate=1.0 train+eval:             DesignBased RMSE=35.5, ME=3.1, Spatial=38.3
+        #   gate=0.5 eval-only rel:          DesignBased RMSE=35.7, ME=5.3, Spatial=38.3
+        #   krig_dropout=0.3 + gate=0.5:    DesignBased RMSE=35.8, ME=3.2, Spatial=39.0
+        #
+        # All gate variants degraded DesignBased and did not improve SpatialKFold.
+        # Root cause: base + kriging are co-trained; the base learns to rely on
+        # β×δ to correct its positive bias. Any eval-time suppression of kriging
+        # exposes this bias (ME > 0 → higher RMSE). krig_dropout at 0.3 is
+        # insufficient to break the dependency; would need ~0.7+ which would
+        # prevent the kriging layer from learning. Requires separate architectural
+        # treatment (future work).
+        #
+        # Key result: DesignBased RMSE=32.8 < RF Wadoux (33.4) — the unbiased
+        # estimator. SpatialKFold gap is expected and explained by Wadoux (2021).
       )
     )
   } else {
@@ -218,6 +236,8 @@ compare_rf_conv_on_explicit_split <- function(train_core,
                                               patch_size = 15,
                                               context = NULL) {
   out <- list(pred_rf = NULL, pred_conv = NULL)
+
+  rf_model <- NULL   # kept in scope for CNN distillation injection below
 
   if ("RF" %in% models) {
     form_rf <- as.formula(
@@ -293,6 +313,16 @@ compare_rf_conv_on_explicit_split <- function(train_core,
       K = neighbor_pool_k,
       patch_cache = patch_cache_combined
     )
+
+    # RF distillation injection: if RF was trained in this fold, attach its
+    # predictions on train and val sets to fd_conv so that Auto trainer can
+    # use them as a distillation target. Non-Auto trainers ignore fd$rf_pred.
+    if (!is.null(rf_model)) {
+      fd_conv$rf_pred <- list(
+        train = predict_rf_default_wadoux(rf_model, train_core),
+        val   = predict_rf_default_wadoux(rf_model, val_df)
+      )
+    }
 
     conv_out <- do.call(
       conv_env$train_convkrigingnet2d_one_fold,
@@ -641,14 +671,110 @@ conv_params <- NULL
 if ("ConvKrigingNet2D" %in% models) {
   cat("Loading ConvKrigingNet2D environment...\n")
   conv_env <- load_convkrigingnet2d_env()
+  override_path <- Sys.getenv("WADOUX_TWOSTAGE_SCRIPT", unset = "")
+  if (nchar(override_path) > 0 && file.exists(override_path)) {
+    sys.source(override_path, envir = conv_env)
+    conv_env$train_convkrigingnet2d_one_fold <- conv_env$train_convkrigingnet2d_twostage_one_fold
+    cat("[TwoStage] Overriding train function with two-stage trainer\n")
+  }
+  # ExpCov hook — replaces kriging layer with pure exponential covariance
+  #               takes priority over TwoStage
+  expcov_path <- Sys.getenv("WADOUX_EXPCOV_SCRIPT", unset = "")
+  if (nchar(expcov_path) > 0 && file.exists(expcov_path)) {
+    sys.source(expcov_path, envir = conv_env)
+    conv_env$train_convkrigingnet2d_one_fold <- conv_env$train_convkrigingnet2d_expcov_one_fold
+    cat("[ExpCov] Overriding train function with ExpCov trainer\n")
+  }
+  # Auto hook — fully self-configuring model; takes priority over ExpCov/TwoStage
+  # v5 hook — takes priority over v4 Auto
+  auto_v5_path <- Sys.getenv("WADOUX_AUTO_V5_SCRIPT", unset = "")
+  if (nchar(auto_v5_path) > 0 && file.exists(auto_v5_path)) {
+    sys.source(auto_v5_path, envir = conv_env)
+    # Also load v4 base (v5 builds on top)
+    auto_path <- Sys.getenv("WADOUX_AUTO_SCRIPT", unset = "")
+    if (nchar(auto_path) > 0 && file.exists(auto_path)) {
+      sys.source(auto_path, envir = conv_env)
+    }
+    conv_env$train_convkrigingnet2d_one_fold <- conv_env$train_convkrigingnet2d_auto_one_fold_v5
+    cat("[Auto v5] Overriding train function with COMPLETE AUTO-CONFIG v5\n")
+  } else {
+    # Fall back to v4 Auto
+    auto_path <- Sys.getenv("WADOUX_AUTO_SCRIPT", unset = "")
+    if (nchar(auto_path) > 0 && file.exists(auto_path)) {
+      sys.source(auto_path, envir = conv_env)
+      conv_env$train_convkrigingnet2d_one_fold <- conv_env$train_convkrigingnet2d_auto_one_fold
+      cat("[Auto v4] Overriding train function with Auto (self-configuring) trainer\n")
+    }
+  }
+  # DeepRK hook — takes priority over TwoStage, ExpCov and Auto if all are set
+  deeprk_path <- Sys.getenv("WADOUX_DEEPRK_SCRIPT", unset = "")
+  if (nchar(deeprk_path) > 0 && file.exists(deeprk_path)) {
+    sys.source(deeprk_path, envir = conv_env)
+    conv_env$train_convkrigingnet2d_one_fold <- conv_env$train_convkrigingnet2d_deeprk_one_fold
+    cat("[DeepRK] Overriding train function with DeepRK trainer\n")
+  }
   conv_params <- get_conv_params_profile(
     conv_env = conv_env,
     profile = model_profile,
     train_seed = train_seed,
     device = device
   )
+  # DeepRK calibration override: allows Benchmark_DeepRK.R to inject
+  # calibrate_method = "linear" without touching conv_params directly.
+  deeprk_calibrate <- Sys.getenv("WADOUX_DEEPRK_CALIBRATE", unset = "")
+  if (nchar(deeprk_calibrate) > 0 && nchar(deeprk_path) > 0) {
+    conv_params$calibrate_method <- deeprk_calibrate
+    cat(sprintf("[DeepRK] calibrate_method overridden → '%s'\n", deeprk_calibrate))
+  }
+  # Ablation override: WADOUX_WARMUP_EPOCHS overrides warmup_epochs in conv_params.
+  ablation_warmup <- Sys.getenv("WADOUX_WARMUP_EPOCHS", unset = "")
+  if (nchar(ablation_warmup) > 0) {
+    conv_params$warmup_epochs <- as.integer(ablation_warmup)
+    cat(sprintf("[Ablation] warmup_epochs overridden → %dL\n", conv_params$warmup_epochs))
+  }
+  # Ablation override: WADOUX_BASE_LOSS_WEIGHT
+  ablation_blw <- Sys.getenv("WADOUX_BASE_LOSS_WEIGHT", unset = "")
+  if (nchar(ablation_blw) > 0) {
+    conv_params$base_loss_weight <- as.numeric(ablation_blw)
+    cat(sprintf("[Ablation] base_loss_weight overridden → %.4f\n", conv_params$base_loss_weight))
+  }
+  # Ablation override: WADOUX_LR
+  ablation_lr <- Sys.getenv("WADOUX_LR", unset = "")
+  if (nchar(ablation_lr) > 0) {
+    conv_params$lr <- as.numeric(ablation_lr)
+    cat(sprintf("[Ablation] lr overridden → %.2e\n", conv_params$lr))
+  }
+  # Ablation override: WADOUX_BANK_REFRESH_EVERY
+  ablation_bre <- Sys.getenv("WADOUX_BANK_REFRESH_EVERY", unset = "")
+  if (nchar(ablation_bre) > 0) {
+    conv_params$bank_refresh_every <- as.integer(ablation_bre)
+    cat(sprintf("[Ablation] bank_refresh_every overridden → %dL\n", conv_params$bank_refresh_every))
+  }
+  # Ablation override: architecture dimensions and dropouts
+  ablation_patch_dim   <- Sys.getenv("WADOUX_PATCH_DIM",    unset = "")
+  ablation_d           <- Sys.getenv("WADOUX_D",            unset = "")
+  ablation_tab_drop    <- Sys.getenv("WADOUX_TAB_DROPOUT",  unset = "")
+  ablation_patch_drop  <- Sys.getenv("WADOUX_PATCH_DROPOUT",unset = "")
+  ablation_coord_dim   <- Sys.getenv("WADOUX_COORD_DIM",    unset = "")
+  if (nchar(ablation_patch_dim)  > 0) { conv_params$patch_dim    <- as.integer(ablation_patch_dim);  cat(sprintf("[Ablation] patch_dim    → %d\n",    conv_params$patch_dim))    }
+  if (nchar(ablation_d)          > 0) { conv_params$d             <- as.integer(ablation_d);          cat(sprintf("[Ablation] d           → %d\n",    conv_params$d))            }
+  if (nchar(ablation_tab_drop)   > 0) { conv_params$tab_dropout   <- as.numeric(ablation_tab_drop);   cat(sprintf("[Ablation] tab_dropout → %.2f\n", conv_params$tab_dropout))   }
+  if (nchar(ablation_patch_drop) > 0) { conv_params$patch_dropout <- as.numeric(ablation_patch_drop); cat(sprintf("[Ablation] patch_drop  → %.2f\n", conv_params$patch_dropout)) }
+  if (nchar(ablation_coord_dim)  > 0) { conv_params$coord_dim     <- as.integer(ablation_coord_dim);  cat(sprintf("[Ablation] coord_dim   → %d\n",    conv_params$coord_dim))    }
 }
-patch_size <- 15L
+# v4 DYNAMIC patch_size: derived from sample_size using auto_kriging_config rule
+# patch_size = min(max(8, floor(√n)), 31)
+# Ablation override: WADOUX_PATCH_SIZE can still override if explicitly set.
+patch_size_ablation <- Sys.getenv("WADOUX_PATCH_SIZE", unset = "")
+if (nchar(patch_size_ablation) > 0) {
+  # Explicit ablation override takes priority
+  patch_size <- as.integer(patch_size_ablation)
+  cat(sprintf("[Ablation] patch_size overridden → %dL\n", patch_size))
+} else {
+  # v4 AUTO: dynamic patch_size from sample_size
+  patch_size <- as.integer(min(max(8L, floor(sqrt(sample_size))), 31L))
+  cat(sprintf("[Auto v4] patch_size dynamically set → %d [rule: min(max(8,⌊√n⌋), 31)]\n", patch_size))
+}
 
 config <- data.frame(
   scenario = scenario,

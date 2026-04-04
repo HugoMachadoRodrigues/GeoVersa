@@ -105,9 +105,20 @@ ConvKrigingNet2D <- nn_module(
                         coord_dropout = 0.05,
                         fusion_hidden = 256,
                         kriging_mode = c("isotropic", "anisotropic"),
-                        beta_init = -4) {
+                        beta_init = -4,
+                        dist_scale = NULL,
+                        krig_dropout = 0) {
     kriging_mode <- match.arg(kriging_mode)
     self$kriging_mode <- kriging_mode
+    # krig_dropout: probability of zeroing the kriging correction for each sample
+    # during TRAINING. Forces the base network to produce unbiased predictions
+    # independently, so that suppressing kriging at eval time (via dist_scale gate)
+    # does not expose a base-network bias. Analogous to standard MC dropout.
+    self$krig_dropout <- krig_dropout
+    # dist_scale: if non-NULL and > 0, a relative distance gate is applied at
+    # EVAL time only. gate = exp(-rel_dist / dist_scale) where
+    # rel_dist = min_aniso_dist / mean_aniso_dist ∈ (0,1] (scale-invariant).
+    self$dist_scale <- dist_scale
     self$enc_tab <- make_mlp(c_tab, hidden = tab_hidden, out_dim = d, dropout = tab_dropout)
     self$enc_patch <- PatchEncoder2D(
       in_channels = patch_channels,
@@ -155,10 +166,51 @@ ConvKrigingNet2D <- nn_module(
 
   forward_with_kriging = function(x_tab, x_patch, coords, z_n, coords_n, r_n) {
     base <- self$forward_base(x_tab, x_patch, coords)
-    k <- self$krig(base$z, coords, z_n, coords_n, r_n)
+    k    <- self$krig(base$z, coords, z_n, coords_n, r_n)
     beta <- torch_sigmoid(self$logit_beta)
-    pred_corr <- base$pred + beta * k$delta
-    list(pred = pred_corr, base_pred = base$pred, z = base$z, delta = k$delta, beta = beta)
+
+    if (self$training && self$krig_dropout > 0) {
+      # ── Kriging Dropout (TRAIN ONLY) ────────────────────────────────────────
+      # For each sample in the batch, independently zero the kriging correction
+      # with probability krig_dropout. This forces the base network to produce
+      # unbiased predictions on its own (it cannot always rely on β×δ to fix
+      # its errors). Consequence: at eval time, when the dist_scale gate
+      # suppresses kriging (far neighbours, SpatialKFold), the base prediction
+      # has ~zero bias — the gate cleanly removes noise without exposing a
+      # systematic offset.
+      # All shapes: [B] — no unsqueeze, pure element-wise ops.
+      B         <- base$pred$shape[1]
+      keep_prob <- torch_full(
+        c(B), 1 - self$krig_dropout,
+        dtype = torch_float(), device = base$pred$device
+      )
+      drop_mask <- torch_bernoulli(keep_prob)          # [B]: 1=keep, 0=drop
+      pred_corr <- base$pred + beta * drop_mask * k$delta   # [B]
+
+    } else if (!self$training && !is.null(self$dist_scale) && self$dist_scale > 0) {
+      # ── Distance-Aware Gate (EVAL ONLY) ─────────────────────────────────────
+      # Relative gate: rel_dist = min_aniso_dist / mean_aniso_dist ∈ (0, 1].
+      # Scale-invariant — works regardless of what ell_major learns.
+      #   rel_dist ≈ 0  → very close neighbour exists → gate ≈ 1 (full kriging)
+      #   rel_dist ≈ 1  → ALL K neighbours equidistant and far (SpatialKFold
+      #                    exclusion buffer) → gate → 0 (kriging silenced)
+      # dist_scale controls sharpness on the [0,1] axis:
+      #   0.5 → gate(rel=1) = exp(-2) = 0.14  (strong suppression)
+      #   1.0 → gate(rel=1) = exp(-1) = 0.37  (moderate suppression)
+      # All shapes: [B] — no unsqueeze, pure element-wise ops.
+      min_aniso_dist  <- torch_amin(k$aniso_dist, dim = 2)           # [B]
+      mean_aniso_dist <- torch_mean(k$aniso_dist, dim = 2)           # [B]
+      rel_dist        <- min_aniso_dist / (mean_aniso_dist + 1e-8)   # [B] ∈ (0,1]
+      dist_gate       <- torch_exp(-rel_dist / self$dist_scale)      # [B] ∈ (0,1]
+      effective_beta  <- beta * dist_gate                            # [B]
+      pred_corr <- base$pred + effective_beta * k$delta              # [B]
+
+    } else {
+      pred_corr <- base$pred + beta * k$delta                        # [B]
+    }
+
+    list(pred = pred_corr, base_pred = base$pred, z = base$z,
+         delta = k$delta, beta = beta)
   }
 )
 
@@ -466,6 +518,8 @@ train_convkrigingnet2d_one_fold <- function(fd,
                                             fusion_hidden = 256,
                                             kriging_mode = "isotropic",
                                             beta_init = -4,
+                                            dist_scale = NULL,
+                                            krig_dropout = 0,
                                             target_transform = "identity",
                                             calibrate_method = "none",
                                             K_neighbors = 12,
@@ -558,7 +612,9 @@ train_convkrigingnet2d_one_fold <- function(fd,
     coord_dropout = coord_dropout,
     fusion_hidden = fusion_hidden,
     kriging_mode = kriging_mode,
-    beta_init = beta_init
+    beta_init = beta_init,
+    dist_scale = dist_scale,
+    krig_dropout = krig_dropout
   )
   model$to(device = device)
 
@@ -799,6 +855,8 @@ convkriging2d_baseline_params <- list(
   fusion_hidden = 256,
   kriging_mode = "isotropic",
   beta_init = -4,
+  dist_scale = NULL,
+  krig_dropout = 0,
   target_transform = "identity",
   calibrate_method = "none",
   K_neighbors = 12,
