@@ -7,12 +7,17 @@
 <p align="center"><em>Deep Learning + Geostatistics for Spatial Prediction</em></p>
 
 <p align="center">
+  <a href="https://doi.org/10.5281/zenodo.15139517"><img alt="DOI" src="https://zenodo.org/badge/DOI/10.5281/zenodo.15139517.svg"></a>
+  <a href="https://cran.r-project.org/package=GeoVersa"><img alt="CRAN release" src="https://img.shields.io/badge/CRAN-release%20pending-D3D3D3?logo=r&logoColor=white"></a>
+  <a href="https://cran.r-project.org/package=GeoVersa"><img alt="CRAN downloads" src="https://img.shields.io/badge/CRAN-downloads%20pending-D3D3D3?logo=r&logoColor=white"></a>
   <a href="https://cran.r-project.org/"><img alt="R ≥ 4.2" src="https://img.shields.io/badge/R-%E2%89%A54.2-276DC3?logo=r&logoColor=white"></a>
   <a href="https://torch.mlverse.org/"><img alt="torch" src="https://img.shields.io/badge/torch-lantern-EE4C2C?logo=pytorch&logoColor=white"></a>
   <a href="https://github.com/HugoMachadoRodrigues/GeoVersa"><img alt="Status: Research" src="https://img.shields.io/badge/status-research%20preview-orange"></a>
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-yellow.svg"></a>
   <a href="https://www.pedometrics.org/"><img alt="Pedometrics" src="https://img.shields.io/badge/domain-Pedometrics%20%7C%20DSM-2e8b57"></a>
 </p>
+
+<p align="center"><sub>The DOI badge is active. CRAN badges switch from pending placeholders to package badges after publication.</sub></p>
 
 <p align="center">
   <a href="https://orcid.org/0000-0002-8070-8126"><img alt="ORCID" src="https://img.shields.io/badge/ORCID-0000--0002--8070--8126-A6CE39?style=flat&logo=orcid&logoColor=white"></a>
@@ -25,22 +30,32 @@
 
 ## What is GeoVersa?
 
-**GeoVersa** is the current research code for a pedometric model that combines deep learning and geostatistics in a single trainable architecture for spatial prediction in Digital Soil Mapping (DSM).
+**GeoVersa** is a pedometric research package that combines deep learning and geostatistics in a single trainable architecture for spatial prediction in Digital Soil Mapping (DSM).
 
-The current implementation is centered on **ConvKrigingNet2D**, a point-wise predictor that combines:
+The current implementation is centered on **ConvKrigingNet2D**, a point-wise predictor with four coupled components:
 
-- A **2D CNN** that reads local raster patches (terrain, remote sensing) around each sample point
-- A **tabular MLP** that processes point-level covariates (the SCORPAN factors)
-- A **coordinate MLP** that encodes geographic position
-- A **differentiable anisotropic residual-kriging layer** that interpolates a learned residual field from nearby training points
+| Component | Input | Role |
+|---|---|---|
+| Tabular encoder | Point-level covariates | Learns the non-linear trend from SCORPAN-style attributes |
+| Patch encoder | Local raster patch around the sample | Learns spatial texture from terrain and remote-sensing context |
+| Coordinate encoder | Geographic coordinates | Encodes position explicitly in latent space |
+| Residual kriging layer | Nearby residual bank | Applies differentiable anisotropic spatial correction |
 
-In the current code path, the trend model and the residual spatial correction are trained jointly. The benchmarked configuration is the **pure GeoVersa** variant: `RF distillation` is disabled.
+The trend model and the residual spatial correction are trained jointly. The benchmarked configuration is the **pure GeoVersa** variant: `RF distillation` is disabled.
+
+At a high level, GeoVersa learns a base predictor and then adds a spatially weighted residual correction:
+
+```math
+\hat{y}_i^{(s)} = \hat{y}_{i}^{\mathrm{base}} + \beta\,\delta_i
+```
+
+where $\hat{y}_i^{(s)}$ is the prediction in standardized target space, $\hat{y}_{i}^{\mathrm{base}}$ is the deep trend prediction, $\delta_i$ is the learned residual-kriging correction, and $\beta \in (0,1)$ is a learned global gate.
 
 ---
 
-## Zero User Tuning
+## Automatic Configuration
 
-**GeoVersa** uses complete automatic configuration. The user provides only the data and the compute device. The main model hyperparameters are derived from the data itself:
+**GeoVersa** uses data-driven automatic configuration. The user provides the data and the compute device; the training pipeline derives the main hyperparameters from sample size, patch geometry, variogram structure, gradient statistics, and available memory.
 
 | Hyperparameter | Derived from |
 |---|---|
@@ -54,86 +69,97 @@ In the current code path, the trend model and the residual spatial correction ar
 | Coordinate embedding dimension | Variogram anisotropy and nugget ratio |
 | Weight decay | Model parameter count |
 
-Auto-configuration is split across the training pipeline:
+This automatic configuration is split into three stages:
 
-1. **Variogram phase**: fit the spatial structure used to initialise anisotropy, neighbour count and kriging weight
-2. **Capacity phase**: derive architecture width and dropout from sample size and patch geometry
-3. **Optimisation phase**: estimate learning rate, batch size, weight decay, patience and bank refresh from gradients, hardware and warmup dynamics
+1. **Variogram stage**: initialize anisotropy, neighbour count, and the kriging gate from the empirical spatial structure.
+2. **Capacity stage**: size the latent space and regularization from sample size and patch geometry.
+3. **Optimization stage**: infer learning rate, batch size, patience, and refresh cadence from gradients, hardware, and warmup behavior.
 
-In the current code path, the training configuration is derived automatically from the data and the available hardware.
+The current code path derives the training configuration automatically from the data and the available hardware.
 
 ---
 
 ## Mathematical Formulation
 
-For a sample at location `s_i ∈ R^2`, let:
+For a sample observed at location $s_i \in \mathbb{R}^2$, GeoVersa uses the following notation:
 
-- `x_i ∈ R^p`: tabular covariates
-- `P_i ∈ R^(C x H x W)`: raster patch centered at `s_i`
-- `y_i`: target value
-- `T(y_i)`: optional target transform used by the trainer; in the current Wadoux benchmark the default is `identity`
-- `y_i^(s) = (T(y_i) - μ_y) / σ_y`: standardized target used in training
+| Symbol | Meaning |
+|---|---|
+| $x_i \in \mathbb{R}^p$ | Tabular covariates |
+| $P_i \in \mathbb{R}^{C \times H \times W}$ | Raster patch centered at $s_i$ |
+| $y_i$ | Observed target |
+| $T(y_i)$ | Optional target transformation |
+| $y_i^{(s)} = \dfrac{T(y_i) - \mu_y}{\sigma_y}$ | Standardized target used in training |
 
-### Encoders and Fusion
+### Forward Model
 
-The model computes three embeddings:
+GeoVersa computes three latent embeddings:
 
-```text
-e_i^tab   = f_tab(x_i) ∈ R^d
-e_i^patch = W_patch f_cnn(P_i) ∈ R^d
-e_i^coord = W_coord f_coord(s_i) ∈ R^d
+```math
+\begin{aligned}
+e_i^{\mathrm{tab}}   &= f_{\mathrm{tab}}(x_i) \in \mathbb{R}^d \\
+e_i^{\mathrm{patch}} &= W_{\mathrm{patch}}\,f_{\mathrm{cnn}}(P_i) \in \mathbb{R}^d \\
+e_i^{\mathrm{coord}} &= W_{\mathrm{coord}}\,f_{\mathrm{coord}}(s_i) \in \mathbb{R}^d
+\end{aligned}
 ```
 
-These are fused into a latent representation:
+These embeddings are fused into a shared latent representation and mapped to a base prediction:
 
-```text
-z_i = f_fuse([e_i^tab, e_i^patch, e_i^coord])
-yhat_i^base = h(z_i)
+```math
+\begin{aligned}
+z_i &= f_{\mathrm{fuse}}\!\left([e_i^{\mathrm{tab}}, e_i^{\mathrm{patch}}, e_i^{\mathrm{coord}}]\right) \\
+\hat{y}_i^{\mathrm{base}} &= h(z_i)
+\end{aligned}
 ```
 
-The latent width `d`, patch embedding dimension, coordinate embedding dimension and dropouts are all derived automatically in the current implementation.
+The latent width $d$, patch embedding dimension, coordinate embedding dimension, and dropout rates are all derived automatically in the current implementation.
 
 ### Residual Memory Bank
 
-At each bank refresh, the training set is passed through the current backbone to build:
+At each memory-bank refresh, the current backbone is applied to the training set to build a residual bank:
 
-```text
-B = {(z_j, s_j, r_j)} for j = 1, ..., n_train
-r_j = y_j^(s) - yhat_j^base
+```math
+\mathcal{B} = \{(z_j, s_j, r_j)\}_{j=1}^{n_{\mathrm{train}}},
+\qquad
+r_j = y_j^{(s)} - \hat{y}_j^{\mathrm{base}}
 ```
 
-So the kriging branch does **not** interpolate raw targets. It interpolates residuals of the current backbone in standardized target space.
+The kriging branch therefore interpolates **learned residuals**, not raw targets, and it does so in standardized target space.
 
 ### Anisotropic Residual Kriging
 
-For a query `i` and a neighbour `j`, define the coordinate offset:
+For a query point $i$ and a neighbour $j$, define the rotated anisotropic coordinates:
 
-```text
-Δx_ij = x_i - x_j
-Δy_ij = y_i - y_j
-
-u_ij = cos(θ) Δx_ij + sin(θ) Δy_ij
-v_ij = -sin(θ) Δx_ij + cos(θ) Δy_ij
-
-d_ij^aniso = sqrt((u_ij / l_maj)^2 + (v_ij / l_min)^2 + ε)
-
-q_i = W_q z_i
-q_j = W_q z_j
-s_ij = <q_i, q_j> / sqrt(d_q)
-
-a_ij = -d_ij^aniso + s_ij
-w_ij = exp(a_ij) / Σ_{k in N(i)} exp(a_ik)
-
-δ_i = Σ_{j in N(i)} w_ij r_j
+```math
+\begin{aligned}
+\Delta x_{ij} &= x_i - x_j, \qquad \Delta y_{ij} = y_i - y_j \\
+u_{ij} &= \cos(\theta)\,\Delta x_{ij} + \sin(\theta)\,\Delta y_{ij} \\
+v_{ij} &= -\sin(\theta)\,\Delta x_{ij} + \cos(\theta)\,\Delta y_{ij} \\
+d_{ij}^{\mathrm{aniso}} &= \sqrt{\left(\frac{u_{ij}}{\ell_{\mathrm{maj}}}\right)^2 + \left(\frac{v_{ij}}{\ell_{\mathrm{min}}}\right)^2 + \varepsilon}
+\end{aligned}
 ```
+
+GeoVersa combines this anisotropic distance with latent similarity:
+
+```math
+\begin{aligned}
+q_i &= W_q z_i,\qquad q_j = W_q z_j \\
+s_{ij} &= \frac{\langle q_i, q_j \rangle}{\sqrt{d_q}} \\
+w_{ij} &= \frac{\exp\!\left(-d_{ij}^{\mathrm{aniso}} + s_{ij}\right)}{\sum_{k \in \mathcal{N}(i)} \exp\!\left(-d_{ik}^{\mathrm{aniso}} + s_{ik}\right)} \\
+\delta_i &= \sum_{j \in \mathcal{N}(i)} w_{ij} r_j
+\end{aligned}
+```
+
+So the spatial correction is an **attention-weighted residual interpolation** constrained by anisotropic distance.
 
 ### Final Predictor
 
-The current benchmark uses a **global learned kriging gate**:
+The current benchmark uses a learned global kriging gate:
 
-```text
-β = sigmoid(logit_β)
-yhat_i^(s) = yhat_i^base + β δ_i
+```math
+\beta = \sigma(\mathrm{logit}_\beta),
+\qquad
+\hat{y}_i^{(s)} = \hat{y}_i^{\mathrm{base}} + \beta\,\delta_i
 ```
 
 The prediction returned to the user is then mapped back to the original target scale by undoing the standardization and any optional target transform.
@@ -144,24 +170,23 @@ The prediction returned to the user is then mapped back to the original target s
 
 The warmup phase trains only the backbone:
 
-```text
-L_warmup = Huber(y^(s), yhat^base)
+```math
+\mathcal{L}_{\mathrm{warmup}} = \mathrm{Huber}\!\left(y^{(s)}, \hat{y}^{\mathrm{base}}\right)
 ```
 
 After warmup, the full model is trained with:
 
-```text
-L = Huber(y^(s), yhat^(s))
-  + λ_base Huber(y^(s), yhat^base)
-  + α_ME (mean(yhat^base) - mean(y^(s)))^2
-  + λ_cov (sd(yhat^base) / (sd(y^(s)) + ε) - 1)^2
+```math
+\begin{aligned}
+\mathcal{L} &=
+\mathrm{Huber}\!\left(y^{(s)}, \hat{y}^{(s)}\right)
+ + \lambda_{\mathrm{base}}\,\mathrm{Huber}\!\left(y^{(s)}, \hat{y}^{\mathrm{base}}\right) \\
+&\quad + \alpha_{\mathrm{ME}}\left(\operatorname{mean}(\hat{y}^{\mathrm{base}}) - \operatorname{mean}(y^{(s)})\right)^2 \\
+&\quad + \lambda_{\mathrm{cov}}\left(\frac{\operatorname{sd}(\hat{y}^{\mathrm{base}})}{\operatorname{sd}(y^{(s)}) + \varepsilon} - 1\right)^2
+\end{aligned}
 ```
 
-where:
-
-- `λ_base` is `base_loss_weight`
-- `α_ME` is the base-prediction mean-error penalty
-- `λ_cov` matches the dispersion of the base predictor to the target dispersion
+where $\lambda_{\mathrm{base}}$ is the base-loss weight, $\alpha_{\mathrm{ME}}$ penalizes bias in the base predictor mean, and $\lambda_{\mathrm{cov}}$ matches the scale of the base predictor to the scale of the target.
 
 For the current pure benchmark:
 
@@ -171,40 +196,37 @@ For the current pure benchmark:
 
 ### What GeoVersa Auto-Configures
 
-The current implementation derives the main parameters as follows:
+The current implementation derives the key parameters using explicit heuristics tied to the data and the fitted variogram:
 
-```text
-K = clamp(round(n_train π range_maj^2 / area), 6, 30)
-
-logit_β,0 = 2 - 6r
-
-d = clamp(64 ceil(sqrt(n_train) / 8), 128, 512)
-
-patch_size = clamp(floor(sqrt(n_train)), 8, 31)
-
-patch_dim = clamp(ceil(sqrt(C H W)), d / 4, d)
-
-coord_dim = clamp(32 + 24 (1 - ρ_aniso) + 8 (1 - r), 32, 64)
+```math
+\begin{aligned}
+K &= \operatorname{clamp}\!\left(\operatorname{round}\!\left(\frac{n_{\mathrm{train}}\,\pi\,\ell_{\mathrm{maj}}^2}{\mathrm{area}}\right), 6, 30\right) \\
+\mathrm{logit}_{\beta,0} &= 2 - 6r \\
+d &= \operatorname{clamp}\!\left(64\,\left\lceil \frac{\sqrt{n_{\mathrm{train}}}}{8} \right\rceil, 128, 512\right) \\
+\mathrm{patch\_size} &= \operatorname{clamp}\!\left(\left\lfloor \sqrt{n_{\mathrm{train}}} \right\rfloor, 8, 31\right) \\
+\mathrm{patch\_dim} &= \operatorname{clamp}\!\left(\left\lceil \sqrt{C H W} \right\rceil, \frac{d}{4}, d\right) \\
+\mathrm{coord\_dim} &= \operatorname{clamp}\!\left(32 + 24(1 - \rho_{\mathrm{aniso}}) + 8(1 - r), 32, 64\right)
+\end{aligned}
 ```
 
-with:
-
-- `r`: nugget-to-sill ratio from the fitted variogram
-- `ρ_aniso = range_min / range_maj`
+with $r$ denoting the nugget-to-sill ratio and $\rho_{\mathrm{aniso}} = \ell_{\mathrm{min}} / \ell_{\mathrm{maj}}$.
 
 The loss weights are also variogram-derived:
 
-```text
-λ_base = 0.10 r
-α_ME = 0.75 r
-λ_cov = 0.025 (1 - r)
+```math
+\lambda_{\mathrm{base}} = 0.10\,r,
+\qquad
+\alpha_{\mathrm{ME}} = 0.75\,r,
+\qquad
+\lambda_{\mathrm{cov}} = 0.025(1-r)
 ```
 
 The initial learning rate is estimated from a Polyak-style probe on the actual model:
 
-```text
-α_Polyak = L / ||∇L||^2
-α_init = clamp(0.01 α_Polyak, 1e-5, 1e-3)
+```math
+\alpha_{\mathrm{Polyak}} = \frac{\mathcal{L}}{\lVert \nabla \mathcal{L} \rVert_2^2},
+\qquad
+\alpha_{\mathrm{init}} = \operatorname{clamp}\!\left(0.01\,\alpha_{\mathrm{Polyak}}, 10^{-5}, 10^{-3}\right)
 ```
 
 Batch size is the minimum of:
@@ -214,8 +236,8 @@ Batch size is the minimum of:
 
 Weight decay scales with parameter count:
 
-```text
-wd = clamp(1e-3 / sqrt((n_params / 1e6) / 5), 1e-4, 1e-2)
+```math
+\mathrm{wd} = \operatorname{clamp}\!\left(\frac{10^{-3}}{\sqrt{(n_{\mathrm{params}}/10^6)/5}}, 10^{-4}, 10^{-2}\right)
 ```
 
 Warmup validation losses then determine:
@@ -380,8 +402,8 @@ GeoVersa/
   author = {Rodrigues, Hugo},
   title  = {{GeoVersa}: Deep Learning + Geostatistics for Spatial Prediction},
   year   = {2026},
-  url    = {https://github.com/HugoMachadoRodrigues/GeoVersa},
-  note   = {Research preview with complete automatic configuration}
+  doi    = {10.5281/zenodo.15139517},
+  url    = {https://github.com/HugoMachadoRodrigues/GeoVersa}
 }
 ```
 

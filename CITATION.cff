@@ -5,6 +5,7 @@ version: 0.1.0
 date-released: 2026-04-01
 url: https://github.com/HugoMachadoRodrigues/GeoVersa
 repository-code: https://github.com/HugoMachadoRodrigues/GeoVersa
+doi: 10.5281/zenodo.15139517
 license: MIT
 type: software
 abstract: >-
