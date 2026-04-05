@@ -100,7 +100,12 @@ extract_point_patches <- function(r_stack,
     rowcol[valid_cells, ] <- terra::rowColFromCell(r_stack[[1]], cells[valid_cells])
   }
 
-  half <- floor(patch_size / 2)
+  # half_lo / half_hi guarantee exactly patch_size elements for both even and odd sizes.
+  # seq.int(r - half, r + half) gives patch_size+1 elements when patch_size is even,
+  # triggering "logical subscript too long" on the fixed-size patch array.
+  half_lo <- floor((patch_size - 1L) / 2L)
+  half_hi <- patch_size - 1L - half_lo          # == half_lo when odd, half_lo+1 when even
+
   patches <- lapply(seq_len(nrow(coords)), function(i) {
     if (i %% 50 == 0 || i == nrow(coords)) {
       cat(sprintf("  %s: %d/%d\n", label, i, nrow(coords)))
@@ -110,8 +115,8 @@ extract_point_patches <- function(r_stack,
       return(array(fill_value, dim = c(cache$nlyr, patch_size, patch_size)))
     }
 
-    rows <- seq.int(rowcol[i, 1] - half, rowcol[i, 1] + half)
-    cols <- seq.int(rowcol[i, 2] - half, rowcol[i, 2] + half)
+    rows <- seq.int(rowcol[i, 1] - half_lo, rowcol[i, 1] + half_hi)
+    cols <- seq.int(rowcol[i, 2] - half_lo, rowcol[i, 2] + half_hi)
     patch <- array(fill_value, dim = c(cache$nlyr, patch_size, patch_size))
 
     valid_rows <- rows >= 1 & rows <= cache$nrow

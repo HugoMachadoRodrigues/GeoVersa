@@ -269,20 +269,26 @@ estimate_initial_lr_polyak <- function(model, train_cache, bs_init = 32L,
     cb <- train_cache$C$index_select(1L, idx_t)
     yb <- train_cache$y$index_select(1L, idx_t)
 
+    # In torch for R, model$parameters is a property (no parens).
+    # nn_module does not have $zero_grad(); use a temporary optimizer instead.
+    tmp_opt <- optim_adam(model$parameters, lr = 0.01)
     model$train()
-    model$zero_grad()
+    tmp_opt$zero_grad()
     out  <- model$forward_base(xb, pb, cb)
     loss <- huber_loss(yb, out$pred)
     loss$backward()
 
     loss_val    <- loss$item()
     grad_sq_sum <- 0.0
-    for (param in model$parameters()) {
-      if (!is.null(param$grad)) {
-        grad_sq_sum <- grad_sq_sum + torch_sum(param$grad * param$grad)$item()
+    for (param in model$parameters) {           # no parens — property, not method
+      g <- param$grad
+      if (!is.null(g)) {
+        # as.array() avoids any $item() issues on non-scalar tensors
+        g_vals      <- as.array(g$cpu()$detach())
+        grad_sq_sum <- grad_sq_sum + sum(g_vals^2)
       }
     }
-    model$zero_grad()
+    tmp_opt$zero_grad()   # clear gradients so they don't bleed into training
 
     if (!is.finite(grad_sq_sum) || grad_sq_sum < 1e-30) {
       cat("[Auto v5]   ⚠ degenerate gradients — fallback lr = 1e-4\n")
@@ -369,7 +375,10 @@ auto_weight_decay_from_capacity <- function(model) {
 
   n_params <- tryCatch({
     total <- 0L
-    for (p in model$parameters()) if (!is.null(p)) total <- total + p$numel()
+    # model$parameters is a property in torch for R (no parens).
+    # prod(p$shape) is the safest cross-version way to count elements.
+    for (p in model$parameters)
+      if (!is.null(p)) total <- total + prod(p$shape)
     total
   }, error = function(e) { cat("[Auto v5]   ⚠ param count failed\n"); 0L })
 

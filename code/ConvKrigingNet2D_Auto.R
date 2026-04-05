@@ -1386,8 +1386,10 @@ train_convkrigingnet2d_auto_one_fold_v5 <- function(
         loss <- loss + blw * huber_loss(yb, out$base_pred)
 
       if (cfg$alpha_me > 0) {
-        loss_me <- (torch_mean(out$base_pred) - torch_mean(yb))^2
-        loss    <- loss + cfg$alpha_me * loss_me
+        # Mean-error penalty: use * instead of ^ (torch tensors in R don't overload ^)
+        me       <- torch_mean(out$base_pred) - torch_mean(yb)
+        loss_me  <- me * me
+        loss     <- loss + cfg$alpha_me * loss_me
       }
 
       if (has_rf_distil && cfg$lambda_rf > 0) {
@@ -1396,22 +1398,42 @@ train_convkrigingnet2d_auto_one_fold_v5 <- function(
       }
 
       if (cfg$lambda_cov > 0) {
-        # Variance-matching: penalises mismatch between prediction and target spread.
-        # Scale-invariant — (σ_pred / σ_target - 1)² = 0 iff spreads match exactly.
+        # Variance-matching: (σ_pred / σ_target − 1)² = 0 iff spreads match exactly.
+        # Use * instead of ^ — R's ^ does not dispatch to torch tensor methods.
         pred_std <- torch_std(out$base_pred) + 1e-8
         targ_std <- torch_std(yb)             + 1e-8
-        loss_cov <- (pred_std / targ_std - 1)^2
+        ratio    <- pred_std / targ_std - 1
+        loss_cov <- ratio * ratio
         loss     <- loss + cfg$lambda_cov * loss_cov
       }
 
-      opt$zero_grad(); loss$backward()
-      nn_utils_clip_grad_norm_(model$parameters, max_norm = 2.0)
-      opt$step()
-      tr_loss <- tr_loss + loss$item()
+      loss_val <- loss$item()
+      if (!is.finite(loss_val)) {
+        # NaN/Inf loss: clear gradients and skip this batch (don't update weights)
+        cat(sprintf("[Auto v5] WARN: loss=%.4g at ep %d b %d — batch skipped\n",
+                    loss_val, ep, batch_id))
+        opt$zero_grad()
+      } else {
+        opt$zero_grad(); loss$backward()
+        # tryCatch guards against NaN gradients from kriging instability at startup
+        clip_ok <- tryCatch({
+          nn_utils_clip_grad_norm_(model$parameters, max_norm = 2.0)
+          TRUE
+        }, error = function(e) {
+          cat(sprintf("[Auto v5] WARN: NaN gradients at ep %d b %d — batch skipped\n",
+                      ep, batch_id))
+          opt$zero_grad()
+          FALSE
+        })
+        if (clip_ok) {
+          opt$step()
+          tr_loss <- tr_loss + loss_val
+        }
+      }
 
       if (batch_id %% 10L == 0L || batch_id == length(batches))
         cat(sprintf("[Auto v5] ep %d | b %d/%d | loss=%.4f\n",
-                    ep, batch_id, length(batches), loss$item()))
+                    ep, batch_id, length(batches), loss_val))
     }
 
     if (ep %% bre == 0L || ep == epochs)
