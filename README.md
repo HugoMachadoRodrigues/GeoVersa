@@ -1,20 +1,25 @@
-<div align="center">
+<p align="center">
+  <img src="logo/geoversa-logo.png" alt="GeoVersa logo" width="280">
+</p>
 
-# 🌍 GeoVersa
+<h1 align="center">GeoVersa</h1>
 
-### *Deep Learning + Geostatistics for Spatial Prediction — Fully Automatic*
+<p align="center"><em>Deep Learning + Geostatistics for Spatial Prediction</em></p>
 
-[![R ≥ 4.2](https://img.shields.io/badge/R-%E2%89%A54.2-276DC3?logo=r&logoColor=white)](https://cran.r-project.org/)
-[![torch](https://img.shields.io/badge/torch-lantern-EE4C2C?logo=pytorch&logoColor=white)](https://torch.mlverse.org/)
-[![Status: Research](https://img.shields.io/badge/status-research%20preview-orange)](https://github.com/HugoMachadoRodrigues/GeoVersa)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Pedometrics](https://img.shields.io/badge/domain-Pedometrics%20%7C%20DSM-2e8b57)](https://www.pedometrics.org/)
-[![ORCID](https://img.shields.io/badge/ORCID-0000--0002--8070--8126-A6CE39?style=flat&logo=orcid&logoColor=white)](https://orcid.org/0000-0002-8070-8126)
-[![Google Scholar](https://img.shields.io/badge/Google%20Scholar-Hugo%20Rodrigues-4285F4?style=flat&logo=googlescholar&logoColor=white)](https://scholar.google.com/citations?user=vu-Ka7wAAAAJ&sortby=pubdate)
-[![ResearchGate](https://img.shields.io/badge/ResearchGate-Hugo%20Rodrigues-00CCBB?style=flat&logo=researchgate&logoColor=white)](https://www.researchgate.net/profile/Hugo-Rodrigues-12)
-[![X / Twitter](https://img.shields.io/badge/X-@Hugo__MRodrigues-000000?style=flat&logo=x&logoColor=white)](https://twitter.com/Hugo_MRodrigues)
+<p align="center">
+  <a href="https://cran.r-project.org/"><img alt="R ≥ 4.2" src="https://img.shields.io/badge/R-%E2%89%A54.2-276DC3?logo=r&logoColor=white"></a>
+  <a href="https://torch.mlverse.org/"><img alt="torch" src="https://img.shields.io/badge/torch-lantern-EE4C2C?logo=pytorch&logoColor=white"></a>
+  <a href="https://github.com/HugoMachadoRodrigues/GeoVersa"><img alt="Status: Research" src="https://img.shields.io/badge/status-research%20preview-orange"></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-yellow.svg"></a>
+  <a href="https://www.pedometrics.org/"><img alt="Pedometrics" src="https://img.shields.io/badge/domain-Pedometrics%20%7C%20DSM-2e8b57"></a>
+</p>
 
-</div>
+<p align="center">
+  <a href="https://orcid.org/0000-0002-8070-8126"><img alt="ORCID" src="https://img.shields.io/badge/ORCID-0000--0002--8070--8126-A6CE39?style=flat&logo=orcid&logoColor=white"></a>
+  <a href="https://scholar.google.com/citations?user=vu-Ka7wAAAAJ&sortby=pubdate"><img alt="Google Scholar" src="https://img.shields.io/badge/Google%20Scholar-Hugo%20Rodrigues-4285F4?style=flat&logo=googlescholar&logoColor=white"></a>
+  <a href="https://www.researchgate.net/profile/Hugo-Rodrigues-12"><img alt="ResearchGate" src="https://img.shields.io/badge/ResearchGate-Hugo%20Rodrigues-00CCBB?style=flat&logo=researchgate&logoColor=white"></a>
+  <a href="https://twitter.com/Hugo_MRodrigues"><img alt="X / Twitter" src="https://img.shields.io/badge/X-@Hugo__MRodrigues-000000?style=flat&logo=x&logoColor=white"></a>
+</p>
 
 ---
 
@@ -61,137 +66,75 @@ In the current V5 code path, the training configuration is derived automatically
 
 ## Mathematical Formulation
 
-For a sample at location \(\mathbf{s}_i \in \mathbb{R}^2\), let:
+For a sample at location `s_i ∈ R^2`, let:
 
-- \(\mathbf{x}_i \in \mathbb{R}^p\): tabular covariates
-- \(\mathbf{P}_i \in \mathbb{R}^{C \times H \times W}\): raster patch centered at \(\mathbf{s}_i\)
-- \(y_i\): target value
-- \(T(y_i)\): optional target transform used by the trainer; in the current Wadoux benchmark the default is `identity`
-- \(y_i^{(s)} = \dfrac{T(y_i) - \mu_y}{\sigma_y}\): standardized target used in training
+- `x_i ∈ R^p`: tabular covariates
+- `P_i ∈ R^(C x H x W)`: raster patch centered at `s_i`
+- `y_i`: target value
+- `T(y_i)`: optional target transform used by the trainer; in the current Wadoux benchmark the default is `identity`
+- `y_i^(s) = (T(y_i) - μ_y) / σ_y`: standardized target used in training
 
 ### Encoders and Fusion
 
 The model computes three embeddings:
 
-\[
-\mathbf{e}^{\text{tab}}_i = f_{\text{tab}}(\mathbf{x}_i) \in \mathbb{R}^d
-\]
-
-\[
-\mathbf{e}^{\text{patch}}_i = W_{\text{patch}} f_{\text{cnn}}(\mathbf{P}_i) \in \mathbb{R}^d
-\]
-
-\[
-\mathbf{e}^{\text{coord}}_i = W_{\text{coord}} f_{\text{coord}}(\mathbf{s}_i) \in \mathbb{R}^d
-\]
+```text
+e_i^tab   = f_tab(x_i) ∈ R^d
+e_i^patch = W_patch f_cnn(P_i) ∈ R^d
+e_i^coord = W_coord f_coord(s_i) ∈ R^d
+```
 
 These are fused into a latent representation:
 
-\[
-\mathbf{z}_i = f_{\text{fuse}}\left(
-\left[
-\mathbf{e}^{\text{tab}}_i,\;
-\mathbf{e}^{\text{patch}}_i,\;
-\mathbf{e}^{\text{coord}}_i
-\right]
-\right)
-\]
+```text
+z_i = f_fuse([e_i^tab, e_i^patch, e_i^coord])
+yhat_i^base = h(z_i)
+```
 
-The base predictor is:
-
-\[
-\hat{y}^{\text{base}}_i = h(\mathbf{z}_i)
-\]
-
-The latent width \(d\), patch embedding dimension, coordinate embedding dimension and dropouts are all derived automatically in `v5`.
+The latent width `d`, patch embedding dimension, coordinate embedding dimension and dropouts are all derived automatically in `v5`.
 
 ### Residual Memory Bank
 
 At each bank refresh, the training set is passed through the current backbone to build:
 
-\[
-\mathcal{B} = \left\{(\mathbf{z}_j,\; \mathbf{s}_j,\; r_j)\right\}_{j=1}^{n_{\text{train}}}
-\]
-
-with residuals
-
-\[
-r_j = y_j^{(s)} - \hat{y}^{\text{base}}_j
-\]
+```text
+B = {(z_j, s_j, r_j)} for j = 1, ..., n_train
+r_j = y_j^(s) - yhat_j^base
+```
 
 So the kriging branch does **not** interpolate raw targets. It interpolates residuals of the current backbone in standardized target space.
 
 ### Anisotropic Residual Kriging
 
-For a query \(i\) and a neighbour \(j\), define the coordinate offset:
+For a query `i` and a neighbour `j`, define the coordinate offset:
 
-\[
-\Delta x_{ij} = x_i - x_j,\qquad
-\Delta y_{ij} = y_i - y_j
-\]
+```text
+Δx_ij = x_i - x_j
+Δy_ij = y_i - y_j
 
-The model learns a rotation \(\theta\) and two positive spatial scales \(\ell_{\text{maj}}, \ell_{\text{min}}\). The rotated coordinates are:
+u_ij = cos(θ) Δx_ij + sin(θ) Δy_ij
+v_ij = -sin(θ) Δx_ij + cos(θ) Δy_ij
 
-\[
-u_{ij} = \cos\theta \, \Delta x_{ij} + \sin\theta \, \Delta y_{ij}
-\]
+d_ij^aniso = sqrt((u_ij / l_maj)^2 + (v_ij / l_min)^2 + ε)
 
-\[
-v_{ij} = -\sin\theta \, \Delta x_{ij} + \cos\theta \, \Delta y_{ij}
-\]
+q_i = W_q z_i
+q_j = W_q z_j
+s_ij = <q_i, q_j> / sqrt(d_q)
 
-The anisotropic distance is:
+a_ij = -d_ij^aniso + s_ij
+w_ij = exp(a_ij) / Σ_{k in N(i)} exp(a_ik)
 
-\[
-d^{\text{aniso}}_{ij} =
-\sqrt{
-\left(\frac{u_{ij}}{\ell_{\text{maj}}}\right)^2 +
-\left(\frac{v_{ij}}{\ell_{\text{min}}}\right)^2 + \varepsilon
-}
-\]
-
-The same latent representation is also projected into a smaller similarity space:
-
-\[
-\mathbf{q}_i = W_q \mathbf{z}_i,\qquad
-\mathbf{q}_j = W_q \mathbf{z}_j
-\]
-
-and the feature-similarity term is:
-
-\[
-s_{ij} = \frac{\langle \mathbf{q}_i,\mathbf{q}_j\rangle}{\sqrt{d_q}}
-\]
-
-The attention score over neighbours combines geometry and latent similarity:
-
-\[
-a_{ij} = - d^{\text{aniso}}_{ij} + s_{ij}
-\]
-
-\[
-w_{ij} = \frac{\exp(a_{ij})}{\sum_{k \in \mathcal{N}(i)} \exp(a_{ik})}
-\]
-
-The residual correction is:
-
-\[
-\delta_i = \sum_{j \in \mathcal{N}(i)} w_{ij} r_j
-\]
+δ_i = Σ_{j in N(i)} w_ij r_j
+```
 
 ### Final Predictor
 
 The current `v5` benchmark uses a **global learned kriging gate**:
 
-\[
-\beta = \sigma(\text{logit}_\beta)
-\]
-
-and the final prediction in standardized space is:
-
-\[
-\hat{y}^{(s)}_i = \hat{y}^{\text{base}}_i + \beta \, \delta_i
-\]
+```text
+β = sigmoid(logit_β)
+yhat_i^(s) = yhat_i^base + β δ_i
+```
 
 The prediction returned to the user is then mapped back to the original target scale by undoing the standardization and any optional target transform.
 
@@ -201,30 +144,28 @@ The prediction returned to the user is then mapped back to the original target s
 
 The warmup phase trains only the backbone:
 
-\[
-\mathcal{L}_{\text{warmup}} =
-\operatorname{Huber}\!\left(y^{(s)}, \hat{y}^{\text{base}}\right)
-\]
+```text
+L_warmup = Huber(y^(s), yhat^base)
+```
 
 After warmup, the full model is trained with:
 
-\[
-\mathcal{L} =
-\operatorname{Huber}\!\left(y^{(s)}, \hat{y}^{(s)}\right)
-+ \lambda_{\text{base}} \operatorname{Huber}\!\left(y^{(s)}, \hat{y}^{\text{base}}\right)
-+ \alpha_{\text{ME}} \left(\overline{\hat{y}^{\text{base}}} - \overline{y^{(s)}}\right)^2
-+ \lambda_{\text{cov}} \left(\frac{\operatorname{sd}(\hat{y}^{\text{base}})}{\operatorname{sd}(y^{(s)}) + \varepsilon} - 1\right)^2
-\]
+```text
+L = Huber(y^(s), yhat^(s))
+  + λ_base Huber(y^(s), yhat^base)
+  + α_ME (mean(yhat^base) - mean(y^(s)))^2
+  + λ_cov (sd(yhat^base) / (sd(y^(s)) + ε) - 1)^2
+```
 
 where:
 
-- \(\lambda_{\text{base}}\) is `base_loss_weight`
-- \(\alpha_{\text{ME}}\) is the base-prediction mean-error penalty
-- \(\lambda_{\text{cov}}\) matches the dispersion of the base predictor to the target dispersion
+- `λ_base` is `base_loss_weight`
+- `α_ME` is the base-prediction mean-error penalty
+- `λ_cov` matches the dispersion of the base predictor to the target dispersion
 
 For the current pure `v5` benchmark:
 
-- `RF distillation` is removed, so \(\lambda_{\text{RF}} = 0\)
+- `RF distillation` is removed, so `λ_RF = 0`
 - the residual bank is refreshed periodically during training from the current backbone state
 - early stopping and LR reduction are driven by validation loss
 
@@ -232,78 +173,50 @@ For the current pure `v5` benchmark:
 
 The current `v5` implementation derives the main parameters as follows:
 
-\[
-K = \operatorname{clamp}\!\left(\operatorname{round}\left(
-\frac{n_{\text{train}} \pi \, \text{range}_{\text{maj}}^2}{\text{area}}
-\right), 6, 30\right)
-\]
+```text
+K = clamp(round(n_train π range_maj^2 / area), 6, 30)
 
-\[
-\text{logit}_{\beta,0} = 2 - 6r
-\]
+logit_β,0 = 2 - 6r
 
-\[
-d = \operatorname{clamp}\!\left(64 \cdot \left\lceil \frac{\sqrt{n_{\text{train}}}}{8} \right\rceil, 128, 512\right)
-\]
+d = clamp(64 ceil(sqrt(n_train) / 8), 128, 512)
 
-\[
-\text{patch\_size} = \operatorname{clamp}\!\left(\lfloor \sqrt{n_{\text{train}}} \rfloor, 8, 31\right)
-\]
+patch_size = clamp(floor(sqrt(n_train)), 8, 31)
 
-\[
-\text{patch\_dim} =
-\operatorname{clamp}\!\left(
-\left\lceil \sqrt{C \cdot H \cdot W} \right\rceil,\;
-\frac{d}{4},\;
-d
-\right)
-\]
+patch_dim = clamp(ceil(sqrt(C H W)), d / 4, d)
 
-\[
-\text{coord\_dim} =
-\operatorname{clamp}\!\left(
-32 + 24(1-\rho_{\text{aniso}}) + 8(1-r),\;
-32,\;
-64
-\right)
-\]
+coord_dim = clamp(32 + 24 (1 - ρ_aniso) + 8 (1 - r), 32, 64)
+```
 
 with:
 
-- \(r\): nugget-to-sill ratio from the fitted variogram
-- \(\rho_{\text{aniso}} = \dfrac{\text{range}_{\text{min}}}{\text{range}_{\text{maj}}}\)
+- `r`: nugget-to-sill ratio from the fitted variogram
+- `ρ_aniso = range_min / range_maj`
 
 The loss weights are also variogram-derived:
 
-\[
-\lambda_{\text{base}} = 0.10\,r,\qquad
-\alpha_{\text{ME}} = 0.75\,r,\qquad
-\lambda_{\text{cov}} = 0.025(1-r)
-\]
+```text
+λ_base = 0.10 r
+α_ME = 0.75 r
+λ_cov = 0.025 (1 - r)
+```
 
 The initial learning rate is estimated from a Polyak-style probe on the actual model:
 
-\[
-\alpha_{\text{Polyak}} = \frac{\mathcal{L}}{\|\nabla \mathcal{L}\|^2},
-\qquad
-\alpha_{\text{init}} = \operatorname{clamp}\!\left(0.01 \,\alpha_{\text{Polyak}}, 10^{-5}, 10^{-3}\right)
-\]
+```text
+α_Polyak = L / ||∇L||^2
+α_init = clamp(0.01 α_Polyak, 1e-5, 1e-3)
+```
 
 Batch size is the minimum of:
 
-- a **statistical** target of roughly \(n/8\) samples per batch
+- a **statistical** target of roughly `n/8` samples per batch
 - a **hardware** limit estimated from available memory and per-sample tensor cost
 
 Weight decay scales with parameter count:
 
-\[
-\text{wd} =
-\operatorname{clamp}\!\left(
-\frac{10^{-3}}{\sqrt{(n_{\text{params}}/10^6)/5}},
-10^{-4},
-10^{-2}
-\right)
-\]
+```text
+wd = clamp(1e-3 / sqrt((n_params / 1e6) / 5), 1e-4, 1e-2)
+```
 
 Warmup validation losses then determine:
 
@@ -323,7 +236,7 @@ GeoVersa implements the **SCORPAN** framework (McBratney et al., 2003) as a unif
 | S, C, O, R, P, A (point-level covariates) | Tabular MLP |
 | O, R (spatial texture as raster) | 2D CNN PatchEncoder |
 | N (geographic position) | Coordinate MLP |
-| ε(s) (spatially structured residual) | Differentiable anisotropic kriging layer |
+| ε(s) (spatially structured residual) | Differentiable anisotropic residual-kriging layer |
 
 Classical regression-kriging fits these components in separate stages. **DeepSCORPAN trains all of them jointly**, so the trend model is aware of spatial autocorrelation and the kriging layer is aware of covariate structure.
 
@@ -434,6 +347,7 @@ GeoVersa/
 │   └── generate_wadoux_maps.R                # Prediction maps
 ├── external/SpatialValidation/               # Wadoux et al. (2021) original data
 ├── data/                                     # Local data (gitignored)
+├── logo/                                     # GeoVersa visual identity assets
 ├── results/                                  # Output metrics (gitignored)
 ├── figures/                                  # Generated figures
 └── README.md
