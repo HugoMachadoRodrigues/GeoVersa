@@ -181,8 +181,8 @@ After warmup, the full model is trained with:
 \mathcal{L} &=
 \mathrm{Huber}\!\left(y^{(s)}, \hat{y}^{(s)}\right)
  + \lambda_{\mathrm{base}}\,\mathrm{Huber}\!\left(y^{(s)}, \hat{y}^{\mathrm{base}}\right) \\
-&\quad + \alpha_{\mathrm{ME}}\left(\operatorname{mean}(\hat{y}^{\mathrm{base}}) - \operatorname{mean}(y^{(s)})\right)^2 \\
-&\quad + \lambda_{\mathrm{cov}}\left(\frac{\operatorname{sd}(\hat{y}^{\mathrm{base}})}{\operatorname{sd}(y^{(s)}) + \varepsilon} - 1\right)^2
+&\quad + \alpha_{\mathrm{ME}}\left(\mathrm{mean}(\hat{y}^{\mathrm{base}}) - \mathrm{mean}(y^{(s)})\right)^2 \\
+&\quad + \lambda_{\mathrm{cov}}\left(\frac{\mathrm{sd}(\hat{y}^{\mathrm{base}})}{\mathrm{sd}(y^{(s)}) + \varepsilon} - 1\right)^2
 \end{aligned}
 ```
 
@@ -200,12 +200,12 @@ The current implementation derives the key parameters using explicit heuristics 
 
 ```math
 \begin{aligned}
-K &= \operatorname{clamp}\!\left(\operatorname{round}\!\left(\frac{n_{\mathrm{train}}\,\pi\,\ell_{\mathrm{maj}}^2}{\mathrm{area}}\right), 6, 30\right) \\
+K &= \mathrm{clamp}\!\left(\mathrm{round}\!\left(\frac{n_{\mathrm{train}}\,\pi\,\ell_{\mathrm{maj}}^2}{\mathrm{area}}\right), 6, 30\right) \\
 \mathrm{logit}_{\beta,0} &= 2 - 6r \\
-d &= \operatorname{clamp}\!\left(64\,\left\lceil \frac{\sqrt{n_{\mathrm{train}}}}{8} \right\rceil, 128, 512\right) \\
-\mathrm{patch\_size} &= \operatorname{clamp}\!\left(\left\lfloor \sqrt{n_{\mathrm{train}}} \right\rfloor, 8, 31\right) \\
-\mathrm{patch\_dim} &= \operatorname{clamp}\!\left(\left\lceil \sqrt{C H W} \right\rceil, \frac{d}{4}, d\right) \\
-\mathrm{coord\_dim} &= \operatorname{clamp}\!\left(32 + 24(1 - \rho_{\mathrm{aniso}}) + 8(1 - r), 32, 64\right)
+d &= \mathrm{clamp}\!\left(64\,\left\lceil \frac{\sqrt{n_{\mathrm{train}}}}{8} \right\rceil, 128, 512\right) \\
+\mathrm{patch\_size} &= \mathrm{clamp}\!\left(\left\lfloor \sqrt{n_{\mathrm{train}}} \right\rfloor, 8, 31\right) \\
+\mathrm{patch\_dim} &= \mathrm{clamp}\!\left(\left\lceil \sqrt{C H W} \right\rceil, \frac{d}{4}, d\right) \\
+\mathrm{coord\_dim} &= \mathrm{clamp}\!\left(32 + 24(1 - \rho_{\mathrm{aniso}}) + 8(1 - r), 32, 64\right)
 \end{aligned}
 ```
 
@@ -226,7 +226,7 @@ The initial learning rate is estimated from a Polyak-style probe on the actual m
 ```math
 \alpha_{\mathrm{Polyak}} = \frac{\mathcal{L}}{\lVert \nabla \mathcal{L} \rVert_2^2},
 \qquad
-\alpha_{\mathrm{init}} = \operatorname{clamp}\!\left(0.01\,\alpha_{\mathrm{Polyak}}, 10^{-5}, 10^{-3}\right)
+\alpha_{\mathrm{init}} = \mathrm{clamp}\!\left(0.01\,\alpha_{\mathrm{Polyak}}, 10^{-5}, 10^{-3}\right)
 ```
 
 Batch size is the minimum of:
@@ -237,7 +237,7 @@ Batch size is the minimum of:
 Weight decay scales with parameter count:
 
 ```math
-\mathrm{wd} = \operatorname{clamp}\!\left(\frac{10^{-3}}{\sqrt{(n_{\mathrm{params}}/10^6)/5}}, 10^{-4}, 10^{-2}\right)
+\mathrm{wd} = \mathrm{clamp}\!\left(\frac{10^{-3}}{\sqrt{(n_{\mathrm{params}}/10^6)/5}}, 10^{-4}, 10^{-2}\right)
 ```
 
 Warmup validation losses then determine:
