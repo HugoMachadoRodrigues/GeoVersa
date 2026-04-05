@@ -34,13 +34,13 @@ The current implementation is centered on **ConvKrigingNet2D**, a point-wise pre
 - A **coordinate MLP** that encodes geographic position
 - A **differentiable anisotropic residual-kriging layer** that interpolates a learned residual field from nearby training points
 
-In the current code path, the trend model and the residual spatial correction are trained jointly. The benchmarked `v5` configuration is the **pure GeoVersa** variant: `RF distillation` is disabled.
+In the current code path, the trend model and the residual spatial correction are trained jointly. The benchmarked configuration is the **pure GeoVersa** variant: `RF distillation` is disabled.
 
 ---
 
-## V5: Zero User Tuning
+## Zero User Tuning
 
-**GeoVersa V5** introduces complete automatic configuration. The user provides only the data and the compute device. All 23 model hyperparameters are derived from the data itself:
+**GeoVersa** uses complete automatic configuration. The user provides only the data and the compute device. The main model hyperparameters are derived from the data itself:
 
 | Hyperparameter | Derived from |
 |---|---|
@@ -60,7 +60,7 @@ Auto-configuration is split across the training pipeline:
 2. **Capacity phase**: derive architecture width and dropout from sample size and patch geometry
 3. **Optimisation phase**: estimate learning rate, batch size, weight decay, patience and bank refresh from gradients, hardware and warmup dynamics
 
-In the current V5 code path, the training configuration is derived automatically from the data and the available hardware.
+In the current code path, the training configuration is derived automatically from the data and the available hardware.
 
 ---
 
@@ -91,7 +91,7 @@ z_i = f_fuse([e_i^tab, e_i^patch, e_i^coord])
 yhat_i^base = h(z_i)
 ```
 
-The latent width `d`, patch embedding dimension, coordinate embedding dimension and dropouts are all derived automatically in `v5`.
+The latent width `d`, patch embedding dimension, coordinate embedding dimension and dropouts are all derived automatically in the current implementation.
 
 ### Residual Memory Bank
 
@@ -129,7 +129,7 @@ w_ij = exp(a_ij) / Σ_{k in N(i)} exp(a_ik)
 
 ### Final Predictor
 
-The current `v5` benchmark uses a **global learned kriging gate**:
+The current benchmark uses a **global learned kriging gate**:
 
 ```text
 β = sigmoid(logit_β)
@@ -138,9 +138,9 @@ yhat_i^(s) = yhat_i^base + β δ_i
 
 The prediction returned to the user is then mapped back to the original target scale by undoing the standardization and any optional target transform.
 
-> **Implementation note**: the core model code supports an optional eval-time distance gate and kriging dropout. In the current pure `v5` benchmark path, those mechanisms are not the main formulation being used.
+> **Implementation note**: the core model code supports an optional eval-time distance gate and kriging dropout. In the current pure benchmark path, those mechanisms are not the main formulation being used.
 
-### Training Objective in V5
+### Training Objective
 
 The warmup phase trains only the backbone:
 
@@ -163,15 +163,15 @@ where:
 - `α_ME` is the base-prediction mean-error penalty
 - `λ_cov` matches the dispersion of the base predictor to the target dispersion
 
-For the current pure `v5` benchmark:
+For the current pure benchmark:
 
 - `RF distillation` is removed, so `λ_RF = 0`
 - the residual bank is refreshed periodically during training from the current backbone state
 - early stopping and LR reduction are driven by validation loss
 
-### What V5 Auto-Configures
+### What GeoVersa Auto-Configures
 
-The current `v5` implementation derives the main parameters as follows:
+The current implementation derives the main parameters as follows:
 
 ```text
 K = clamp(round(n_train π range_maj^2 / area), 6, 30)
@@ -240,7 +240,7 @@ GeoVersa implements the **SCORPAN** framework (McBratney et al., 2003) as a unif
 
 Classical regression-kriging fits these components in separate stages. **DeepSCORPAN trains all of them jointly**, so the trend model is aware of spatial autocorrelation and the kriging layer is aware of covariate structure.
 
-| Aspect | Regression-Kriging | Random Forest | **GeoVersa V5** |
+| Aspect | Regression-Kriging | Random Forest | **GeoVersa** |
 |---|:---:|:---:|:---:|
 | SCORPAN covariates | ✅ linear | ✅ non-linear | ✅ deep non-linear |
 | Local raster texture | ❌ | ❌ | ✅ 2D CNN patch |
@@ -261,7 +261,7 @@ The benchmark runner follows the **Wadoux et al. (2021)** validation framework. 
 
 The current clean run is:
 
-- model: **GeoVersa V5 / ConvKrigingNet2D**, pure version (`RF distillation` removed)
+- model: **GeoVersa / ConvKrigingNet2D**, pure version (`RF distillation` removed)
 - baseline: **local RF**, trained on the same sampled calibration sets
 - scenario: `random`
 - calibration sample size: `n = 500`
@@ -271,11 +271,11 @@ The current clean run is:
 | Model | ME | RMSE | Spearman² | MEC |
 |---|:---:|:---:|:---:|:---:|
 | RF (local benchmark) | 0.42 | 31.74 | 0.803 | 0.883 |
-| GeoVersa V5 (pure) | -0.02 | 35.08 | 0.763 | 0.853 |
+| GeoVersa (pure) | -0.02 | 35.08 | 0.763 | 0.853 |
 
-At this point, **GeoVersa V5 pure does not outperform the local RF baseline** on the clean Design-Based benchmark.
+At this point, **GeoVersa pure does not outperform the local RF baseline** on the clean Design-Based benchmark.
 
-Source: `results/codex_v5_pure_designbased_3iter/wadoux_style_rf_conv_summary_by_protocol.csv`
+Source: clean Design-Based benchmark summary generated by this repository under `results/`.
 
 In this benchmark runner, `R²` is the squared **Spearman** correlation, matching the Wadoux-style metric implementation in the repository.
 
@@ -301,21 +301,28 @@ git clone https://github.com/HugoMachadoRodrigues/GeoVersa.git
 cd GeoVersa
 ```
 
-### Reproduce the benchmark (entry point)
+### Reproduce the benchmark
 
 ```r
 # Open GeoVersa.Rproj in RStudio, then:
-source("code/Benchmark_Auto_v5.R")
+Sys.setenv(
+  WADOUX_MODELS      = "RF,ConvKrigingNet2D",
+  WADOUX_PROTOCOLS   = "DesignBased,RandomKFold,SpatialKFold",
+  WADOUX_N_ITER      = "50",
+  WADOUX_SAMPLE_SIZE = "500",
+  WADOUX_DEVICE      = "mps",
+  WADOUX_RESULTS_DIR = "results/wadoux2021_auto_50iter"
+)
+source("code/run_wadoux_style_rf_conv_comparison.R")
 ```
 
-Runs 50 independent iterations of the Wadoux (2021) benchmark with full V5 auto-configuration.
-Results saved to `results/wadoux2021_auto_v5_50iter/`.
+Runs 50 independent iterations of the Wadoux (2021) benchmark with full automatic configuration.
+Results saved to `results/wadoux2021_auto_50iter/`.
 
 ### Custom run
 
 ```r
 Sys.setenv(
-  WADOUX_AUTO_V5_SCRIPT = normalizePath("code/ConvKrigingNet2D_Auto_v5.R"),
   WADOUX_MODELS         = "RF,ConvKrigingNet2D",
   WADOUX_PROTOCOLS      = "DesignBased,RandomKFold,SpatialKFold",
   WADOUX_N_ITER         = "50",        # independent iterations
@@ -334,9 +341,9 @@ source("code/run_wadoux_style_rf_conv_comparison.R")
 GeoVersa/
 ├── code/
 │   ├── ConvKrigingNet2D.R                    # Core model architecture (sources utilities below)
-│   ├── ConvKrigingNet2D_Auto.R               # Training loop (V5 trainer + V4 auto-config)
-│   ├── ConvKrigingNet2D_Auto_v5.R            # V5 auto-configuration functions
-│   ├── Benchmark_Auto_v5.R                   # ⭐ Entry point — run this
+│   ├── ConvKrigingNet2D_Auto.R               # Training loop and automatic configuration hooks
+│   ├── auto-configuration scripts            # Data-driven parameter derivation utilities
+│   ├── benchmark entry scripts               # High-level benchmark launchers
 │   ├── run_wadoux_style_rf_conv_comparison.R # Benchmark engine
 │   ├── wadoux2021_rf_reproduction_helpers.R  # Data loading, protocols, Wadoux metrics
 │   ├── KrigingNet_PointPatchCNN.R            # Patch extraction + memory bank utilities
@@ -369,12 +376,12 @@ GeoVersa/
 ## Citation
 
 ```bibtex
-@software{rodrigues2026geoVersa,
+@software{GeoVersa,
   author = {Rodrigues, Hugo},
   title  = {{GeoVersa}: Deep Learning + Geostatistics for Spatial Prediction},
   year   = {2026},
   url    = {https://github.com/HugoMachadoRodrigues/GeoVersa},
-  note   = {Research preview — ConvKrigingNet2D V5 with complete automatic configuration}
+  note   = {Research preview with complete automatic configuration}
 }
 ```
 
