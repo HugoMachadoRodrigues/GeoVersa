@@ -1178,13 +1178,14 @@ train_convkrigingnet2d_auto_one_fold_v5 <- function(
   
   # V5 Auto-config: ALL parameters automatic
   cfg <- auto_kriging_config_v5(
-    vg = vg,
-    n_train = n_train,
-    coord_scaler = coord_scaler,
-    Ctr = Ctr,
-    model_init = model_pre,
-    train_cache = train_cache,
-    device = device
+    vg             = vg,
+    n_train        = n_train,
+    coord_scaler   = coord_scaler,
+    Ctr            = Ctr,
+    patch_channels = dim(Ptr)[1L],
+    model_init     = model_pre,
+    train_cache    = train_cache,
+    device         = device
   )
   
   # Rebuild model with auto-configured architecture
@@ -1209,9 +1210,15 @@ train_convkrigingnet2d_auto_one_fold_v5 <- function(
   
   # Recompute weight decay from final model capacity
   cfg$wd <- auto_weight_decay_from_capacity(model)
-  
+
+  # Re-estimate learning rate on the final (full-capacity) model.
+  # The preliminary model_pre used fixed d=192; the rebuilt model may differ.
+  # Polyak step α = loss / ‖∇f‖² on a fresh mini-batch gives a scale-correct LR.
+  cfg$lr     <- estimate_initial_lr_polyak(model, train_cache, device = device)
+  cfg$min_lr <- cfg$lr / 1000
+
   cat(sprintf("[Auto v5] ══ v5 Auto-Config Complete ══\n"))
-  cat(sprintf("[Auto v5]   Learning rate: %.2e\n", cfg$lr))
+  cat(sprintf("[Auto v5]   Learning rate (Polyak, final model): %.2e\n", cfg$lr))
   cat(sprintf("[Auto v5]   Batch size: %d\n", cfg$batch_size))
   cat(sprintf("[Auto v5]   Weight decay: %.2e\n", cfg$wd))
   cat(sprintf("[Auto v5]   Coord dim: %d\n", cfg$coord_dim))
@@ -1264,10 +1271,11 @@ train_convkrigingnet2d_auto_one_fold_v5 <- function(
     model$proj_coord$parameters, model$fuse$parameters,
     model$head$parameters
   )
-  wu_opt    <- optim_adamw(warmup_params, lr = lr_now, weight_decay = wd)
-  wu_prev   <- Inf
-  wu_bad    <- 0L
-  wu_done   <- 0L
+  wu_opt        <- optim_adamw(warmup_params, lr = lr_now, weight_decay = wd)
+  wu_prev       <- Inf
+  wu_bad        <- 0L
+  wu_done       <- 0L
+  wu_val_losses <- c()   # collect per-epoch val loss for Phase-3 trajectory analysis
 
   for (ep in seq_len(max_wu)) {
     model$train()
@@ -1296,6 +1304,7 @@ train_convkrigingnet2d_auto_one_fold_v5 <- function(
 
     vb <- predict_convkrigingnet2d_base_tensor(model, val_cache, bs)
     vl <- huber_loss(val_cache$y, to_float_tensor(vb, device))$item()
+    wu_val_losses <- c(wu_val_losses, vl)   # §Phase-3: trajectory accumulation
 
     rel_imp <- if (is.finite(wu_prev) && wu_prev > 0)
       (wu_prev - vl) / wu_prev else 1.0
@@ -1318,6 +1327,23 @@ train_convkrigingnet2d_auto_one_fold_v5 <- function(
     wu_prev <- vl
   }
   cat(sprintf("[Auto v5] Warmup complete: %d epochs used.\n", wu_done))
+
+  # ── Phase 3: data-driven training dynamics from warmup trajectory ─────────
+  # auto_patience_from_warmup: convergence speed ratio → lr_patience + es_patience
+  # auto_lr_decay_from_trajectory: CV of warmup improvements → tanh mapping → [0.30, 0.70]
+  # auto_bank_refresh_from_patience: floor(lr_patience/2)
+  dyn_pat <- auto_patience_from_warmup(wu_done, max_wu)
+  dyn_dec <- auto_lr_decay_from_trajectory(wu_val_losses)
+  dyn_bre <- auto_bank_refresh_from_patience(dyn_pat$lr_patience)
+
+  pat                    <- dyn_pat$patience
+  cfg$lr_patience        <- dyn_pat$lr_patience
+  cfg$lr_decay           <- dyn_dec
+  cfg$bank_refresh_every <- dyn_bre
+  bre                    <- dyn_bre
+
+  cat(sprintf("[Auto v5] Phase-3 | patience=%d | lr_patience=%d | lr_decay=%.2f | bank_refresh=%d\n",
+              pat, cfg$lr_patience, cfg$lr_decay, bre))
 
   # ══════════════════════════════════════════════════════════════════════════
   # §E  Main loop — full model (backbone + kriging)
@@ -1369,9 +1395,12 @@ train_convkrigingnet2d_auto_one_fold_v5 <- function(
         loss    <- loss + cfg$lambda_rf * loss_rf
       }
 
-      if (cfg$lambda_cov > 0 && !is.null(xb)) {
-        y_mean   <- torch_mean(yb)
-        loss_cov <- torch_mean((out$base_pred - y_mean)^2)
+      if (cfg$lambda_cov > 0) {
+        # Variance-matching: penalises mismatch between prediction and target spread.
+        # Scale-invariant — (σ_pred / σ_target - 1)² = 0 iff spreads match exactly.
+        pred_std <- torch_std(out$base_pred) + 1e-8
+        targ_std <- torch_std(yb)             + 1e-8
+        loss_cov <- (pred_std / targ_std - 1)^2
         loss     <- loss + cfg$lambda_cov * loss_cov
       }
 
