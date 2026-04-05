@@ -283,9 +283,10 @@ estimate_initial_lr_polyak <- function(model, train_cache, bs_init = 32L,
     for (param in model$parameters) {           # no parens — property, not method
       g <- param$grad
       if (!is.null(g)) {
-        # as.array() avoids any $item() issues on non-scalar tensors
-        g_vals      <- as.array(g$cpu()$detach())
-        grad_sq_sum <- grad_sq_sum + sum(g_vals^2)
+        # torch_sum(...)$item() works on any device (cpu/mps/cuda) without
+        # needing an explicit .cpu() call — avoids "tensor does not have a device"
+        # errors on MPS gradient tensors.
+        grad_sq_sum <- grad_sq_sum + torch_sum(g$detach() * g$detach())$item()
       }
     }
     tmp_opt$zero_grad()   # clear gradients so they don't bleed into training
