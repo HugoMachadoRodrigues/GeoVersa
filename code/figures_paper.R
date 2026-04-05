@@ -99,7 +99,8 @@ MS_DIR <- file.path(RESULTS, "convkriging2d_anisotropic_multiseed_confirmation")
 
 # --- 1a) Benchmark comparável: RF + XGB no mesmo setup multiseed
 #         Gerado por run_rf_xgb_multiseed_benchmark.R
-#         Fallback: wadoux_summary_goal.csv (setup diferente — só para contexto)
+#         Historical fallback removed: wadoux_summary_goal.csv mixed
+#         unverified reference values with a different setup.
 rf_xgb_all_path <- file.path(MS_DIR, "rf_xgb_multiseed_all.csv")
 rf_xgb_available <- file.exists(rf_xgb_all_path)
 
@@ -142,17 +143,12 @@ if (rf_xgb_available) {
 } else {
   message("AVISO: rf_xgb_multiseed_all.csv nao encontrado.")
   message("  -> Execute code/run_rf_xgb_multiseed_benchmark.R primeiro.")
-  message("  -> Usando wadoux_summary_goal.csv como FALLBACK (setup diferente, so contexto).")
-
-  ref_raw <- read.csv(file.path(RESULTS, "wadoux_summary_goal.csv"),
-                      check.names = FALSE)
-  baselines_summary <- ref_raw %>%
-    filter(protocol == "spatial_kfold") %>%
-    select(model, RMSE_mean = RMSE_mean, R2_mean = R2_mean,
-           MAE_mean = MAE_mean, Bias_mean = Bias_mean)
-
-  fig1_subtitle <- "FALLBACK: wadoux_summary_goal.csv -- setup diferente (n~250, 5 folds) -- NAO comparavel"
-  fig1_caption  <- "ATENCAO: execute run_rf_xgb_multiseed_benchmark.R para resultados comparaveis"
+  stop(
+    "Resultados comparaveis de RF/XGB nao encontrados. ",
+    "O fallback 'wadoux_summary_goal.csv' foi removido porque misturava ",
+    "valores nao verificados e um setup diferente. ",
+    "Execute code/run_rf_xgb_multiseed_benchmark.R antes de gerar estas figuras."
+  )
 }
 
 # Garante ordem dos modelos (pior para melhor em RMSE, de cima para baixo)

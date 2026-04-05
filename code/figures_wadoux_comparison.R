@@ -3,19 +3,9 @@
 #
 # Narrative: ConvKrigingNet2D vs RF using the Wadoux (2021) validation framework.
 #
-# Core argument (from Wadoux et al. 2021):
-#   - Spatial k-fold CV systematically OVERESTIMATES RMSE (too pessimistic).
-#   - Design-based validation is the ONLY theoretically unbiased estimator.
-#   - Therefore, the Design-based result is the correct comparison point.
-#
-# Result:
-#   ConvKrigingNet2D Design-based RMSE = 33.2 ≅ RF Wadoux published = 33.4
-#   Spatial k-fold inflates ConvKrigingNet2D RMSE to 37.9 — exactly as Wadoux predicts.
-#
-# Three data sources:
-#   A) ConvKrigingNet2D  — our run: n=500, 3 iter, same protocol as Wadoux
-#   B) RF (our run)      — n=500, 3 iter, same calibration samples as A
-#   C) RF (Wadoux 2021)  — published values: n=500, 500 iter, random scenario
+# This script compares only locally generated benchmark runs executed under the
+# same protocol implementation. No hardcoded "published paper" metric table is
+# used here.
 #
 # Protocols: DesignBased, RandomKFold, SpatialKFold
 # (BLOOCV: 1000 model trainings/iter — computationally infeasible for deep learning)
@@ -78,36 +68,12 @@ our_summary <- bind_rows(conv_raw, rf_raw) %>%
   )
 
 # =============================================================================
-# Wadoux (2021) published RF values
-# Source: Wadoux et al. (2021) Table / Fig. 1, random sampling scenario
-# Metrics: ME and RMSE in Mg/ha; r2 = Spearman correlation squared; n=500, 500 iter
-# Note: MEC was not reported by Wadoux et al.
-# =============================================================================
-wadoux_published <- tribble(
-  ~protocol,      ~ME_mean, ~RMSE_mean, ~r2_mean,
-  "DesignBased",   2.83,     33.43,      0.87,
-  "RandomKFold",   0.74,     32.60,      0.88,
-  "SpatialKFold", -0.18,     33.38,      0.66
-) %>%
-  mutate(
-    model      = "RF",
-    source     = "Wadoux (2021) published\n(n=500, 500 iter)",
-    data_label = "RF\n(Wadoux 2021, n=500, 500 iter)",
-    n_iter     = 500L,
-    ME_sd = NA_real_, RMSE_sd = NA_real_, r2_sd = NA_real_,
-    MEC_mean = NA_real_, MEC_sd = NA_real_
-  )
-
-# =============================================================================
 # Combine
 # =============================================================================
-combined <- bind_rows(
-  our_summary %>%
-    select(protocol, model, source, data_label,
-           ME_mean, RMSE_mean, r2_mean, MEC_mean,
-           ME_sd, RMSE_sd, r2_sd, MEC_sd, n_iter),
-  wadoux_published
-)
+combined <- our_summary %>%
+  select(protocol, model, source, data_label,
+         ME_mean, RMSE_mean, r2_mean, MEC_mean,
+         ME_sd, RMSE_sd, r2_sd, MEC_sd, n_iter)
 
 protocol_labels <- c(
   DesignBased  = "Design-based\n(unbiased estimator)",
@@ -126,8 +92,7 @@ combined <- combined %>%
 # Factor levels: ConvKrigingNet2D first
 model_levels <- c(
   "ConvKrigingNet2D\n(this study)",
-  "RF\n(our run, n=500, 3 iter)",
-  "RF\n(Wadoux 2021, n=500, 500 iter)"
+  "RF\n(our run, n=500, 3 iter)"
 )
 combined$data_label <- factor(combined$data_label, levels = model_levels)
 
@@ -136,18 +101,15 @@ combined$data_label <- factor(combined$data_label, levels = model_levels)
 # =============================================================================
 palette <- c(
   "ConvKrigingNet2D\n(this study)"            = "#2166AC",
-  "RF\n(our run, n=500, 3 iter)"              = "#4DAC26",
-  "RF\n(Wadoux 2021, n=500, 500 iter)"        = "#878787"
+  "RF\n(our run, n=500, 3 iter)"              = "#4DAC26"
 )
 shape_map <- c(
   "ConvKrigingNet2D\n(this study)"            = 16,
-  "RF\n(our run, n=500, 3 iter)"              = 17,
-  "RF\n(Wadoux 2021, n=500, 500 iter)"        = 15
+  "RF\n(our run, n=500, 3 iter)"              = 17
 )
 linetype_map <- c(
   "ConvKrigingNet2D\n(this study)"            = "solid",
-  "RF\n(our run, n=500, 3 iter)"              = "solid",
-  "RF\n(Wadoux 2021, n=500, 500 iter)"        = "dashed"
+  "RF\n(our run, n=500, 3 iter)"              = "solid"
 )
 
 # =============================================================================
@@ -181,8 +143,8 @@ save_fig <- function(p, name, w = 8, h = 5) {
 
 # =============================================================================
 # FIGURE 1 (MAIN) — RMSE across protocols
-# Key message: Design-based ConvKrigingNet2D (33.2) = RF Wadoux (33.4)
-#              Spatial k-fold inflation is explained by Wadoux's own findings
+# Key message: compare the local ConvKrigingNet2D and RF runs under the same
+# protocol implementation.
 # =============================================================================
 
 # Annotation: arrow/label for design-based equivalence
@@ -219,12 +181,11 @@ p_rmse_main <- ggplot(combined,
     x = NULL,
     title = "Map accuracy of ConvKrigingNet2D evaluated with Wadoux et al. (2021) protocols",
     subtitle = paste0(
-      "Design-based (unbiased): ConvKrigingNet2D RMSE = 33.2 vs RF (Wadoux 2021) RMSE = 33.4 Mg/ha\n",
-      "Spatial k-fold overestimates RMSE (pessimistic bias) — consistent with Wadoux et al. (2021)"
+      "Local benchmark only: ConvKrigingNet2D vs RF under the same protocol implementation\n",
+      "Design-based is the map-accuracy protocol emphasised by Wadoux et al. (2021)"
     ),
     caption = paste0(
-      "Error bars: mean +/- 1 SD across 3 independent sampling iterations (our runs) | ",
-      "Wadoux (2021): mean over 500 iterations\n",
+      "Error bars: mean +/- 1 SD across 3 independent sampling iterations\n",
       "BLOOCV excluded: requires 1,000 model trainings/iteration (computationally infeasible for deep learning)"
     )
   ) +
@@ -262,8 +223,8 @@ p_r2 <- ggplot(combined,
   labs(
     x = NULL,
     title = expression(r^2~"by validation protocol"),
-    subtitle = "Spearman squared correlation | same three-protocol comparison",
-    caption = "Error bars: +/- 1 SD | Wadoux (2021): 500 iterations"
+    subtitle = "Local benchmark only",
+    caption = "Error bars: +/- 1 SD"
   ) +
   theme_paper()
 
@@ -331,7 +292,7 @@ if (nrow(mec_data) > 0) {
     labs(
       x = NULL, y = "Model Efficiency Coefficient (MEC)",
       title = "MEC by validation protocol",
-      subtitle = "Wadoux et al. (2021) did not report MEC",
+      subtitle = "Local benchmark only",
       caption = "MEC = 1 - SSE/SST; closer to 1 = better | Error bars: +/- 1 SD"
     ) +
     theme_paper()
@@ -354,12 +315,12 @@ p_composite <- (
   plot_annotation(
     title    = "ConvKrigingNet2D map accuracy: Wadoux et al. (2021) validation framework",
     subtitle = paste0(
-      "Design-based (unbiased): ConvKrigingNet2D RMSE 33.2 Mg/ha vs RF 33.4 Mg/ha (Wadoux 2021)\n",
-      "Spatial k-fold pessimistic bias consistent with findings of Wadoux et al. (2021)"
+      "Local benchmark only: ConvKrigingNet2D and RF evaluated under the same protocol implementation\n",
+      "Design-based remains the primary protocol for map-accuracy interpretation"
     ),
     caption  = paste0(
       "Random sampling scenario | n = 500 calibration points | Amazon basin above-ground biomass\n",
-      "Error bars: mean +/- 1 SD (3 iterations) | Wadoux (2021) RF: mean over 500 iterations"
+      "Error bars: mean +/- 1 SD (3 iterations)"
     ),
     theme = theme(
       plot.title    = element_text(face = "bold", size = 12),
@@ -371,18 +332,16 @@ p_composite <- (
 save_fig(p_composite, "fig5_composite_rmse_r2", w = 14, h = 7)
 
 # =============================================================================
-# FIGURE 6 — Bar chart: Design-based only (the correct metric, per Wadoux)
-# Main take-home figure for the paper
+# FIGURE 6 — Bar chart: Design-based only
 # =============================================================================
 design_only <- combined %>%
   filter(protocol == "DesignBased") %>%
   mutate(label_short = case_when(
     grepl("ConvKrigingNet2D", data_label) ~ "ConvKrigingNet2D\n(this study)",
-    grepl("our run", data_label)          ~ "RF\n(our run)",
-    grepl("Wadoux", data_label)           ~ "RF\n(Wadoux 2021)"
+    grepl("our run", data_label)          ~ "RF\n(our run)"
   )) %>%
   mutate(label_short = factor(label_short, levels = c(
-    "ConvKrigingNet2D\n(this study)", "RF\n(our run)", "RF\n(Wadoux 2021)"
+    "ConvKrigingNet2D\n(this study)", "RF\n(our run)"
   )))
 
 p_design_bar <- ggplot(design_only,
@@ -406,12 +365,12 @@ p_design_bar <- ggplot(design_only,
     x = NULL,
     title = "Design-based validation RMSE (Wadoux et al. 2021 framework)",
     subtitle = paste0(
-      "The design-based estimator is the only theoretically unbiased map accuracy estimator\n",
-      "ConvKrigingNet2D achieves equivalent accuracy to RF under this framework"
+      "Local benchmark only\n",
+      "Compare ConvKrigingNet2D and RF on the design-based protocol"
     ),
     caption = paste0(
       "Design-based validation: probability sample of n = 500, random sampling scenario\n",
-      "Error bars: +/- 1 SD across 3 iterations | Wadoux (2021) RF: mean over 500 iterations"
+      "Error bars: +/- 1 SD across 3 iterations"
     )
   ) +
   theme_paper() +
@@ -457,11 +416,11 @@ cat("\nFULL TABLE (all protocols):\n")
 print(as.data.frame(table_out %>% select(Protocol, Model, RMSE, RMSE_SD, r2, r2_SD)), row.names = FALSE)
 
 cat(sprintf("\nFigures saved to: figures/wadoux_comparison/\n"))
-cat("\nNARRATIVE FOR PAPER:\n")
-conv_db  <- combined %>% filter(protocol == "DesignBased", grepl("ConvKriging", data_label)) %>% pull(RMSE_mean)
-rf_wad   <- combined %>% filter(protocol == "DesignBased", grepl("Wadoux", data_label))    %>% pull(RMSE_mean)
+cat("\nNARRATIVE:\n")
+conv_db <- combined %>% filter(protocol == "DesignBased", grepl("ConvKriging", data_label)) %>% pull(RMSE_mean)
+rf_db   <- combined %>% filter(protocol == "DesignBased", grepl("our run", data_label))      %>% pull(RMSE_mean)
 conv_spk <- combined %>% filter(protocol == "SpatialKFold", grepl("ConvKriging", data_label)) %>% pull(RMSE_mean)
 cat(sprintf(
-  "ConvKrigingNet2D Design-based RMSE = %.1f Mg/ha\nRF (Wadoux 2021) Design-based RMSE  = %.1f Mg/ha\nConvKrigingNet2D SpatialKFold RMSE  = %.1f Mg/ha (pessimistic, as predicted by Wadoux 2021)\n",
-  conv_db, rf_wad, conv_spk
+  "ConvKrigingNet2D Design-based RMSE = %.1f Mg/ha\nRF (our run) Design-based RMSE     = %.1f Mg/ha\nConvKrigingNet2D SpatialKFold RMSE   = %.1f Mg/ha\n",
+  conv_db, rf_db, conv_spk
 ))

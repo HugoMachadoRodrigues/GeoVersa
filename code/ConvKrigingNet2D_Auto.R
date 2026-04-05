@@ -1124,25 +1124,9 @@ train_convkrigingnet2d_auto_one_fold_v5 <- function(
 
   n_train <- nrow(Xtr)
 
-  # ── RF distillation targets ──────────────────────────────────────────────
-  has_rf_distil <- !is.null(fd$rf_pred) &&
-                   !is.null(fd$rf_pred$train) &&
-                   !is.null(fd$rf_pred$val)
-
-  rf_train_s_t <- NULL
-  rf_val_s_t   <- NULL
-
-  if (has_rf_distil) {
-    rf_train_s <- apply_target_scaler(
-      transform_target(fd$rf_pred$train, target_transform), y_scaler)
-    rf_val_s   <- apply_target_scaler(
-      transform_target(fd$rf_pred$val,   target_transform), y_scaler)
-    rf_train_s_t <- to_float_tensor(rf_train_s, device)
-    rf_val_s_t   <- to_float_tensor(rf_val_s,   device)
-    cat("[Auto v5] RF distillation targets loaded (train + val).\n")
-  } else {
-    cat("[Auto v5] RF distillation targets NOT available — skipping distillation.\n")
-  }
+  # ── Pure GeoVersa v5: no RF distillation ─────────────────────────────────
+  has_rf_distil <- FALSE
+  cat("[Auto v5] RF distillation disabled — benchmarking pure GeoVersa.\n")
 
   # ══════════════════════════════════════════════════════════════════════════
   # §A  V5 COMPLETE AUTO-CONFIGURATION
@@ -1292,10 +1276,6 @@ train_convkrigingnet2d_auto_one_fold_v5 <- function(
         train_cache$C$index_select(1L, b_t)
       )
       loss <- huber_loss(train_cache$y$index_select(1L, b_t), out$pred)
-      if (has_rf_distil && cfg$lambda_rf > 0) {
-        loss_rf <- huber_loss(rf_train_s_t$index_select(1L, b_t), out$pred)
-        loss    <- loss + cfg$lambda_rf * loss_rf
-      }
       wu_opt$zero_grad(); loss$backward()
       nn_utils_clip_grad_norm_(warmup_params, max_norm = 2.0)
       wu_opt$step()
@@ -1390,11 +1370,6 @@ train_convkrigingnet2d_auto_one_fold_v5 <- function(
         me       <- torch_mean(out$base_pred) - torch_mean(yb)
         loss_me  <- me * me
         loss     <- loss + cfg$alpha_me * loss_me
-      }
-
-      if (has_rf_distil && cfg$lambda_rf > 0) {
-        loss_rf <- huber_loss(rf_train_s_t$index_select(1L, b_t), out$base_pred)
-        loss    <- loss + cfg$lambda_rf * loss_rf
       }
 
       if (cfg$lambda_cov > 0) {
@@ -1534,4 +1509,3 @@ train_convkrigingnet2d_auto_one_fold_v5 <- function(
     metrics_test = metrics(yte, test_preds)
   )
 }
-

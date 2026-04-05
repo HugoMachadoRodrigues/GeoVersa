@@ -173,15 +173,16 @@
 #
 #   base_loss_weight:  0.10 × r       — direct backbone supervision when δ→0
 #   alpha_me:          0.75 × r       — anti co-training-collapse penalty
-#   lambda_rf:         1 − r          — RF distillation (backbone must match RF
-#                                        when spatial structure is absent)
+#   lambda_rf:         0              — RF distillation disabled for the pure
+#                                        GeoVersa benchmark; model must stand
+#                                        on its own against the RF baseline
 #   lambda_cov:        0.025 × (1−r)  — variance-matching regulariser weight
 #   max_warmup_epochs: clamp(4+16r, 4, 20)  — more warmup when backbone load is high
 .auto_loss_weights_from_nugget <- function(r) {
   list(
     base_loss_weight  = round(0.10 * r,              4L),
     alpha_me          = round(0.75 * r,              4L),
-    lambda_rf         = round(1.0  - r,              4L),
+    lambda_rf         = 0.0,
     lambda_cov        = round(0.025 * (1.0 - r),     5L),
     max_warmup_epochs = as.integer(.auto_clamp(round(4 + 16 * r), 4L, 20L))
   )
@@ -282,11 +283,13 @@ estimate_initial_lr_polyak <- function(model, train_cache, bs_init = 32L,
     grad_sq_sum <- 0.0
     for (param in model$parameters) {           # no parens — property, not method
       g <- param$grad
-      if (!is.null(g)) {
+      g_numel <- if (is.null(g)) 0L else tryCatch(g$numel(), error = function(e) 0L)
+      if (g_numel > 0L) {
         # torch_sum(...)$item() works on any device (cpu/mps/cuda) without
         # needing an explicit .cpu() call — avoids "tensor does not have a device"
         # errors on MPS gradient tensors.
-        grad_sq_sum <- grad_sq_sum + torch_sum(g$detach() * g$detach())$item()
+        g_detached  <- g$detach()
+        grad_sq_sum <- grad_sq_sum + torch_sum(g_detached * g_detached)$item()
       }
     }
     tmp_opt$zero_grad()   # clear gradients so they don't bleed into training
@@ -521,8 +524,17 @@ auto_kriging_config_v5 <- function(vg, n_train, coord_scaler, Ctr,
   # ── Phase 0-B: Statistical capacity ──────────────────────────────────────
   cat("\n[Auto v5] ── Phase 0-B: Statistical capacity (√n scaling) ──\n")
 
-  d          <- .auto_d_from_n(n_train)
+  d <- .auto_d_from_n(n_train)
   patch_size <- as.integer(.auto_clamp(floor(sqrt(n_train)), 8L, 31L))
+  if (!is.null(train_cache) && !is.null(train_cache$P)) {
+    patch_shape <- tryCatch(train_cache$P$shape, error = function(e) NULL)
+    if (!is.null(patch_shape) && length(patch_shape) >= 4L &&
+        is.finite(patch_shape[3]) && patch_shape[3] > 0) {
+      patch_size <- as.integer(patch_shape[3])
+      cat(sprintf("[Auto v5]   patch_size = %d  [inferred from cached patches]\n",
+                  patch_size))
+    }
+  }
   drops      <- .auto_dropouts_from_n(n_train)
   coord_dim  <- .auto_coord_dim_from_variogram(vg)
   # coord MLP: hidden = max(2×coord_dim, 32) — minimum expressivity for a

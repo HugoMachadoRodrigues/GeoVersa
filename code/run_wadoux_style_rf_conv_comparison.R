@@ -205,8 +205,9 @@ get_conv_params_profile <- function(conv_env, profile = c("quick", "full", "n500
         # prevent the kriging layer from learning. Requires separate architectural
         # treatment (future work).
         #
-        # Key result: DesignBased RMSE=32.8 < RF Wadoux (33.4) — the unbiased
-        # estimator. SpatialKFold gap is expected and explained by Wadoux (2021).
+        # Historical note: earlier exploratory runs reported DesignBased
+        # RMSE near the Wadoux RF baseline. Treat the CSV outputs written by
+        # this runner as the source of truth for any current claim.
       )
     )
   } else {
@@ -237,7 +238,7 @@ compare_rf_conv_on_explicit_split <- function(train_core,
                                               context = NULL) {
   out <- list(pred_rf = NULL, pred_conv = NULL)
 
-  rf_model <- NULL   # kept in scope for CNN distillation injection below
+  rf_model <- NULL   # kept in scope for the benchmark baseline only
 
   if ("RF" %in% models) {
     form_rf <- as.formula(
@@ -313,16 +314,6 @@ compare_rf_conv_on_explicit_split <- function(train_core,
       K = neighbor_pool_k,
       patch_cache = patch_cache_combined
     )
-
-    # RF distillation injection: if RF was trained in this fold, attach its
-    # predictions on train and val sets to fd_conv so that Auto trainer can
-    # use them as a distillation target. Non-Auto trainers ignore fd$rf_pred.
-    if (!is.null(rf_model)) {
-      fd_conv$rf_pred <- list(
-        train = predict_rf_default_wadoux(rf_model, train_core),
-        val   = predict_rf_default_wadoux(rf_model, val_df)
-      )
-    }
 
     conv_out <- do.call(
       conv_env$train_convkrigingnet2d_one_fold,
