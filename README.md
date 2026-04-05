@@ -17,8 +17,6 @@
   <a href="https://www.pedometrics.org/"><img alt="Pedometrics" src="https://img.shields.io/badge/domain-Pedometrics%20%7C%20DSM-2e8b57"></a>
 </p>
 
-<p align="center"><sub>The DOI badge is active. CRAN badges switch from pending placeholders to package badges after publication.</sub></p>
-
 <p align="center">
   <a href="https://orcid.org/0000-0002-8070-8126"><img alt="ORCID" src="https://img.shields.io/badge/ORCID-0000--0002--8070--8126-A6CE39?style=flat&logo=orcid&logoColor=white"></a>
   <a href="https://scholar.google.com/citations?user=vu-Ka7wAAAAJ&sortby=pubdate"><img alt="Google Scholar" src="https://img.shields.io/badge/Google%20Scholar-Hugo%20Rodrigues-4285F4?style=flat&logo=googlescholar&logoColor=white"></a>
