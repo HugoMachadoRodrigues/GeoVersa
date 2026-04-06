@@ -1,297 +1,521 @@
-<p align="center">
-  <img src="logo/GeoVersa%20Logo.png" alt="GeoVersa logo" width="280">
-</p>
+<div align="center">
 
-<h1 align="center">GeoVersa</h1>
+<img src="logo/GeoVersa%20Logo.png" alt="GeoVersa logo" width="280">
 
-<p align="center"><em>Deep Learning + Geostatistics for Spatial Prediction</em></p>
+# GeoVersa
 
-<p align="center">
-  <a href="https://doi.org/10.5281/zenodo.15139517"><img alt="DOI" src="https://zenodo.org/badge/DOI/10.5281/zenodo.15139517.svg"></a>
-  <a href="https://cran.r-project.org/"><img alt="CRAN release" src="https://img.shields.io/badge/CRAN-not%20published-lightgrey?logo=r&logoColor=white"></a>
-  <a href="https://cran.r-project.org/"><img alt="CRAN downloads" src="https://img.shields.io/badge/CRAN-downloads%20n%2Fa-lightgrey?logo=r&logoColor=white"></a>
-  <a href="https://cran.r-project.org/"><img alt="R >= 4.2" src="https://img.shields.io/badge/R-%E2%89%A54.2-276DC3?logo=r&logoColor=white"></a>
-  <a href="https://torch.mlverse.org/"><img alt="torch" src="https://img.shields.io/badge/torch-lantern-EE4C2C?logo=pytorch&logoColor=white"></a>
-  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-yellow.svg"></a>
-</p>
+### *Deep Learning + Geostatistics for Spatial Prediction*
+
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.15139517.svg)](https://doi.org/10.5281/zenodo.15139517)
+[![CRAN](https://img.shields.io/badge/CRAN-not%20published-lightgrey?logo=r&logoColor=white)](https://cran.r-project.org/)
+[![R >= 4.2](https://img.shields.io/badge/R-%E2%89%A54.2-276DC3?logo=r&logoColor=white)](https://cran.r-project.org/)
+[![torch](https://img.shields.io/badge/torch-lantern-EE4C2C?logo=pytorch&logoColor=white)](https://torch.mlverse.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Pedometrics](https://img.shields.io/badge/domain-Pedometrics%20%7C%20DSM-2e8b57)](https://www.pedometrics.org/)
+[![ORCID](https://img.shields.io/badge/ORCID-0000--0002--8070--8126-A6CE39?style=flat&logo=orcid&logoColor=white)](https://orcid.org/0000-0002-8070-8126)
+
+[Overview](#overview) · [DeepSCORPAN](#from-scorpan-to-deepscorpan) · [Architecture](#active-architecture) · [Mathematics](#mathematical-formulation) · [Auto-Configuration](#automatic-configuration) · [Research-Family](#geoversa-research-family) · [Benchmark](#wadoux-reference-and-current-results) · [Usage](#how-to-run)
+
+</div>
+
+---
 
 ## Overview
 
-**GeoVersa** is the current research codebase for a deep geostatistical model that learns:
+**GeoVersa** is the research line behind a family of spatial prediction networks that combine deep representation learning with geostatistical residual correction.
 
-- a nonlinear trend from tabular covariates, raster patches, and coordinates;
-- a residual memory bank built from the current backbone predictions;
-- an anisotropic residual-kriging correction trained end to end with the backbone.
+The active, benchmarked path in this repository is the pure **ConvKrigingNet2D / GeoVersa** configuration:
 
-The active benchmark path in this repository is:
+- three encoders learn from tabular covariates, raster patches, and coordinates;
+- a residual memory bank stores the current backbone residual field;
+- a differentiable anisotropic kriging layer interpolates those residuals;
+- a learned global gate controls how strongly the correction enters the final prediction;
+- the training pipeline configures itself automatically from the fold, the variogram, and the available hardware.
 
-- model: `ConvKrigingNet2D`;
-- trainer: `train_convkrigingnet2d_auto_one_fold_v5()`;
-- auto-config source: `code/ConvKrigingNet2D_Auto_v5.R`;
-- evaluation target: Wadoux-style `DesignBased` validation;
-- correlation metric: `Pearson^2` by default;
-- pure GeoVersa mode: `RF distillation = 0`.
+The repository also preserves a broader GeoVersa research family of experimental architectures and benchmark histories. This `README` now does both:
 
-This `README` describes that active path, not older exploratory variants kept in `results/`.
+- it documents the **current validated benchmark path exactly as the code executes it**;
+- it keeps the **DeepSCORPAN / GeoVersa research narrative** and the references to your network families.
 
-## What The Code Is Doing Today
+---
 
-For each sample at location `s_i`, GeoVersa uses:
+## From SCORPAN to DeepSCORPAN
 
-- `x_i`: point-level tabular covariates;
-- `P_i`: a local raster patch around the point;
-- `s_i = (lon_i, lat_i)`: coordinates;
-- `y_i`: observed target.
+Digital Soil Mapping is grounded in the **SCORPAN** framework:
 
-The target is standardized before training:
-
-```text
-y_i^(s) = (T(y_i) - mu_y) / sigma_y
+```math
+S(\mathbf{s}) = f(S, C, O, R, P, A, N) + \varepsilon(\mathbf{s})
 ```
 
-where `T(.)` is the optional target transform.
+where `S, C, O, R, P, A, N` represent the classical soil-forming factors and `\varepsilon(\mathbf{s})` is the spatially structured residual.
 
-### Backbone
+Classical regression-kriging keeps these two parts separate:
 
-The model has three encoders and one fusion block:
-
-```text
-e_tab_i   = f_tab(x_i)
-e_patch_i = W_patch f_cnn(P_i)
-e_coord_i = W_coord f_coord(s_i)
-
-z_i = f_fuse([e_tab_i, e_patch_i, e_coord_i])
-yhat_base_i = h(z_i)
+```math
+\hat{S}(\mathbf{s}_0) =
+\hat{f}(\mathbf{x}_0) +
+\sum_{i=1}^{n} \lambda_i(\mathbf{s}_0)\,\hat{\varepsilon}(\mathbf{s}_i)
 ```
 
-Implemented components:
+GeoVersa reframes that idea as a **DeepSCORPAN** program: the trend model and the residual geostatistical correction are learned inside one trainable system.
 
-- tabular encoder: MLP;
-- patch encoder: 2D CNN plus linear projection;
-- coordinate encoder: MLP plus linear projection;
-- fusion block: `Linear -> GELU -> Dropout -> Linear`;
-- scalar head: maps fused latent state to the base prediction.
+For the active GeoVersa benchmark path, the final standardized prediction is:
+
+```math
+\hat{y}_i^{(s)} =
+\hat{y}_{i}^{\mathrm{base}} + \beta\,\delta_i
+```
+
+with:
+
+- `\hat{y}_{i}^{\mathrm{base}}`: deep trend prediction;
+- `\delta_i`: anisotropic residual interpolation from the memory bank;
+- `\beta \in (0,1)`: learned global kriging gate.
+
+This is the current concrete realization of the broader DeepSCORPAN idea in the repository.
+
+### SCORPAN Mapping in GeoVersa
+
+| SCORPAN factor | Current GeoVersa realization |
+|---|---|
+| `S, C, O, R, P, A` | Tabular encoder over point-level covariates |
+| `O, R` as local landscape texture | 2D CNN patch encoder |
+| `N` | Coordinate encoder |
+| `\varepsilon(\mathbf{s})` | Differentiable anisotropic residual-kriging layer |
+
+---
+
+## Active Architecture
+
+The benchmarked architecture has four coupled components:
+
+| Component | Input | Output | Role |
+|---|---|---|---|
+| Tabular encoder | point covariates `\mathbf{x}_i` | `\mathbf{e}_i^{\mathrm{tab}}` | nonlinear trend from SCORPAN-style attributes |
+| Patch encoder | raster patch `\mathbf{P}_i` | `\mathbf{e}_i^{\mathrm{patch}}` | local terrain and remote-sensing texture |
+| Coordinate encoder | location `\mathbf{s}_i` | `\mathbf{e}_i^{\mathrm{coord}}` | smooth spatial trend component |
+| Residual kriging layer | neighbor residual bank | `\delta_i` | anisotropic spatial correction |
+
+```mermaid
+flowchart LR
+    X["Tabular covariates x_i"] --> TAB["Tabular MLP"]
+    P["Raster patch P_i"] --> PATCH["Patch CNN + projection"]
+    C["Coordinates s_i"] --> COORD["Coordinate MLP + projection"]
+
+    TAB --> FUSE["Fusion block"]
+    PATCH --> FUSE
+    COORD --> FUSE
+
+    FUSE --> BASE["Scalar head: yhat_base"]
+    BASE --> BANK["Residual bank refresh"]
+    BANK --> KRIG["Anisotropic residual kriging"]
+    C --> KRIG
+
+    BASE --> OUT["Final predictor"]
+    KRIG --> OUT
+    OUT["yhat = yhat_base + beta delta"]
+```
+
+### Important implementation note
+
+The active kriging layer is **purely spatial in its weighting rule**. It stores latent vectors in the bank for compatibility with the broader GeoVersa research program, but the current benchmarked path does **not** use latent similarity inside the kriging weights. That distinction matters and is reflected below in the mathematics.
+
+---
+
+## Mathematical Formulation
+
+### Notation
+
+| Symbol | Meaning |
+|---|---|
+| `\mathbf{x}_i \in \mathbb{R}^p` | tabular covariates |
+| `\mathbf{P}_i \in \mathbb{R}^{C \times H \times W}` | raster patch |
+| `\mathbf{s}_i \in \mathbb{R}^2` | coordinates |
+| `y_i` | observed target |
+| `T(y_i)` | optional target transform |
+| `y_i^{(s)}` | standardized training target |
+
+The standardized target is:
+
+```math
+y_i^{(s)} = \frac{T(y_i) - \mu_y}{\sigma_y}
+```
+
+### Encoder Fusion
+
+Each modality is encoded independently and projected into a shared latent space:
+
+```math
+\begin{aligned}
+\mathbf{e}_i^{\mathrm{tab}}   &= f_{\mathrm{tab}}(\mathbf{x}_i), \\
+\mathbf{e}_i^{\mathrm{patch}} &= W_{\mathrm{patch}}\,f_{\mathrm{cnn}}(\mathbf{P}_i), \\
+\mathbf{e}_i^{\mathrm{coord}} &= W_{\mathrm{coord}}\,f_{\mathrm{coord}}(\mathbf{s}_i).
+\end{aligned}
+```
+
+These embeddings are fused into a joint representation:
+
+```math
+\mathbf{z}_i =
+f_{\mathrm{fuse}}
+\left[
+\mathbf{e}_i^{\mathrm{tab}},
+\mathbf{e}_i^{\mathrm{patch}},
+\mathbf{e}_i^{\mathrm{coord}}
+\right]
+```
+
+and mapped to the base trend:
+
+```math
+\hat{y}_i^{\mathrm{base}} = h(\mathbf{z}_i)
+```
 
 ### Residual Memory Bank
 
-The current backbone is applied to the training set and a residual bank is rebuilt periodically:
+At each bank refresh, the current backbone defines residuals over the training set:
 
-```text
-r_j = y_j^(s) - yhat_base_j
-B = {(z_j, s_j, r_j)} for j in training set
+```math
+r_j = y_j^{(s)} - \hat{y}_j^{\mathrm{base}}
 ```
 
-The active kriging layer stores latent vectors `z_j`, but the current weight computation uses only spatial distance. There is no latent-similarity term in the active anisotropic kriging weights.
+so the memory bank can be written as:
+
+```math
+\mathcal{B} = \left\{ \left(\mathbf{z}_j, \mathbf{s}_j, r_j\right) \right\}_{j=1}^{n_{\mathrm{train}}}
+```
 
 ### Anisotropic Residual Kriging
 
-For query point `i` and training neighbour `j`, the code computes rotated anisotropic coordinates:
+For query point `i` and neighbor `j`, GeoVersa rotates coordinate offsets by a learned anisotropy angle `\theta`:
 
-```text
-dx_ij = x_i - x_j
-dy_ij = y_i - y_j
-
-u_ij =  cos(theta) dx_ij + sin(theta) dy_ij
-v_ij = -sin(theta) dx_ij + cos(theta) dy_ij
-
-d_aniso_ij = sqrt((u_ij / ell_major)^2 + (v_ij / ell_minor)^2 + eps)
+```math
+\begin{aligned}
+\Delta x_{ij} &= x_i - x_j, \\
+\Delta y_{ij} &= y_i - y_j, \\
+u_{ij} &= \cos(\theta)\,\Delta x_{ij} + \sin(\theta)\,\Delta y_{ij}, \\
+v_{ij} &= -\sin(\theta)\,\Delta x_{ij} + \cos(\theta)\,\Delta y_{ij}.
+\end{aligned}
 ```
 
-The residual interpolation weights are:
+The anisotropic distance is:
 
-```text
-w_ij = exp(-3 d_aniso_ij) / sum_k exp(-3 d_aniso_ik)
-delta_i = sum_j w_ij r_j
+```math
+d_{ij}^{\mathrm{aniso}} =
+\sqrt{
+\left(\frac{u_{ij}}{\ell_{\mathrm{maj}}}\right)^2 +
+\left(\frac{v_{ij}}{\ell_{\mathrm{min}}}\right)^2 + \varepsilon
+}
 ```
 
-The final standardized prediction is:
+The active weighting rule is the exponential covariance softmax used in `AnisotropicExpCovKrigingLayer_Auto`:
 
-```text
-beta = sigmoid(logit_beta)
-yhat_i^(s) = yhat_base_i + beta delta_i
+```math
+w_{ij} =
+\frac{\exp\!\left(-3\,d_{ij}^{\mathrm{aniso}}\right)}
+{\sum_{k \in \mathcal{N}(i)} \exp\!\left(-3\,d_{ik}^{\mathrm{aniso}}\right)}
 ```
 
-This is the exact active formulation in `AnisotropicExpCovKrigingLayer_Auto`: pure exponential anisotropic covariance, normalized with `softmax(-3 * distance)`.
+and the residual correction is:
 
-## Training Objective
-
-The training procedure has two stages.
-
-### Warmup
-
-Only the backbone is trained:
-
-```text
-L_warmup = Huber(y^(s), yhat_base)
+```math
+\delta_i = \sum_{j \in \mathcal{N}(i)} w_{ij}\,r_j
 ```
 
-### Full Training
+This is intentionally different from earlier latent-attention variants explored in the GeoVersa research line. The benchmarked path described here uses **pure anisotropic spatial weighting**.
+
+### Final Predictor
+
+The global gate is learned end to end:
+
+```math
+\beta = \sigma(\mathrm{logit}_{\beta})
+```
+
+and the final standardized prediction is:
+
+```math
+\hat{y}_i^{(s)} = \hat{y}_i^{\mathrm{base}} + \beta\,\delta_i
+```
+
+### Training Objective
+
+During warmup, only the backbone is optimized:
+
+```math
+\mathcal{L}_{\mathrm{warmup}} =
+\mathrm{Huber}\!\left(y^{(s)}, \hat{y}^{\mathrm{base}}\right)
+```
 
 After warmup, the full model is trained with:
 
-```text
-L_full =
-    Huber(y^(s), yhat)
-  + lambda_base * Huber(y^(s), yhat_base)
-  + alpha_ME * (mean(yhat_base) - mean(y^(s)))^2
-  + lambda_cov * (sd(yhat_base) / (sd(y^(s)) + eps) - 1)^2
+```math
+\begin{aligned}
+\mathcal{L}_{\mathrm{full}}
+&=
+\mathrm{Huber}\!\left(y^{(s)}, \hat{y}\right)
+ + \lambda_{\mathrm{base}}\,
+\mathrm{Huber}\!\left(y^{(s)}, \hat{y}^{\mathrm{base}}\right) \\
+&\quad
+ + \alpha_{\mathrm{ME}}
+\left(
+\mathrm{mean}\!\left(\hat{y}^{\mathrm{base}}\right) -
+\mathrm{mean}\!\left(y^{(s)}\right)
+\right)^2 \\
+&\quad
+ + \lambda_{\mathrm{cov}}
+\left(
+\frac{\mathrm{sd}\!\left(\hat{y}^{\mathrm{base}}\right)}
+{\mathrm{sd}\!\left(y^{(s)}\right) + \varepsilon}
+ - 1
+\right)^2
+\end{aligned}
 ```
 
-Current benchmark constraints:
+For the pure GeoVersa benchmark:
 
-- `lambda_RF = 0`;
-- the residual bank is refreshed during training from the current backbone state;
-- validation loss drives LR reduction and early stopping;
-- `Pearson^2` is the default `r2` metric in the benchmark outputs.
+- `\lambda_{\mathrm{RF}} = 0`;
+- RF distillation is disabled;
+- `r2` is reported as **Pearson squared** in the current benchmark path.
+
+---
 
 ## Automatic Configuration
 
-The active auto-config logic in `code/ConvKrigingNet2D_Auto_v5.R` derives the main parameters from the training fold, the fitted variogram, and the hardware.
+The active auto-config logic lives in `code/ConvKrigingNet2D_Auto_v5.R` and derives the model from the fold geometry, the fitted variogram, and device constraints.
 
-### Spatial Initialization
+### Variogram-Derived Spatial Initialization
 
-From the fitted empirical variogram, the code initializes:
+From the empirical variogram, the code initializes:
 
-- `ell_major`, `ell_minor`, `theta`;
-- nugget ratio `r`;
-- neighbour count `K`;
-- kriging gate prior `beta_init`.
+- `\ell_{\mathrm{maj}}`, `\ell_{\mathrm{min}}`, and `\theta`;
+- nugget-to-sill ratio `r`;
+- neighborhood size `K`;
+- the initial kriging gate prior.
 
-Core rules:
+The active rules are:
 
-```text
-K = clamp(round(n_train * pi * range_major^2 / area), 6, 30)
-logit_beta0 = 2 - 6r
-beta_init = logit_beta0
+```math
+\begin{aligned}
+K &= \mathrm{clamp}
+\left(
+\mathrm{round}
+\left(
+\frac{n_{\mathrm{train}} \pi \,\mathrm{range}_{\mathrm{major}}^2}
+{\mathrm{area}}
+\right),
+6, 30
+\right), \\
+\mathrm{logit}_{\beta,0} &= 2 - 6r.
+\end{aligned}
 ```
 
 ### Capacity Rules
 
-The current benchmark path uses:
+The latent widths and patch geometry follow:
 
-```text
-d = clamp(64 * ceil(sqrt(n_train) / 8), 128, 512)
-patch_size = clamp(floor(sqrt(n_train)), 8, 31)
-patch_dim = clamp(ceil(sqrt(C * H * W)), d / 4, d)
-coord_dim = clamp(32 + 24 * (1 - rho_aniso) + 8 * (1 - r), 32, 64)
+```math
+\begin{aligned}
+d &=
+\mathrm{clamp}
+\left(
+64 \left\lceil \frac{\sqrt{n_{\mathrm{train}}}}{8} \right\rceil,
+128, 512
+\right), \\
+\mathrm{patch\_size} &=
+\mathrm{clamp}
+\left(
+\left\lfloor \sqrt{n_{\mathrm{train}}} \right\rfloor,
+8, 31
+\right), \\
+\mathrm{patch\_dim} &=
+\mathrm{clamp}
+\left(
+\left\lceil \sqrt{C H W} \right\rceil,
+\frac{d}{4}, d
+\right), \\
+\mathrm{coord\_dim} &=
+\mathrm{clamp}
+\left(
+32 + 24(1 - \rho_{\mathrm{aniso}}) + 8(1-r),
+32, 64
+\right),
+\end{aligned}
 ```
 
-where `rho_aniso = ell_minor / ell_major`.
+where:
 
-If cached patches are already available, `patch_size` is inferred from the actual cached tensor shape instead of being recomputed heuristically.
+```math
+\rho_{\mathrm{aniso}} = \frac{\ell_{\mathrm{min}}}{\ell_{\mathrm{maj}}}
+```
 
-### Regularization And Loss Weights
+If patches are already cached, the actual cached tensor size overrides the heuristic `patch_size`.
+
+### Loss Weights And Warmup
 
 The current v5 rules are:
 
-```text
-lambda_base = max(0.05, 0.10 * r)
-alpha_ME    = 0.75 * r
-lambda_cov  = 0.025 * (1 - r)
-max_warmup  = clamp(round(4 + 16r), 4, 20)
+```math
+\begin{aligned}
+\lambda_{\mathrm{base}} &= \max(0.05,\; 0.10r), \\
+\alpha_{\mathrm{ME}} &= 0.75r, \\
+\lambda_{\mathrm{cov}} &= 0.025(1-r), \\
+\mathrm{max\_warmup} &= \mathrm{clamp}\!\left(\mathrm{round}(4 + 16r), 4, 20\right).
+\end{aligned}
 ```
 
-This `lambda_base` floor at `0.05` is active because the pure GeoVersa benchmark no longer uses RF distillation, so the backbone needs a minimum direct supervised signal even in strongly spatial folds.
+The `0.05` floor on `\lambda_{\mathrm{base}}` is active because the pure benchmark no longer uses RF distillation. Without that floor, the backbone under-learns in strongly spatial folds.
 
 ### Optimization Rules
 
-The initial learning rate is estimated with a Polyak-style probe on a preliminary model:
+The initial learning rate is estimated with a Polyak-style probe:
 
-```text
-alpha_init = clamp(0.01 * L / ||grad L||^2, 1e-5, 1e-3)
+```math
+\alpha_{\mathrm{init}} =
+\mathrm{clamp}
+\left(
+0.01 \frac{\mathcal{L}}{\lVert \nabla \mathcal{L} \rVert_2^2},
+10^{-5},
+10^{-3}
+\right)
 ```
 
-The weight decay rule is:
+Weight decay scales with model size:
 
-```text
-wd = clamp(1e-3 / sqrt((n_params / 1e6) / 5), 1e-4, 1e-2)
+```math
+\mathrm{wd} =
+\mathrm{clamp}
+\left(
+\frac{10^{-3}}{\sqrt{(n_{\mathrm{params}}/10^6)/5}},
+10^{-4},
+10^{-2}
+\right)
 ```
 
 Batch size is chosen from the smaller of:
 
-- a statistical target of about `n_train / 8`;
-- a device-aware memory estimate based on tensor footprint.
+- a statistical target near `n_{\mathrm{train}} / 8`;
+- a device-aware memory estimate.
 
 After warmup, the code adapts:
 
 - `patience`;
 - `lr_patience`;
 - `lr_decay`;
-- `bank_refresh_every`;
+- `bank_refresh_every`.
 
-using the observed warmup convergence speed and the variability of warmup loss improvements.
+---
 
-## Wadoux Reference Organization
+## GeoVersa Research Family
 
-The repository now separates two different things that should not be mixed:
+The repository is not only the current ConvKrigingNet2D benchmark. It also records a broader family of GeoVersa research directions through archived searches, confirmations, and benchmark folders under `results/`.
+
+### Benchmarked Core
+
+- `PointPatch`
+- `ConvKrigingNet2D`
+- `GeoVersa`
+
+### Functional And Basis-Oriented Families
+
+- `GeoBasisMLP`
+- `GeoImplicitNet`
+- `GeoSplineNet`
+- `GeoMonotoneSpline`
+- `GeoNAMKrigingNet`
+- `GeoMLSKrigingNet`
+
+### Attention, Memory, And Set-Based Families
+
+- `GeoHashKrigingNet`
+- `GeoKernelAttentionKrigingNet`
+- `GeoPrototypeKrigingNet`
+- `GeoSetKrigingNet`
+- `GeoSetLocalKrigingNet`
+- `GeoNeuralProcessKrigingNet`
+- `GeoTransformerKrigingNet`
+
+### Structured Expert And Hybrid Families
+
+- `GeoFlowKrigingNet`
+- `GeoGraphKrigingNet`
+- `GeoHyperKrigingNet`
+- `GeoKANKrigingNet`
+- `GeoMOEKrigingNet`
+- `GeoSoftTreeKrigingNet`
+- `PedoformerKrigingNet`
+
+### Explicit Spatial-Structure Families
+
+- `GeoVariogramKrigingNet`
+- `GeoWaveletKrigingNet`
+- `GeoScoreKrigingNet`
+
+These families should be understood as part of the GeoVersa research program. The current benchmarked and documented production path, however, is the pure `ConvKrigingNet2D / GeoVersa` route described in this `README`.
+
+---
+
+## Wadoux Reference And Current Results
+
+The repository now keeps two separate comparison tracks:
 
 ### 1. GeoVersa Benchmark
 
 `code/run_wadoux_style_rf_conv_comparison.R`
 
-Use this to run GeoVersa itself, optionally alongside local baselines, on Wadoux-style validation splits.
+This runs GeoVersa itself on Wadoux-style validation splits.
 
 ### 2. Wadoux RF Reference Reproduction
 
 `code/run_wadoux_rf_reference.R`
 
-Use this to reproduce the Random Forest reference under the Wadoux validation framework.
+This reproduces the Random Forest reference under the same validation framework.
 
-Important details tracked in `docs/wadoux2021-reference/`:
+Tracked upstream reference:
 
-- upstream repository: `AlexandreWadoux/SpatialValidation`;
-- tracked mirror commit: `ba3ad39bfa8474a09e8ac4cd82a0161649648794`;
-- `Pearson^2` is the default in this repository because it matches the paper text;
-- the upstream code path can still be audited separately when needed.
+- repository: `AlexandreWadoux/SpatialValidation`;
+- mirrored commit: `ba3ad39bfa8474a09e8ac4cd82a0161649648794`;
+- local documentation: `docs/wadoux2021-reference/`.
 
-The repository also tracks whether the original Wadoux `.Rdata` outputs are present. As currently documented in `docs/wadoux2021-reference/official_rdata_manifest.csv`, the mirrored upstream checkout does not yet contain:
+### Current confirmed comparison
 
-- `res_random_500.Rdata`;
-- `res_regular_500.Rdata`;
-- `res_clustered_random_500.Rdata`.
-
-## Current Confirmed Benchmark Status
-
-The most relevant confirmed comparison today is:
+Setup:
 
 - scenario: `random`;
 - protocol: `DesignBased`;
 - sample size: `500`;
 - repetitions: `10`;
-- `r2`: `Pearson^2`.
-
-### Reference RF Reproduction
-
-Source: `results/wadoux2021_rf_reference_random_designbased_10iter_pearson_20260405/wadoux2021_rf_random_absolute_summary.csv`
+- metric convention: `Pearson^2`.
 
 | Model | ME | RMSE | Pearson^2 | MEC |
 |---|---:|---:|---:|---:|
 | Wadoux RF reference | 1.340 | 32.444 | 0.882 | 0.879 |
+| GeoVersa, auto, `lambda_base = 0.05` floor | -0.203 | 33.814 | 0.866 | 0.862 |
+| GeoVersa, same setup, `lambda_base = 0.20` | -0.257 | 33.852 | 0.865 | 0.862 |
 
-### GeoVersa Confirmation
+Current reading:
 
-Source: `results/geoversa_blw_confirm10_20260406/`
+- the `0.05` floor is confirmed as slightly better than `0.20`;
+- GeoVersa is close to the reproduced RF reference;
+- GeoVersa still does not yet beat the reproduced RF on `DesignBased`.
 
-| GeoVersa setting | ME | RMSE | Pearson^2 | MEC |
-|---|---:|---:|---:|---:|
-| Auto-config with `lambda_base = 0.05` floor | -0.203 | 33.814 | 0.866 | 0.862 |
-| Same setup with `lambda_base = 0.20` | -0.257 | 33.852 | 0.865 | 0.862 |
+The current best confirmed gap relative to the RF reference is:
 
-Current takeaway:
+```math
+\Delta \mathrm{RMSE} = +1.370,
+\qquad
+\Delta \mathrm{Pearson}^2 = -0.016,
+\qquad
+\Delta \mathrm{MEC} = -0.017
+```
 
-- the `0.05` floor is slightly better than `0.20`;
-- GeoVersa is now close to the Wadoux RF reference on this benchmark;
-- GeoVersa still does not beat the reproduced RF reference on `DesignBased`.
+The original saved Wadoux `.Rdata` outputs are still not present in the mirrored upstream checkout. Their availability is tracked in `docs/wadoux2021-reference/official_rdata_manifest.csv`.
 
-Gap of the current best confirmed GeoVersa run versus RF reference:
+---
 
-- `delta RMSE = +1.370`;
-- `delta Pearson^2 = -0.016`;
-- `delta MEC = -0.017`.
+## How To Run
 
-## How To Run The Current Benchmark
-
-### GeoVersa
+### GeoVersa benchmark
 
 ```r
 Sys.setenv(
@@ -309,7 +533,7 @@ Sys.setenv(
 source("code/run_wadoux_style_rf_conv_comparison.R")
 ```
 
-Useful ablation overrides exposed by the runner:
+Useful override knobs exposed by the runner:
 
 - `WADOUX_BASE_LOSS_WEIGHT`
 - `WADOUX_K_NEIGHBORS`
@@ -323,7 +547,7 @@ Useful ablation overrides exposed by the runner:
 - `WADOUX_LAMBDA_COV`
 - `WADOUX_COORD_DROPOUT`
 
-### Wadoux RF Reference
+### Wadoux RF reference reproduction
 
 ```r
 Sys.setenv(
@@ -338,15 +562,13 @@ Sys.setenv(
 source("code/run_wadoux_rf_reference.R")
 ```
 
-### Import Official Wadoux `.Rdata` Outputs
-
-If the upstream project later provides the saved `.Rdata` outputs, import and document them with:
+### Import official Wadoux `.Rdata` outputs
 
 ```r
 source("code/import_wadoux_official_rdata.R")
 ```
 
-This writes the manifest and any imported summaries to `docs/wadoux2021-reference/`.
+---
 
 ## Repository Layout
 
@@ -368,7 +590,10 @@ logo/
 results/
   geoversa_blw_confirm10_20260406/
   wadoux2021_rf_reference_random_designbased_10iter_pearson_20260405/
+  many archived GeoVersa family searches and confirmations
 ```
+
+---
 
 ## Citation
 
@@ -382,11 +607,8 @@ results/
 }
 ```
 
-## Reference
+## References
 
-```text
-Wadoux, A. M. J.-C., Heuvelink, G. B. M., de Bruin, S., and Brus, D. J. (2021).
-Spatial cross-validation is not the right way to evaluate map accuracy.
-Ecological Modelling, 457, 109692.
-https://doi.org/10.1016/j.ecolmodel.2021.109692
-```
+- McBratney, A. B., Mendonça Santos, M. L., and Minasny, B. (2003). On digital soil mapping. *Geoderma*, 117(1-2), 3-52.
+- Jenny, H. (1941). *Factors of Soil Formation: A System of Quantitative Pedology*.
+- Wadoux, A. M. J.-C., Heuvelink, G. B. M., de Bruin, S., and Brus, D. J. (2021). Spatial cross-validation is not the right way to evaluate map accuracy. *Ecological Modelling*, 457, 109692. [https://doi.org/10.1016/j.ecolmodel.2021.109692](https://doi.org/10.1016/j.ecolmodel.2021.109692)
