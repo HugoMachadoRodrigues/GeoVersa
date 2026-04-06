@@ -194,7 +194,7 @@ p_rmse_main <- ggplot(combined,
 save_fig(p_rmse_main, "fig1_rmse_main", w = 10, h = 6)
 
 # =============================================================================
-# FIGURE 2 — r2 (Spearman squared) across protocols
+# FIGURE 2 — r2 (Pearson squared) across protocols
 # =============================================================================
 p_r2 <- ggplot(combined,
   aes(x = protocol_label, y = r2_mean,
@@ -218,7 +218,7 @@ p_r2 <- ggplot(combined,
   scale_y_continuous(
     limits = c(0.60, 0.95),
     breaks = seq(0.60, 0.95, by = 0.05),
-    name = expression(r^2~"(Spearman)")
+    name = expression(r^2~"(Pearson)")
   ) +
   labs(
     x = NULL,

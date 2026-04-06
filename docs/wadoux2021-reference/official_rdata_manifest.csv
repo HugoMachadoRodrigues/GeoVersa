@@ -1,0 +1,4 @@
+"scenario","expected_rdata","full_path","exists","upstream_repo","upstream_commit"
+"random","res_random_500.Rdata","/Users/rodrigues.h/Library/CloudStorage/OneDrive-Personal/Deep Kriging/external/SpatialValidation/code/res_random_500.Rdata",FALSE,"https://github.com/AlexandreWadoux/SpatialValidation","ba3ad39bfa8474a09e8ac4cd82a0161649648794"
+"regular_grid","res_regular_500.Rdata","/Users/rodrigues.h/Library/CloudStorage/OneDrive-Personal/Deep Kriging/external/SpatialValidation/code/res_regular_500.Rdata",FALSE,"https://github.com/AlexandreWadoux/SpatialValidation","ba3ad39bfa8474a09e8ac4cd82a0161649648794"
+"clustered_random","res_clustered_random_500.Rdata","/Users/rodrigues.h/Library/CloudStorage/OneDrive-Personal/Deep Kriging/external/SpatialValidation/code/res_clustered_random_500.Rdata",FALSE,"https://github.com/AlexandreWadoux/SpatialValidation","ba3ad39bfa8474a09e8ac4cd82a0161649648794"

@@ -57,10 +57,11 @@ load_wadoux_common_data <- function(include_polygon = FALSE) {
   out
 }
 
-wadoux_eval <- function(obs, pred) {
+wadoux_eval <- function(obs, pred, corr_method = getOption("wadoux_corr_method", "pearson")) {
+  corr_method <- match.arg(corr_method, c("pearson", "spearman"))
   me <- round(mean(pred - obs, na.rm = TRUE), digits = 2)
   rmse <- round(sqrt(mean((pred - obs)^2, na.rm = TRUE)), digits = 2)
-  r2 <- round((cor(pred, obs, method = "spearman", use = "pairwise.complete.obs")^2), digits = 2)
+  r2 <- round((cor(pred, obs, method = corr_method, use = "pairwise.complete.obs")^2), digits = 2)
   sse <- sum((pred - obs)^2, na.rm = TRUE)
   sst <- sum((obs - mean(obs, na.rm = TRUE))^2, na.rm = TRUE)
   mec <- round((1 - sse / sst), digits = 2)
@@ -276,26 +277,41 @@ make_metric_table_wadoux <- function(population_metrics,
                                      design_metrics,
                                      random_metrics,
                                      spatial_metrics,
-                                     bloo_metrics) {
+                                     bloo_metrics,
+                                     protocols = c("Population", "DesignBased", "RandomKFold", "SpatialKFold", "BLOOCV")) {
   metric_names <- c("ME", "RMSE", "r2", "MEC")
-  data.frame(
-    metric = metric_names,
-    Population = unname(unlist(population_metrics[1, metric_names])),
-    DesignBased = unname(unlist(design_metrics[1, metric_names])),
-    RandomKFold = unname(unlist(random_metrics[1, metric_names])),
-    SpatialKFold = unname(unlist(spatial_metrics[1, metric_names])),
-    BLOOCV = unname(unlist(bloo_metrics[1, metric_names]))
+  out <- data.frame(metric = metric_names, stringsAsFactors = FALSE)
+  metrics_by_protocol <- list(
+    Population = population_metrics,
+    DesignBased = design_metrics,
+    RandomKFold = random_metrics,
+    SpatialKFold = spatial_metrics,
+    BLOOCV = bloo_metrics
   )
+
+  for (protocol in protocols) {
+    metrics_df <- metrics_by_protocol[[protocol]]
+    if (is.null(metrics_df)) {
+      out[[protocol]] <- rep(NA_real_, length(metric_names))
+    } else {
+      out[[protocol]] <- unname(unlist(metrics_df[1, metric_names]))
+    }
+  }
+
+  out
 }
 
 make_delta_table_wadoux <- function(metric_table) {
-  data.frame(
-    metric = metric_table$metric,
-    DesignBased = metric_table$DesignBased - metric_table$Population,
-    RandomKFold = metric_table$RandomKFold - metric_table$Population,
-    SpatialKFold = metric_table$SpatialKFold - metric_table$Population,
-    BLOOCV = metric_table$BLOOCV - metric_table$Population
-  )
+  if (!"Population" %in% names(metric_table)) {
+    return(data.frame(metric = metric_table$metric, stringsAsFactors = FALSE))
+  }
+
+  protocol_cols <- setdiff(names(metric_table), c("metric", "Population"))
+  out <- data.frame(metric = metric_table$metric, stringsAsFactors = FALSE)
+  for (protocol in protocol_cols) {
+    out[[protocol]] <- metric_table[[protocol]] - metric_table$Population
+  }
+  out
 }
 
 save_checkpoint_wadoux <- function(iteration, absolute_rows, delta_rows, results_dir, prefix) {
@@ -321,26 +337,37 @@ save_checkpoint_wadoux <- function(iteration, absolute_rows, delta_rows, results
 finalize_outputs_wadoux <- function(absolute_rows, delta_rows, results_dir, prefix) {
   absolute_df <- bind_rows(absolute_rows)
   delta_df <- bind_rows(delta_rows)
+  absolute_protocols <- setdiff(names(absolute_df), c("iteration", "metric"))
+  delta_protocols <- setdiff(names(delta_df), c("iteration", "metric"))
 
   absolute_long <- bind_rows(lapply(seq_len(nrow(absolute_df)), function(i) {
     row <- absolute_df[i, ]
     data.frame(
       iteration = row$iteration,
       metric = row$metric,
-      protocol = c("Population", "DesignBased", "RandomKFold", "SpatialKFold", "BLOOCV"),
-      value = c(row$Population, row$DesignBased, row$RandomKFold, row$SpatialKFold, row$BLOOCV)
+      protocol = absolute_protocols,
+      value = unname(unlist(row[absolute_protocols]))
     )
   }))
 
-  delta_long <- bind_rows(lapply(seq_len(nrow(delta_df)), function(i) {
-    row <- delta_df[i, ]
-    data.frame(
-      iteration = row$iteration,
-      metric = row$metric,
-      protocol = c("DesignBased", "RandomKFold", "SpatialKFold", "BLOOCV"),
-      delta = c(row$DesignBased, row$RandomKFold, row$SpatialKFold, row$BLOOCV)
+  if (length(delta_protocols) > 0) {
+    delta_long <- bind_rows(lapply(seq_len(nrow(delta_df)), function(i) {
+      row <- delta_df[i, ]
+      data.frame(
+        iteration = row$iteration,
+        metric = row$metric,
+        protocol = delta_protocols,
+        delta = unname(unlist(row[delta_protocols]))
+      )
+    }))
+  } else {
+    delta_long <- data.frame(
+      iteration = integer(),
+      metric = character(),
+      protocol = character(),
+      delta = numeric()
     )
-  }))
+  }
 
   absolute_summary <- absolute_long %>%
     group_by(metric, protocol) %>%
@@ -352,17 +379,29 @@ finalize_outputs_wadoux <- function(absolute_rows, delta_rows, results_dir, pref
     ) %>%
     arrange(metric, protocol)
 
-  delta_summary <- delta_long %>%
-    group_by(metric, protocol) %>%
-    summarise(
-      mean_delta = mean(delta, na.rm = TRUE),
-      sd_delta = sd(delta, na.rm = TRUE),
-      median_delta = median(delta, na.rm = TRUE),
-      q05_delta = unname(quantile(delta, probs = 0.05, na.rm = TRUE)),
-      q95_delta = unname(quantile(delta, probs = 0.95, na.rm = TRUE)),
-      .groups = "drop"
-    ) %>%
-    arrange(metric, protocol)
+  if (nrow(delta_long) > 0) {
+    delta_summary <- delta_long %>%
+      group_by(metric, protocol) %>%
+      summarise(
+        mean_delta = mean(delta, na.rm = TRUE),
+        sd_delta = sd(delta, na.rm = TRUE),
+        median_delta = median(delta, na.rm = TRUE),
+        q05_delta = unname(quantile(delta, probs = 0.05, na.rm = TRUE)),
+        q95_delta = unname(quantile(delta, probs = 0.95, na.rm = TRUE)),
+        .groups = "drop"
+      ) %>%
+      arrange(metric, protocol)
+  } else {
+    delta_summary <- data.frame(
+      metric = character(),
+      protocol = character(),
+      mean_delta = numeric(),
+      sd_delta = numeric(),
+      median_delta = numeric(),
+      q05_delta = numeric(),
+      q95_delta = numeric()
+    )
+  }
 
   write.csv(
     absolute_long,
@@ -439,6 +478,7 @@ run_wadoux_rf_reproduction <- function(common_data,
                                        prefix,
                                        scenario_name,
                                        config_extra = list(),
+                                       protocols = c("Population", "DesignBased", "RandomKFold", "SpatialKFold", "BLOOCV"),
                                        sample_size = 500L,
                                        n_iter = 500L,
                                        val_dist_km = 350,
@@ -455,6 +495,7 @@ run_wadoux_rf_reproduction <- function(common_data,
   config <- c(
     list(
       scenario = scenario_name,
+      protocols = paste(protocols, collapse = ","),
       sample_size = sample_size,
       n_iter = n_iter,
       val_dist_km = val_dist_km,
@@ -484,25 +525,36 @@ run_wadoux_rf_reproduction <- function(common_data,
     )
     valuetable <- na.omit(as.data.frame(valuetable))
 
-    population_metrics <- run_population_protocol_wadoux(valuetable, common_data$s_df, form_rf)
-    design_metrics <- run_design_based_protocol_wadoux(valuetable, common_data$s_df, form_rf, sample_size)
-    random_metrics <- run_random_kfold_protocol_wadoux(valuetable, form_rf, k = random_k)
-    spatial_metrics <- run_spatial_kfold_protocol_wadoux(valuetable, form_rf, val_dist_km = val_dist_km)
-    bloo_metrics <- run_bloocv_protocol_wadoux(
-      valuetable = valuetable,
-      form_rf = form_rf,
-      predictor_names = predList_modelfull_wadoux,
-      val_dist_km = val_dist_km,
-      nb_groups = bloo_groups,
-      nb_test_pixels = bloo_test_pixels
-    )
+    population_metrics <- if ("Population" %in% protocols) {
+      run_population_protocol_wadoux(valuetable, common_data$s_df, form_rf)
+    } else NULL
+    design_metrics <- if ("DesignBased" %in% protocols) {
+      run_design_based_protocol_wadoux(valuetable, common_data$s_df, form_rf, sample_size)
+    } else NULL
+    random_metrics <- if ("RandomKFold" %in% protocols) {
+      run_random_kfold_protocol_wadoux(valuetable, form_rf, k = random_k)
+    } else NULL
+    spatial_metrics <- if ("SpatialKFold" %in% protocols) {
+      run_spatial_kfold_protocol_wadoux(valuetable, form_rf, val_dist_km = val_dist_km)
+    } else NULL
+    bloo_metrics <- if ("BLOOCV" %in% protocols) {
+      run_bloocv_protocol_wadoux(
+        valuetable = valuetable,
+        form_rf = form_rf,
+        predictor_names = predList_modelfull_wadoux,
+        val_dist_km = val_dist_km,
+        nb_groups = bloo_groups,
+        nb_test_pixels = bloo_test_pixels
+      )
+    } else NULL
 
     metric_table <- make_metric_table_wadoux(
       population_metrics = population_metrics,
       design_metrics = design_metrics,
       random_metrics = random_metrics,
       spatial_metrics = spatial_metrics,
-      bloo_metrics = bloo_metrics
+      bloo_metrics = bloo_metrics,
+      protocols = protocols
     )
     delta_table <- make_delta_table_wadoux(metric_table)
 

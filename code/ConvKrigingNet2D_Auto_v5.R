@@ -171,7 +171,12 @@
 # Every loss weight is a closed-form function of the nugget-to-sill ratio r.
 # Physical justifications (see ConvKrigingNet2D_Auto.R header §3 for full proofs):
 #
-#   base_loss_weight:  0.10 × r       — direct backbone supervision when δ→0
+#   base_loss_weight:  max(0.05, 0.10 × r)
+#                                      — direct backbone supervision must not
+#                                        collapse when nugget is low; after
+#                                        removing RF distillation, the backbone
+#                                        needs a minimum standalone learning
+#                                        signal even in strongly spatial fields
 #   alpha_me:          0.75 × r       — anti co-training-collapse penalty
 #   lambda_rf:         0              — RF distillation disabled for the pure
 #                                        GeoVersa benchmark; model must stand
@@ -180,7 +185,7 @@
 #   max_warmup_epochs: clamp(4+16r, 4, 20)  — more warmup when backbone load is high
 .auto_loss_weights_from_nugget <- function(r) {
   list(
-    base_loss_weight  = round(0.10 * r,              4L),
+    base_loss_weight  = round(max(0.05, 0.10 * r),  4L),
     alpha_me          = round(0.75 * r,              4L),
     lambda_rf         = 0.0,
     lambda_cov        = round(0.025 * (1.0 - r),     5L),

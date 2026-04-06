@@ -13,7 +13,7 @@ source("./code/wadoux2021_rf_reproduction_helpers.R")
 # Goals:
 #   - same sampled calibration sets
 #   - same outer folds / test points
-#   - same final metrics (Wadoux metrics: ME, RMSE, Spearman^2, MEC)
+#   - same final metrics (Wadoux metrics: ME, RMSE, Pearson^2, MEC)
 #   - same inner train/validation split inside each outer training set
 #
 # This script is the comparison benchmark. Exact RF-only reproduction of Wadoux
@@ -143,9 +143,17 @@ make_inner_val_split_wadoux <- function(train_df, val_frac = 0.2, seed = NULL) {
   )
 }
 
-get_conv_params_profile <- function(conv_env, profile = c("quick", "full", "n500"), train_seed = 123L, device = "cpu") {
+get_conv_params_profile <- function(conv_env, profile = c("quick", "full", "n500", "auto"), train_seed = 123L, device = "cpu") {
   profile <- match.arg(profile)
-  if (profile == "quick") {
+  if (profile == "auto") {
+    params <- list(
+      kriging_mode = "anisotropic",
+      train_seed = train_seed,
+      deterministic_batches = TRUE,
+      device = device,
+      epochs = 80L
+    )
+  } else if (profile == "quick") {
     params <- modifyList(
       conv_env$convkriging2d_quick_params,
       list(
@@ -729,11 +737,41 @@ if ("ConvKrigingNet2D" %in% models) {
     conv_params$base_loss_weight <- as.numeric(ablation_blw)
     cat(sprintf("[Ablation] base_loss_weight overridden → %.4f\n", conv_params$base_loss_weight))
   }
+  # Ablation override: WADOUX_ALPHA_ME
+  ablation_alpha_me <- Sys.getenv("WADOUX_ALPHA_ME", unset = "")
+  if (nchar(ablation_alpha_me) > 0) {
+    conv_params$alpha_me <- as.numeric(ablation_alpha_me)
+    cat(sprintf("[Ablation] alpha_me overridden → %.4f\n", conv_params$alpha_me))
+  }
+  # Ablation override: WADOUX_LAMBDA_COV
+  ablation_lambda_cov <- Sys.getenv("WADOUX_LAMBDA_COV", unset = "")
+  if (nchar(ablation_lambda_cov) > 0) {
+    conv_params$lambda_cov <- as.numeric(ablation_lambda_cov)
+    cat(sprintf("[Ablation] lambda_cov overridden → %.5f\n", conv_params$lambda_cov))
+  }
   # Ablation override: WADOUX_LR
   ablation_lr <- Sys.getenv("WADOUX_LR", unset = "")
   if (nchar(ablation_lr) > 0) {
     conv_params$lr <- as.numeric(ablation_lr)
     cat(sprintf("[Ablation] lr overridden → %.2e\n", conv_params$lr))
+  }
+  # Ablation override: WADOUX_MIN_LR
+  ablation_min_lr <- Sys.getenv("WADOUX_MIN_LR", unset = "")
+  if (nchar(ablation_min_lr) > 0) {
+    conv_params$min_lr <- as.numeric(ablation_min_lr)
+    cat(sprintf("[Ablation] min_lr overridden → %.2e\n", conv_params$min_lr))
+  }
+  # Ablation override: WADOUX_WEIGHT_DECAY
+  ablation_wd <- Sys.getenv("WADOUX_WEIGHT_DECAY", unset = "")
+  if (nchar(ablation_wd) > 0) {
+    conv_params$wd <- as.numeric(ablation_wd)
+    cat(sprintf("[Ablation] wd overridden → %.2e\n", conv_params$wd))
+  }
+  # Ablation override: WADOUX_BATCH_SIZE
+  ablation_bs <- Sys.getenv("WADOUX_BATCH_SIZE", unset = "")
+  if (nchar(ablation_bs) > 0) {
+    conv_params$batch_size <- as.integer(ablation_bs)
+    cat(sprintf("[Ablation] batch_size overridden → %dL\n", conv_params$batch_size))
   }
   # Ablation override: WADOUX_BANK_REFRESH_EVERY
   ablation_bre <- Sys.getenv("WADOUX_BANK_REFRESH_EVERY", unset = "")
@@ -741,17 +779,49 @@ if ("ConvKrigingNet2D" %in% models) {
     conv_params$bank_refresh_every <- as.integer(ablation_bre)
     cat(sprintf("[Ablation] bank_refresh_every overridden → %dL\n", conv_params$bank_refresh_every))
   }
+  # Ablation override: WADOUX_PATIENCE
+  ablation_pat <- Sys.getenv("WADOUX_PATIENCE", unset = "")
+  if (nchar(ablation_pat) > 0) {
+    conv_params$patience <- as.integer(ablation_pat)
+    cat(sprintf("[Ablation] patience overridden → %dL\n", conv_params$patience))
+  }
+  # Ablation override: WADOUX_LR_PATIENCE
+  ablation_lr_pat <- Sys.getenv("WADOUX_LR_PATIENCE", unset = "")
+  if (nchar(ablation_lr_pat) > 0) {
+    conv_params$lr_patience <- as.integer(ablation_lr_pat)
+    cat(sprintf("[Ablation] lr_patience overridden → %dL\n", conv_params$lr_patience))
+  }
+  # Ablation override: WADOUX_LR_DECAY
+  ablation_lr_decay <- Sys.getenv("WADOUX_LR_DECAY", unset = "")
+  if (nchar(ablation_lr_decay) > 0) {
+    conv_params$lr_decay <- as.numeric(ablation_lr_decay)
+    cat(sprintf("[Ablation] lr_decay overridden → %.2f\n", conv_params$lr_decay))
+  }
+  # Ablation override: WADOUX_K_NEIGHBORS
+  ablation_k_neighbors <- Sys.getenv("WADOUX_K_NEIGHBORS", unset = "")
+  if (nchar(ablation_k_neighbors) > 0) {
+    conv_params$K_neighbors <- as.integer(ablation_k_neighbors)
+    cat(sprintf("[Ablation] K_neighbors overridden → %dL\n", conv_params$K_neighbors))
+  }
+  # Ablation override: WADOUX_BETA_INIT
+  ablation_beta_init <- Sys.getenv("WADOUX_BETA_INIT", unset = "")
+  if (nchar(ablation_beta_init) > 0) {
+    conv_params$beta_init <- as.numeric(ablation_beta_init)
+    cat(sprintf("[Ablation] beta_init overridden → %.4f\n", conv_params$beta_init))
+  }
   # Ablation override: architecture dimensions and dropouts
   ablation_patch_dim   <- Sys.getenv("WADOUX_PATCH_DIM",    unset = "")
   ablation_d           <- Sys.getenv("WADOUX_D",            unset = "")
   ablation_tab_drop    <- Sys.getenv("WADOUX_TAB_DROPOUT",  unset = "")
   ablation_patch_drop  <- Sys.getenv("WADOUX_PATCH_DROPOUT",unset = "")
   ablation_coord_dim   <- Sys.getenv("WADOUX_COORD_DIM",    unset = "")
+  ablation_coord_drop  <- Sys.getenv("WADOUX_COORD_DROPOUT",unset = "")
   if (nchar(ablation_patch_dim)  > 0) { conv_params$patch_dim    <- as.integer(ablation_patch_dim);  cat(sprintf("[Ablation] patch_dim    → %d\n",    conv_params$patch_dim))    }
   if (nchar(ablation_d)          > 0) { conv_params$d             <- as.integer(ablation_d);          cat(sprintf("[Ablation] d           → %d\n",    conv_params$d))            }
   if (nchar(ablation_tab_drop)   > 0) { conv_params$tab_dropout   <- as.numeric(ablation_tab_drop);   cat(sprintf("[Ablation] tab_dropout → %.2f\n", conv_params$tab_dropout))   }
   if (nchar(ablation_patch_drop) > 0) { conv_params$patch_dropout <- as.numeric(ablation_patch_drop); cat(sprintf("[Ablation] patch_drop  → %.2f\n", conv_params$patch_dropout)) }
   if (nchar(ablation_coord_dim)  > 0) { conv_params$coord_dim     <- as.integer(ablation_coord_dim);  cat(sprintf("[Ablation] coord_dim   → %d\n",    conv_params$coord_dim))    }
+  if (nchar(ablation_coord_drop) > 0) { conv_params$coord_dropout <- as.numeric(ablation_coord_drop); cat(sprintf("[Ablation] coord_drop  → %.2f\n", conv_params$coord_dropout)) }
 }
 # v4 DYNAMIC patch_size: derived from sample_size using auto_kriging_config rule
 # patch_size = min(max(8, floor(√n)), 31)

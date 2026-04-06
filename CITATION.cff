@@ -1,6 +1,6 @@
 cff-version: 1.2.0
 message: "If you use GeoVersa or ConvKrigingNet2D in your research, please cite it as below."
-title: "GeoVersa: Spatial Intelligence Through Learned Anisotropic Kriging"
+title: "GeoVersa: Deep Learning + Geostatistics for Spatial Prediction"
 version: 0.1.0
 date-released: 2026-04-01
 url: https://github.com/HugoMachadoRodrigues/GeoVersa
@@ -12,11 +12,11 @@ abstract: >-
   GeoVersa implements ConvKrigingNet2D — a hybrid deep learning architecture
   for Digital Soil Mapping that fuses a 2D CNN raster-patch encoder, a tabular
   MLP, and a coordinate MLP through a differentiable anisotropic residual
-  kriging layer. The kriging layer jointly learns the variogram range,
-  anisotropy axes, and rotation from data gradients, and applies a
-  distance-aware gate to suppress extrapolation noise under spatial
-  cross-validation. Benchmarked against Random Forest using the Wadoux et al.
-  (2021) design-based validation framework.
+  kriging layer. The active benchmark path uses pure exponential anisotropic
+  residual weighting, a learned global kriging gate, complete automatic
+  configuration, and pure GeoVersa training with RF distillation disabled.
+  Benchmarked against a reproduced Random Forest reference using the Wadoux et
+  al. (2021) design-based validation framework.
 keywords:
   - Digital Soil Mapping
   - Pedometrics

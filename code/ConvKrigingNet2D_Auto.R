@@ -1089,20 +1089,35 @@ train_convkrigingnet2d_auto_one_fold <- function(
 # This wrapper is loaded by the runner when WADOUX_AUTO_V5_SCRIPT is set
 
 train_convkrigingnet2d_auto_one_fold_v5 <- function(
-  fd, epochs = 80L, lr = NULL, wd = 1e-3, batch_size = NULL,
+  fd, epochs = 80L, lr = NULL, wd = NULL, batch_size = NULL,
   patience = NULL, warmup_epochs = NULL, bank_refresh_every = NULL,
   train_seed = NULL, deterministic_batches = FALSE,
   lr_decay = NULL, lr_patience = NULL, min_lr = NULL,
-  base_loss_weight = NULL, krig_loss_weight = 0, d = NULL,
+  base_loss_weight = NULL, alpha_me = NULL, lambda_cov = NULL,
+  krig_loss_weight = 0, d = NULL,
   tab_hidden = c(192L), tab_dropout = NULL, patch_dim = NULL,
-  patch_dropout = NULL, coord_hidden = c(32L), coord_dim = 32L,
-  coord_dropout = 0.05, fusion_hidden = NULL, kriging_mode = "anisotropic",
-  beta_init = 0.0, dist_scale = NULL, krig_dropout = 0,
+  patch_dropout = NULL, coord_hidden = c(32L), coord_dim = NULL,
+  coord_dropout = NULL, fusion_hidden = NULL, kriging_mode = "anisotropic",
+  beta_init = NULL, dist_scale = NULL, krig_dropout = 0,
   K_neighbors = NULL, vg_cutoff_frac = 0.50, vg_n_lags = 15L,
   target_transform = "identity", calibrate_method = "none",
   device = "cpu", warmup_converge_tol = 0.01, warmup_patience = 3L,
   ...
 ) {
+  apply_cfg_overrides <- function(cfg, overrides, stage_label) {
+    applied <- character(0)
+    for (nm in names(overrides)) {
+      val <- overrides[[nm]]
+      if (is.null(val) || !nm %in% names(cfg)) next
+      cfg[[nm]] <- val
+      applied <- c(applied, sprintf("%s=%s", nm, paste(val, collapse = ",")))
+    }
+    if (length(applied) > 0) {
+      cat(sprintf("[Auto v5] %s override(s): %s\n",
+                  stage_label, paste(applied, collapse = " | ")))
+    }
+    cfg
+  }
   
   # ── Extract fold data ────────────────────────────────────────────────────
   Xtr <- fd$X$train;  Xva <- fd$X$val;  Xte <- fd$X$test
@@ -1171,6 +1186,35 @@ train_convkrigingnet2d_auto_one_fold_v5 <- function(
     train_cache    = train_cache,
     device         = device
   )
+
+  cfg <- apply_cfg_overrides(
+    cfg,
+    list(
+      d                 = d,
+      patch_dim         = patch_dim,
+      tab_dropout       = tab_dropout,
+      patch_dropout     = patch_dropout,
+      coord_dim         = coord_dim,
+      coord_dropout     = coord_dropout,
+      fusion_hidden     = fusion_hidden,
+      beta_init         = beta_init,
+      K_neighbors       = K_neighbors,
+      base_loss_weight  = base_loss_weight,
+      alpha_me          = alpha_me,
+      lambda_cov        = lambda_cov,
+      batch_size        = batch_size,
+      patience          = patience,
+      lr_patience       = lr_patience,
+      lr_decay          = lr_decay,
+      bank_refresh_every = bank_refresh_every
+    ),
+    stage_label = "Pre-build"
+  )
+  if (!is.null(warmup_epochs)) {
+    cfg$max_warmup_epochs <- as.integer(warmup_epochs)
+    cat(sprintf("[Auto v5] Pre-build override: max_warmup_epochs=%d\n",
+                cfg$max_warmup_epochs))
+  }
   
   # Rebuild model with auto-configured architecture
   model <- ConvKrigingNet2D_Auto(
@@ -1200,6 +1244,17 @@ train_convkrigingnet2d_auto_one_fold_v5 <- function(
   # Polyak step α = loss / ‖∇f‖² on a fresh mini-batch gives a scale-correct LR.
   cfg$lr     <- estimate_initial_lr_polyak(model, train_cache, device = device)
   cfg$min_lr <- cfg$lr / 1000
+
+  cfg <- apply_cfg_overrides(
+    cfg,
+    list(
+      lr         = lr,
+      wd         = wd,
+      batch_size = batch_size,
+      min_lr     = min_lr
+    ),
+    stage_label = "Post-build"
+  )
 
   cat(sprintf("[Auto v5] ══ v5 Auto-Config Complete ══\n"))
   cat(sprintf("[Auto v5]   Learning rate (Polyak, final model): %.2e\n", cfg$lr))
@@ -1316,11 +1371,23 @@ train_convkrigingnet2d_auto_one_fold_v5 <- function(
   dyn_dec <- auto_lr_decay_from_trajectory(wu_val_losses)
   dyn_bre <- auto_bank_refresh_from_patience(dyn_pat$lr_patience)
 
-  pat                    <- dyn_pat$patience
+  cfg$patience           <- dyn_pat$patience
   cfg$lr_patience        <- dyn_pat$lr_patience
   cfg$lr_decay           <- dyn_dec
   cfg$bank_refresh_every <- dyn_bre
-  bre                    <- dyn_bre
+
+  cfg <- apply_cfg_overrides(
+    cfg,
+    list(
+      patience           = patience,
+      lr_patience        = lr_patience,
+      lr_decay           = lr_decay,
+      bank_refresh_every = bank_refresh_every
+    ),
+    stage_label = "Post-warmup"
+  )
+  pat <- cfg$patience
+  bre <- cfg$bank_refresh_every
 
   cat(sprintf("[Auto v5] Phase-3 | patience=%d | lr_patience=%d | lr_decay=%.2f | bank_refresh=%d\n",
               pat, cfg$lr_patience, cfg$lr_decay, bre))
