@@ -47,7 +47,7 @@ Digital Soil Mapping is grounded in the **SCORPAN** framework:
 S(\mathbf{s}) = f(S, C, O, R, P, A, N) + \varepsilon(\mathbf{s})
 ```
 
-where `S, C, O, R, P, A, N` represent the classical soil-forming factors and `\varepsilon(\mathbf{s})` is the spatially structured residual.
+where $S, C, O, R, P, A, N$ represent the classical soil-forming factors and $\varepsilon(\mathbf{s})$ is the spatially structured residual.
 
 Classical regression-kriging keeps these two parts separate:
 
@@ -68,9 +68,9 @@ For the active GeoVersa benchmark path, the final standardized prediction is:
 
 with:
 
-- `\hat{y}_{i}^{\mathrm{base}}`: deep trend prediction;
-- `\delta_i`: anisotropic residual interpolation from the memory bank;
-- `\beta \in (0,1)`: learned global kriging gate.
+- $\hat{y}_{i}^{\mathrm{base}}$: deep trend prediction;
+- $\delta_i$: anisotropic residual interpolation from the memory bank;
+- $\beta \in (0,1)$: learned global kriging gate.
 
 This is the current concrete realization of the broader DeepSCORPAN idea in the repository.
 
@@ -78,10 +78,10 @@ This is the current concrete realization of the broader DeepSCORPAN idea in the 
 
 | SCORPAN factor | Current GeoVersa realization |
 |---|---|
-| `S, C, O, R, P, A` | Tabular encoder over point-level covariates |
-| `O, R` as local landscape texture | 2D CNN patch encoder |
-| `N` | Coordinate encoder |
-| `\varepsilon(\mathbf{s})` | Differentiable anisotropic residual-kriging layer |
+| $S, C, O, R, P, A$ | Tabular encoder over point-level covariates |
+| $O, R$ as local landscape texture | 2D CNN patch encoder |
+| $N$ | Coordinate encoder |
+| $\varepsilon(\mathbf{s})$ | Differentiable anisotropic residual-kriging layer |
 
 ---
 
@@ -91,10 +91,10 @@ The benchmarked architecture has four coupled components:
 
 | Component | Input | Output | Role |
 |---|---|---|---|
-| Tabular encoder | point covariates `\mathbf{x}_i` | `\mathbf{e}_i^{\mathrm{tab}}` | nonlinear trend from SCORPAN-style attributes |
-| Patch encoder | raster patch `\mathbf{P}_i` | `\mathbf{e}_i^{\mathrm{patch}}` | local terrain and remote-sensing texture |
-| Coordinate encoder | location `\mathbf{s}_i` | `\mathbf{e}_i^{\mathrm{coord}}` | smooth spatial trend component |
-| Residual kriging layer | neighbor residual bank | `\delta_i` | anisotropic spatial correction |
+| Tabular encoder | point covariates $\mathbf{x}_i$ | $\mathbf{e}_i^{\mathrm{tab}}$ | nonlinear trend from SCORPAN-style attributes |
+| Patch encoder | raster patch $\mathbf{P}_i$ | $\mathbf{e}_i^{\mathrm{patch}}$ | local terrain and remote-sensing texture |
+| Coordinate encoder | location $\mathbf{s}_i$ | $\mathbf{e}_i^{\mathrm{coord}}$ | smooth spatial trend component |
+| Residual kriging layer | neighbor residual bank | $\delta_i$ | anisotropic spatial correction |
 
 ```mermaid
 flowchart LR
@@ -128,9 +128,9 @@ The active kriging layer is **purely spatial in its weighting rule**. It stores 
 
 | Symbol | Meaning |
 |---|---|
-| `\mathbf{x}_i \in \mathbb{R}^p` | tabular covariates |
-| `\mathbf{P}_i \in \mathbb{R}^{C \times H \times W}` | raster patch |
-| `\mathbf{s}_i \in \mathbb{R}^2` | coordinates |
+| $\mathbf{x}_i \in \mathbb{R}^p$ | tabular covariates |
+| $\mathbf{P}_i \in \mathbb{R}^{C \times H \times W}$ | raster patch |
+| $\mathbf{s}_i \in \mathbb{R}^2$ | coordinates |
 | `y_i` | observed target |
 | `T(y_i)` | optional target transform |
 | `y_i^{(s)}` | standardized training target |
@@ -187,7 +187,7 @@ so the memory bank can be written as:
 
 ### Anisotropic Residual Kriging
 
-For query point `i` and neighbor `j`, GeoVersa rotates coordinate offsets by a learned anisotropy angle `\theta`:
+For query point $i$ and neighbor $j$, GeoVersa rotates coordinate offsets by a learned anisotropy angle $\theta$:
 
 ```math
 \begin{aligned}
@@ -287,9 +287,9 @@ The active auto-config logic lives in `code/ConvKrigingNet2D_Auto_v5.R` and deri
 
 From the empirical variogram, the code initializes:
 
-- `\ell_{\mathrm{maj}}`, `\ell_{\mathrm{min}}`, and `\theta`;
-- nugget-to-sill ratio `r`;
-- neighborhood size `K`;
+- $\ell_{\mathrm{maj}}$, $\ell_{\mathrm{min}}$, and $\theta$;
+- nugget-to-sill ratio $r$;
+- neighborhood size $K$;
 - the initial kriging gate prior.
 
 The active rules are:
@@ -363,7 +363,7 @@ The current v5 rules are:
 \end{aligned}
 ```
 
-The `0.05` floor on `\lambda_{\mathrm{base}}` is active because the standalone benchmark needs a minimum direct backbone signal in strongly spatial folds. Without that floor, the backbone under-learns.
+The $0.05$ floor on $\lambda_{\mathrm{base}}$ is active because the standalone benchmark needs a minimum direct backbone signal in strongly spatial folds. Without that floor, the backbone under-learns.
 
 ### Optimization Rules
 
@@ -393,7 +393,7 @@ Weight decay scales with model size:
 
 Batch size is chosen from the smaller of:
 
-- a statistical target near `n_{\mathrm{train}} / 8`;
+- a statistical target near $n_{\mathrm{train}} / 8$;
 - a device-aware memory estimate.
 
 After warmup, the code adapts:
