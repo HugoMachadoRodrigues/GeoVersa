@@ -260,6 +260,28 @@ prepare_pointpatch_fold <- function(context,
 PatchCNNEncoder <- nn_module(
   "PatchCNNEncoder",
   initialize = function(in_channels, out_dim = 128, dropout = 0.10) {
+    safe_pool_1x1 <- nn_module(
+      "PatchCNNSafeAdaptiveAvgPool2D",
+      initialize = function() {},
+      forward = function(x) {
+        tryCatch(
+          nnf_adaptive_avg_pool2d(x, output_size = c(1, 1)),
+          error = function(e) {
+            device_type <- tryCatch(as.character(x$device$type), error = function(...) "")
+            is_mps_pool_error <- identical(device_type, "mps") &&
+              grepl("Adaptive pool MPS", conditionMessage(e), fixed = TRUE)
+            if (!is_mps_pool_error) {
+              stop(e)
+            }
+            pooled_cpu <- nnf_adaptive_avg_pool2d(
+              x$to(device = "cpu"),
+              output_size = c(1, 1)
+            )
+            pooled_cpu$to(device = "mps")
+          }
+        )
+      }
+    )
     self$conv <- nn_sequential(
       nn_conv2d(in_channels, 32, kernel_size = 3, padding = 1),
       nn_gelu(),
@@ -267,7 +289,7 @@ PatchCNNEncoder <- nn_module(
       nn_conv2d(32, 64, kernel_size = 3, padding = 1),
       nn_gelu(),
       nn_max_pool2d(kernel_size = 2),
-      nn_adaptive_avg_pool2d(output_size = c(1, 1))
+      safe_pool_1x1()
     )
     self$head <- nn_sequential(
       nn_flatten(),

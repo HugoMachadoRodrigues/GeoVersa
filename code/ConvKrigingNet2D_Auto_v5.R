@@ -34,6 +34,18 @@
 
 .auto_clamp <- function(x, lo, hi) pmax(lo, pmin(hi, x))
 
+.auto_env_num <- function(name, default) {
+  raw <- Sys.getenv(name, unset = "")
+  if (!nzchar(raw)) return(default)
+  val <- suppressWarnings(as.numeric(raw))
+  if (!is.finite(val)) {
+    cat(sprintf("[Auto v5]   %s invalid ('%s') — fallback %.4f\n", name, raw, default))
+    return(default)
+  }
+  cat(sprintf("[Auto v5]   %s override → %.4f\n", name, val))
+  val
+}
+
 # Query ACTUAL available memory (not a hardcoded constant).
 .get_actual_ram_gb <- function(device = "mps") {
   if (device == "mps") {
@@ -106,11 +118,19 @@
     cat("[Auto v5]   K: degenerate coordinate area → K = 10\n")
     return(10L)
   }
-  k_theory <- n_train * pi * vg$range_major^2 / area
+  k_mult <- .auto_env_num("GEOVERSA_AUTO_K_MULT", 1.0)
+  k_nugget_slope <- .auto_env_num("GEOVERSA_AUTO_K_NUGGET_SLOPE", 0.0)
+  k_nugget_ref <- .auto_env_num("GEOVERSA_AUTO_K_NUGGET_REF", 0.18)
+  k_theory_raw <- n_train * pi * vg$range_major^2 / area
+  k_struct_mult <- .auto_clamp(
+    1 + k_nugget_slope * (vg$nugget_ratio - k_nugget_ref),
+    0.85, 1.15
+  )
+  k_theory <- k_mult * k_struct_mult * k_theory_raw
   K        <- as.integer(.auto_clamp(round(k_theory), 6L, 30L))
   cat(sprintf(
-    "[Auto v5]   K_neighbors = %d  [n·π·range²/area = %.1f·π·%.4g²/%.4g]\n",
-    K, n_train, vg$range_major, area))
+    "[Auto v5]   K_neighbors = %d  [%.2f × %.3f × n·π·range²/area = %.2f × %.3f × %.1f·π·%.4g²/%.4g]\n",
+    K, k_mult, k_struct_mult, k_mult, k_struct_mult, n_train, vg$range_major, area))
   K
 }
 
@@ -128,10 +148,12 @@
 #     r = 0.67 → logit = −2.0 → β = 0.12  (kriging mostly off)
 #     r = 1.00 → logit = −4.0 → β = 0.02  (kriging disabled)
 .auto_beta_init_from_nugget <- function(r) {
-  logit_beta <- 2.0 - 6.0 * r
+  beta_intercept <- .auto_env_num("GEOVERSA_AUTO_BETA_INTERCEPT", 2.0)
+  beta_slope <- .auto_env_num("GEOVERSA_AUTO_BETA_SLOPE", -6.0)
+  logit_beta <- beta_intercept + beta_slope * r
   cat(sprintf(
-    "[Auto v5]   beta_init: logit = %.2f → β₀ = %.3f  [2 − 6·r, r = %.3f]\n",
-    logit_beta, 1 / (1 + exp(-logit_beta)), r))
+    "[Auto v5]   beta_init: logit = %.2f → β₀ = %.3f  [%.2f %+ .2f·r, r = %.3f]\n",
+    logit_beta, 1 / (1 + exp(-logit_beta)), beta_intercept, beta_slope, r))
   logit_beta
 }
 
@@ -174,22 +196,32 @@
 #   base_loss_weight:  max(0.05, 0.10 × r)
 #                                      — direct backbone supervision must not
 #                                        collapse when nugget is low; after
-#                                        removing RF distillation, the backbone
-#                                        needs a minimum standalone learning
-#                                        signal even in strongly spatial fields
-#   alpha_me:          0.75 × r       — anti co-training-collapse penalty
-#   lambda_rf:         0              — RF distillation disabled for the pure
-#                                        GeoVersa benchmark; model must stand
-#                                        on its own against the RF baseline
-#   lambda_cov:        0.025 × (1−r)  — variance-matching regulariser weight
+#                                        the backbone needs a minimum
+#                                        standalone learning signal even in
+#                                        strongly spatial fields
+#   alpha_me:          0.375 × r × mα — anti co-training-collapse penalty
+#   lambda_cov:        0.025 × (1−r) × mσ
+#                                      — variance-matching regulariser weight
+#   lambda_spatial:    0.020 × (1−r) × mρ
+#                                      — residual decorrelation penalty weight
 #   max_warmup_epochs: clamp(4+16r, 4, 20)  — more warmup when backbone load is high
 .auto_loss_weights_from_nugget <- function(r) {
+  blw_floor <- .auto_env_num("GEOVERSA_AUTO_BLW_FLOOR", 0.05)
+  blw_slope <- .auto_env_num("GEOVERSA_AUTO_BLW_SLOPE", 0.10)
+  alpha_mult <- .auto_env_num("GEOVERSA_AUTO_ALPHA_ME_MULT", 1.0)
+  lambda_cov_mult <- .auto_env_num("GEOVERSA_AUTO_LAMBDA_COV_MULT", 1.0)
+  lambda_spatial_mult <- .auto_env_num("GEOVERSA_AUTO_SPATIAL_LOSS_MULT", 0.0)
   list(
-    base_loss_weight  = round(max(0.05, 0.10 * r),  4L),
-    alpha_me          = round(0.75 * r,              4L),
-    lambda_rf         = 0.0,
-    lambda_cov        = round(0.025 * (1.0 - r),     5L),
-    max_warmup_epochs = as.integer(.auto_clamp(round(4 + 16 * r), 4L, 20L))
+    base_loss_weight  = round(max(blw_floor, blw_slope * r), 4L),
+    alpha_me          = round(0.375 * r * alpha_mult, 4L),
+    lambda_cov        = round(0.025 * (1.0 - r) * lambda_cov_mult, 5L),
+    lambda_spatial    = round(0.020 * (1.0 - r) * lambda_spatial_mult, 5L),
+    max_warmup_epochs = as.integer(.auto_clamp(round(4 + 16 * r), 4L, 20L)),
+    base_loss_floor   = blw_floor,
+    base_loss_slope   = blw_slope,
+    alpha_me_mult     = alpha_mult,
+    lambda_cov_mult   = lambda_cov_mult,
+    lambda_spatial_mult = lambda_spatial_mult
   )
 }
 
@@ -232,11 +264,51 @@
 # Reference: Srivastava et al. (2014); Gal & Ghahramani (2016)
 # Larger n → less regularisation needed.
 # coord MLP has only 2 inputs → lower overfitting risk → gentler dropout.
-.auto_dropouts_from_n <- function(n_train) {
-  tab_drop   <- round(.auto_clamp(0.30 - n_train / 8000,  0.05, 0.30), 3)
-  patch_drop <- round(.auto_clamp(0.20 - n_train / 10000, 0.03, 0.20), 3)
-  coord_drop <- round(.auto_clamp(0.10 - n_train / 20000, 0.02, 0.10), 3)
-  list(tab = tab_drop, patch = patch_drop, coord = coord_drop)
+# The patch branch is regularised slightly less than the raw sample-size rule,
+# because the screening runs showed the baseline patch dropout was suppressing
+# backbone quality more than helping generalisation.
+.auto_dropouts_from_n <- function(n_train, nugget_ratio = NULL, k_neighbors = NULL) {
+  drop_mult  <- .auto_env_num("GEOVERSA_AUTO_DROPOUT_MULT", 1.0)
+  tab_mult   <- .auto_env_num("GEOVERSA_AUTO_TAB_DROPOUT_MULT", 1.0)
+  patch_mult <- .auto_env_num("GEOVERSA_AUTO_PATCH_DROPOUT_MULT", 1.0)
+  coord_mult <- .auto_env_num("GEOVERSA_AUTO_COORD_DROPOUT_MULT", 1.0)
+  patch_nugget_slope <- .auto_env_num("GEOVERSA_AUTO_PATCH_DROPOUT_NUGGET_SLOPE", 0.0)
+  patch_nugget_ref   <- .auto_env_num("GEOVERSA_AUTO_PATCH_DROPOUT_NUGGET_REF", 0.18)
+  patch_k_slope      <- .auto_env_num("GEOVERSA_AUTO_PATCH_DROPOUT_K_SLOPE", 0.0)
+  patch_k_ref        <- .auto_env_num("GEOVERSA_AUTO_PATCH_DROPOUT_K_REF", 20.0)
+  tab_base   <- .auto_clamp(0.30 - n_train / 8000,  0.05, 0.30)
+  patch_base_raw <- .auto_clamp(0.20 - n_train / 10000, 0.03, 0.20)
+  nugget_centered <- if (!is.null(nugget_ratio) && is.finite(nugget_ratio)) {
+    nugget_ratio - patch_nugget_ref
+  } else {
+    0
+  }
+  k_centered <- if (!is.null(k_neighbors) && is.finite(k_neighbors) &&
+                    is.finite(patch_k_ref) && patch_k_ref > 0) {
+    (k_neighbors - patch_k_ref) / patch_k_ref
+  } else {
+    0
+  }
+  patch_struct_mult <- .auto_clamp(
+    1 + patch_nugget_slope * nugget_centered + patch_k_slope * k_centered,
+    0.80, 1.20
+  )
+  patch_base <- .auto_clamp(0.75 * patch_base_raw * patch_struct_mult, 0.02, 0.20)
+  coord_base <- .auto_clamp(0.10 - n_train / 20000, 0.02, 0.10)
+  tab_drop   <- round(.auto_clamp(tab_base * drop_mult * tab_mult,   0.03, 0.35), 3)
+  patch_drop <- round(.auto_clamp(patch_base * drop_mult * patch_mult, 0.02, 0.25), 3)
+  coord_drop <- round(.auto_clamp(coord_base * drop_mult * coord_mult, 0.01, 0.15), 3)
+  list(
+    tab = tab_drop,
+    patch = patch_drop,
+    coord = coord_drop,
+    patch_base_raw = patch_base_raw,
+    patch_struct_mult = patch_struct_mult,
+    patch_nugget_slope = patch_nugget_slope,
+    patch_nugget_ref = patch_nugget_ref,
+    patch_k_slope = patch_k_slope,
+    patch_k_ref = patch_k_ref
+  )
 }
 
 
@@ -381,6 +453,7 @@ auto_batch_size_v5 <- function(n_train, X_dim, patch_channels, patch_size,
 #   Normalised to a 5 M-parameter baseline (≈ a medium backbone).
 auto_weight_decay_from_capacity <- function(model) {
   cat("[Auto v5] ── Estimating weight decay from model capacity ──\n")
+  wd_mult <- .auto_env_num("GEOVERSA_AUTO_WD_MULT", 1.0)
 
   n_params <- tryCatch({
     total <- 0L
@@ -397,12 +470,13 @@ auto_weight_decay_from_capacity <- function(model) {
   }
 
   total_params_m <- as.numeric(n_params) / 1e6
-  wd_est         <- 1e-3 / sqrt(max(total_params_m / 5, 0.1))
+  wd_base        <- 1e-3 / sqrt(max(total_params_m / 5, 0.1))
+  wd_est         <- wd_base * wd_mult
   wd_final       <- .auto_clamp(wd_est, 1e-4, 1e-2)
 
   cat(sprintf(
-    "[Auto v5]   params = %.2f M   wd = 1e-3/√(%.2f/5) = %.2e → clamped %.2e\n",
-    total_params_m, total_params_m, wd_est, wd_final))
+    "[Auto v5]   params = %.2f M   wd = (1e-3/√(%.2f/5)) × %.2f = %.2e → clamped %.2e\n",
+    total_params_m, total_params_m, wd_mult, wd_est, wd_final))
   wd_final
 }
 
@@ -478,12 +552,294 @@ auto_lr_decay_from_trajectory <- function(wu_val_losses) {
 #   should be refreshed at least once per LR-decay cycle so that fine-tuning
 #   (after the LR drops) operates on residuals from the current model, not a
 #   model several epochs old.
-#   Rule: refresh every floor(lr_patience / 2) epochs.
+#   Rule: refresh every floor(lr_patience / 2) epochs, optionally scaled by
+#   GEOVERSA_AUTO_BANK_REFRESH_MULT for automatic screening:
+#     mult > 1  → less frequent refresh (more stale but cheaper / smoother)
+#     mult = 1  → default rule
 auto_bank_refresh_from_patience <- function(lr_patience) {
-  bre <- as.integer(max(1L, floor(lr_patience / 2L)))
-  cat(sprintf("[Auto v5]   bank_refresh_every = %d  [floor(%d / 2)]\n",
-              bre, lr_patience))
+  bank_mult <- .auto_env_num("GEOVERSA_AUTO_BANK_REFRESH_MULT", 1.0)
+  base_bre <- floor(lr_patience / 2L)
+  bre <- as.integer(max(1L, round(base_bre * bank_mult)))
+  cat(sprintf("[Auto v5]   bank_refresh_every = %d  [round(floor(%d / 2) × %.2f)]\n",
+              bre, lr_patience, bank_mult))
   bre
+}
+
+.auto_oof_fold_count <- function(n_train) {
+  fold_override <- .auto_env_num("GEOVERSA_AUTO_OOF_FOLDS", NA_real_)
+  if (is.finite(fold_override)) {
+    folds <- as.integer(.auto_clamp(round(fold_override), 2L, 5L))
+    cat(sprintf("[Auto v5]   OOF folds = %d  [explicit override]\n", folds))
+    return(folds)
+  }
+  folds <- as.integer(.auto_clamp(round(n_train / 180), 3L, 5L))
+  cat(sprintf("[Auto v5]   OOF folds = %d  [round(n/180), n=%d]\n", folds, n_train))
+  folds
+}
+
+.auto_oof_epoch_count <- function(warmup_epochs_done) {
+  epoch_mult <- .auto_env_num("GEOVERSA_AUTO_OOF_EPOCH_MULT", 1.25)
+  epoch_bias <- .auto_env_num("GEOVERSA_AUTO_OOF_EPOCH_BIAS", 1.0)
+  epochs <- as.integer(.auto_clamp(round(epoch_bias + epoch_mult * warmup_epochs_done), 4L, 12L))
+  cat(sprintf("[Auto v5]   OOF epochs = %d  [round(%.2f + %.2f×%d)]\n",
+              epochs, epoch_bias, epoch_mult, warmup_epochs_done))
+  epochs
+}
+
+.auto_operator_select_fold_count <- function(n_train) {
+  fold_override <- .auto_env_num("GEOVERSA_AUTO_OPERATOR_SELECT_FOLDS", NA_real_)
+  if (is.finite(fold_override)) {
+    folds <- as.integer(.auto_clamp(round(fold_override), 3L, 5L))
+    cat(sprintf("[Auto v5]   operator-select folds = %d  [explicit override]\n", folds))
+    return(folds)
+  }
+  folds <- as.integer(.auto_clamp(round(n_train / 220), 3L, 4L))
+  cat(sprintf("[Auto v5]   operator-select folds = %d  [round(n/220), n=%d]\n", folds, n_train))
+  folds
+}
+
+.auto_residual_signal_select_fold_count <- function(n_train) {
+  fold_override <- .auto_env_num("GEOVERSA_AUTO_RESID_SIGNAL_SELECT_FOLDS", NA_real_)
+  if (is.finite(fold_override)) {
+    folds <- as.integer(.auto_clamp(round(fold_override), 3L, 5L))
+    cat(sprintf("[Auto v5]   residual-signal-select folds = %d  [explicit override]\n", folds))
+    return(folds)
+  }
+  folds <- as.integer(.auto_clamp(round(n_train / 220), 3L, 4L))
+  cat(sprintf("[Auto v5]   residual-signal-select folds = %d  [round(n/220), n=%d]\n", folds, n_train))
+  folds
+}
+
+.auto_correction_trust_from_variogram <- function(vg) {
+  trust_floor <- .auto_env_num("GEOVERSA_AUTO_TRUST_FLOOR", 0.18)
+  trust_span <- .auto_env_num("GEOVERSA_AUTO_TRUST_SPAN", 0.72)
+  trust_min <- .auto_env_num("GEOVERSA_AUTO_TRUST_MIN", 0.15)
+  trust_max <- .auto_env_num("GEOVERSA_AUTO_TRUST_MAX", 1.00)
+  trust_range_ref <- .auto_env_num("GEOVERSA_AUTO_TRUST_RANGE_REF", 0.20)
+  trust_signal_exp <- .auto_env_num("GEOVERSA_AUTO_TRUST_SIGNAL_EXP", 1.00)
+  trust_fit_exp <- .auto_env_num("GEOVERSA_AUTO_TRUST_FIT_EXP", 0.75)
+  trust_range_exp <- .auto_env_num("GEOVERSA_AUTO_TRUST_RANGE_EXP", 0.75)
+  spatial_signal <- .auto_clamp(1 - vg$nugget_ratio, 0, 1)
+  fit_quality <- .auto_clamp(ifelse(is.null(vg$fit_quality), 0.25, vg$fit_quality), 0.05, 1.00)
+  range_fraction <- .auto_clamp(ifelse(is.null(vg$range_fraction), 0.30, vg$range_fraction), 0.02, 1.00)
+  range_quality <- .auto_clamp(range_fraction / max(trust_range_ref, 1e-6), 0.10, 1.00)
+  quality <- (spatial_signal ^ trust_signal_exp) *
+    (fit_quality ^ trust_fit_exp) *
+    (range_quality ^ trust_range_exp)
+  trust <- .auto_clamp(trust_floor + trust_span * quality, trust_min, trust_max)
+  cat(sprintf(
+    "[Auto v5]   trust = %.3f  [floor %.2f + span %.2f × ((1-r)^%.2f=%.3f × fit^%.2f=%.3f × range^%.2f=%.3f)]\n",
+    trust, trust_floor, trust_span,
+    trust_signal_exp, spatial_signal ^ trust_signal_exp,
+    trust_fit_exp, fit_quality ^ trust_fit_exp,
+    trust_range_exp, range_quality ^ trust_range_exp
+  ))
+  list(
+    trust = trust,
+    quality = quality,
+    spatial_signal = spatial_signal,
+    fit_quality = fit_quality,
+    range_quality = range_quality,
+    trust_floor = trust_floor,
+    trust_span = trust_span,
+    trust_min = trust_min,
+    trust_max = trust_max,
+    trust_range_ref = trust_range_ref,
+    trust_signal_exp = trust_signal_exp,
+    trust_fit_exp = trust_fit_exp,
+    trust_range_exp = trust_range_exp
+  )
+}
+
+.auto_correction_K_from_residual_variogram <- function(n_train, vg, Ctr, K_reference = NULL) {
+  base_k_resid <- .auto_K_from_spatial_density(n_train, vg, Ctr)
+  if (!is.null(K_reference) && is.finite(K_reference)) {
+    base_k_target <- as.integer(.auto_clamp(round(K_reference), 6L, 30L))
+  } else {
+    base_k_target <- base_k_resid
+  }
+  residual_signal <- .auto_clamp(1 - vg$nugget_ratio, 0, 1)
+  fit_quality <- .auto_clamp(ifelse(is.null(vg$fit_quality), 0.25, vg$fit_quality), 0.05, 1.00)
+  range_fraction <- .auto_clamp(ifelse(is.null(vg$range_fraction), 0.30, vg$range_fraction), 0.02, 1.00)
+  control <- .auto_clamp(
+    (residual_signal ^ 0.50) * (fit_quality ^ 0.50) * (range_fraction ^ 0.35),
+    0.05, 1.00
+  )
+  k_floor <- .auto_env_num("GEOVERSA_AUTO_K_CORR_FLOOR", 0.45)
+  k_scale <- .auto_clamp(k_floor + (1 - k_floor) * control, k_floor, 1.00)
+  k_corr <- as.integer(.auto_clamp(round(base_k_target * k_scale), 6L, 30L))
+  cat(sprintf(
+    "[Auto v5]   K_corr = %d  [round(K_target=%d × scale=%.3f), K_resid=%d]\n",
+    k_corr, base_k_target, k_scale, base_k_resid
+  ))
+  list(
+    K_corr = k_corr,
+    K_base_resid = base_k_resid,
+    K_base_target = base_k_target,
+    K_shrink = k_scale,
+    residual_signal = residual_signal,
+    fit_quality = fit_quality,
+    range_fraction = range_fraction
+  )
+}
+
+.auto_correction_schedule_from_residual_variogram <- function(vg, n_train, Ctr,
+                                                              K_reference = NULL,
+                                                              beta_reference = NULL) {
+  k_info <- .auto_correction_K_from_residual_variogram(n_train, vg, Ctr, K_reference = K_reference)
+  beta_init_resid <- .auto_beta_init_from_nugget(vg$nugget_ratio)
+  beta_resid_prob <- plogis(beta_init_resid)
+  beta_target_prob <- if (!is.null(beta_reference) && is.finite(beta_reference)) {
+    plogis(beta_reference)
+  } else {
+    beta_resid_prob
+  }
+  beta_quality <- .auto_clamp(
+    (k_info$residual_signal ^ 0.50) * (k_info$fit_quality ^ 0.35) * (k_info$range_fraction ^ 0.25),
+    0.05, 1.00
+  )
+  beta_floor_min <- .auto_env_num("GEOVERSA_AUTO_BETA_CORR_FLOOR_MIN", 0.35)
+  beta_floor_max <- .auto_env_num("GEOVERSA_AUTO_BETA_CORR_FLOOR_MAX", 0.60)
+  beta_floor_share <- .auto_clamp(
+    beta_floor_min + (1 - beta_quality) * (beta_floor_max - beta_floor_min),
+    beta_floor_min, beta_floor_max
+  )
+  beta_floor_prob <- beta_floor_share * beta_target_prob
+  beta_corr_prob <- .auto_clamp(max(beta_resid_prob, beta_floor_prob), 0.05, 0.95)
+  beta_init_corr <- qlogis(beta_corr_prob)
+  cat(sprintf(
+    "[Auto v5]   beta_corr = %.3f  [max(beta_resid=%.3f, %.2f×beta_target=%.3f)]\n",
+    beta_corr_prob, beta_resid_prob, beta_floor_share, beta_target_prob
+  ))
+  trust_info <- .auto_correction_trust_from_variogram(vg)
+  list(
+    K_corr = k_info$K_corr,
+    K_base_resid = k_info$K_base_resid,
+    K_base_target = k_info$K_base_target,
+    K_shrink = k_info$K_shrink,
+    beta_init_corr = beta_init_corr,
+    beta_resid_prob = beta_resid_prob,
+    beta_target_prob = beta_target_prob,
+    beta_floor_share = beta_floor_share,
+    trust = trust_info$trust,
+    trust_quality = trust_info$quality,
+    trust_spatial_signal = trust_info$spatial_signal,
+    trust_fit_quality = trust_info$fit_quality,
+    trust_range_quality = trust_info$range_quality,
+    trust_floor = trust_info$trust_floor,
+    trust_span = trust_info$trust_span,
+    residual_signal = k_info$residual_signal
+  )
+}
+
+.auto_residual_bank_mix_from_trust <- function(trust, verbose = TRUE) {
+  current_floor <- .auto_env_num("GEOVERSA_AUTO_BANK_CURRENT_FLOOR", 0.25)
+  current_ceiling <- .auto_env_num("GEOVERSA_AUTO_BANK_CURRENT_CEILING", 0.85)
+  current_power <- .auto_env_num("GEOVERSA_AUTO_BANK_CURRENT_POWER", 0.50)
+  current_weight <- .auto_clamp(trust ^ current_power, current_floor, current_ceiling)
+  oof_weight <- 1 - current_weight
+  if (isTRUE(verbose)) {
+    cat(sprintf(
+      "[Auto v5]   bank mix = current %.3f / OOF %.3f  [clamp(trust^%.2f, %.2f, %.2f)]\n",
+      current_weight, oof_weight, current_power, current_floor, current_ceiling
+    ))
+  }
+  list(
+    current_weight = current_weight,
+    oof_weight = oof_weight,
+    current_floor = current_floor,
+    current_ceiling = current_ceiling,
+    current_power = current_power
+  )
+}
+
+.auto_residual_bank_mode <- function() {
+  mode <- tolower(Sys.getenv("GEOVERSA_AUTO_BANK_MODE", unset = "current"))
+  if (!mode %in% c("current", "mix", "anneal", "oof")) mode <- "current"
+  mode
+}
+
+.auto_residual_bank_weights <- function(trust, progress = 0, verbose = TRUE) {
+  mode <- .auto_residual_bank_mode()
+  progress <- .auto_clamp(progress, 0, 1)
+  base_mix <- .auto_residual_bank_mix_from_trust(trust, verbose = FALSE)
+  anneal_power <- .auto_env_num("GEOVERSA_AUTO_BANK_ANNEAL_POWER", 1.0)
+  current_weight <- switch(
+    mode,
+    current = 1.0,
+    oof = 0.0,
+    mix = base_mix$current_weight,
+    anneal = .auto_clamp(
+      base_mix$current_weight + (1 - base_mix$current_weight) * (progress ^ anneal_power),
+      0, 1
+    )
+  )
+  oof_weight <- 1 - current_weight
+  if (isTRUE(verbose)) {
+    if (identical(mode, "anneal")) {
+      cat(sprintf(
+        "[Auto v5]   bank mode = %s  [progress=%.2f power=%.2f]  current=%.3f / OOF=%.3f\n",
+        mode, progress, anneal_power, current_weight, oof_weight
+      ))
+    } else {
+      cat(sprintf(
+        "[Auto v5]   bank mode = %s  current=%.3f / OOF=%.3f\n",
+        mode, current_weight, oof_weight
+      ))
+    }
+  }
+  list(
+    mode = mode,
+    current_weight = current_weight,
+    oof_weight = oof_weight,
+    anneal_power = anneal_power,
+    base_current_weight = base_mix$current_weight,
+    base_oof_weight = base_mix$oof_weight,
+    current_floor = base_mix$current_floor,
+    current_ceiling = base_mix$current_ceiling,
+    current_power = base_mix$current_power
+  )
+}
+
+.auto_residual_signal_schedule_from_variogram <- function(vg, resid_scaled) {
+  signal_floor <- .auto_env_num("GEOVERSA_AUTO_RESID_SIGNAL_FLOOR", 0.45)
+  signal_span <- .auto_env_num("GEOVERSA_AUTO_RESID_SIGNAL_SPAN", 0.45)
+  clip_floor <- .auto_env_num("GEOVERSA_AUTO_RESID_CLIP_FLOOR", 1.10)
+  clip_span <- .auto_env_num("GEOVERSA_AUTO_RESID_CLIP_SPAN", 1.70)
+  nugget_ratio <- ifelse(is.null(vg$nugget_ratio) || !is.finite(vg$nugget_ratio), 0.35, vg$nugget_ratio)
+  spatial_signal <- .auto_clamp(1 - nugget_ratio, 0, 1)
+  fit_quality <- .auto_clamp(ifelse(is.null(vg$fit_quality), 0.25, vg$fit_quality), 0.05, 1.00)
+  range_fraction <- .auto_clamp(ifelse(is.null(vg$range_fraction), 0.30, vg$range_fraction), 0.02, 1.00)
+  signal_quality <- .auto_clamp(
+    (spatial_signal ^ 0.75) * (fit_quality ^ 0.50) * (range_fraction ^ 0.35),
+    0.05, 1.00
+  )
+  resid_center <- stats::median(resid_scaled, na.rm = TRUE)
+  resid_scale_mad <- stats::mad(resid_scaled, center = resid_center, constant = 1.4826, na.rm = TRUE)
+  resid_scale_sd <- stats::sd(resid_scaled, na.rm = TRUE)
+  resid_scale <- max(resid_scale_mad, 0.35 * resid_scale_sd, 0.05)
+  shrink <- .auto_clamp(signal_floor + signal_span * signal_quality, signal_floor, signal_floor + signal_span)
+  clip_sigma <- .auto_clamp(clip_floor + clip_span * signal_quality, clip_floor, clip_floor + clip_span)
+  cat(sprintf(
+    "[Auto v5]   residual signal = shrink %.3f / clip %.3fσ  [quality=%.3f, center=%.4f, scale=%.4f]\n",
+    shrink, clip_sigma, signal_quality, resid_center, resid_scale
+  ))
+  list(
+    active = TRUE,
+    center = resid_center,
+    scale = resid_scale,
+    shrink = shrink,
+    clip_sigma = clip_sigma,
+    signal_quality = signal_quality,
+    spatial_signal = spatial_signal,
+    fit_quality = fit_quality,
+    range_fraction = range_fraction,
+    signal_floor = signal_floor,
+    signal_span = signal_span,
+    clip_floor = clip_floor,
+    clip_span = clip_span,
+    transform_override = FALSE
+  )
 }
 
 
@@ -522,8 +878,8 @@ auto_kriging_config_v5 <- function(vg, n_train, coord_scaler, Ctr,
   cat(sprintf("[Auto v5]   nugget_ratio = %.3f\n", r))
   cat(sprintf("[Auto v5]   ell_major_init = %.4g   ell_minor_init = %.4g   θ = %.1f°\n",
               ell_major_init, ell_minor_init, theta_init * 180 / pi))
-  cat(sprintf("[Auto v5]   BLW = %.4f   alpha_me = %.4f   lambda_rf = %.4f   lambda_cov = %.5f\n",
-              lw$base_loss_weight, lw$alpha_me, lw$lambda_rf, lw$lambda_cov))
+  cat(sprintf("[Auto v5]   BLW = %.4f   alpha_me = %.4f   lambda_cov = %.5f   lambda_spatial = %.5f\n",
+              lw$base_loss_weight, lw$alpha_me, lw$lambda_cov, lw$lambda_spatial))
   cat(sprintf("[Auto v5]   max_warmup = %d\n", lw$max_warmup_epochs))
 
   # ── Phase 0-B: Statistical capacity ──────────────────────────────────────
@@ -540,7 +896,7 @@ auto_kriging_config_v5 <- function(vg, n_train, coord_scaler, Ctr,
                   patch_size))
     }
   }
-  drops      <- .auto_dropouts_from_n(n_train)
+  drops      <- .auto_dropouts_from_n(n_train, nugget_ratio = r, k_neighbors = K_neighbors)
   coord_dim  <- .auto_coord_dim_from_variogram(vg)
   # coord MLP: hidden = max(2×coord_dim, 32) — minimum expressivity for a
   # 2-input → coord_dim-output smooth function approximator
@@ -561,6 +917,12 @@ auto_kriging_config_v5 <- function(vg, n_train, coord_scaler, Ctr,
               d, patch_size, patch_dim))
   cat(sprintf("[Auto v5]   tab_drop = %.3f   patch_drop = %.3f   coord_drop = %.3f\n",
               drops$tab, drops$patch, drops$coord))
+  cat(sprintf(
+    "[Auto v5]   patch_struct_mult = %.3f  [1 + %.2f·(r−%.2f) + %.2f·((K−%.0f)/%.0f)]\n",
+    drops$patch_struct_mult,
+    drops$patch_nugget_slope, drops$patch_nugget_ref,
+    drops$patch_k_slope, drops$patch_k_ref, drops$patch_k_ref
+  ))
   cat(sprintf("[Auto v5]   coord_dim = %d   coord_hidden = %d\n",
               coord_dim, coord_hidden))
 
@@ -618,8 +980,8 @@ auto_kriging_config_v5 <- function(vg, n_train, coord_scaler, Ctr,
     # (A) Loss weights — nugget-derived
     base_loss_weight   = lw$base_loss_weight,
     alpha_me           = lw$alpha_me,
-    lambda_rf          = lw$lambda_rf,
     lambda_cov         = lw$lambda_cov,
+    lambda_spatial     = lw$lambda_spatial,
     max_warmup_epochs  = lw$max_warmup_epochs,
     # (B) Architecture — √n scaling
     d                  = d,

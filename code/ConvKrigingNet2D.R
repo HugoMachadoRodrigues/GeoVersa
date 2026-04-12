@@ -34,6 +34,31 @@ ConvBlock2D <- nn_module(
   }
 )
 
+SafeAdaptiveAvgPool2D <- nn_module(
+  "SafeAdaptiveAvgPool2D",
+  initialize = function(output_size) {
+    self$output_size <- output_size
+  },
+  forward = function(x) {
+    tryCatch(
+      nnf_adaptive_avg_pool2d(x, output_size = self$output_size),
+      error = function(e) {
+        device_type <- tryCatch(as.character(x$device$type), error = function(...) "")
+        is_mps_pool_error <- identical(device_type, "mps") &&
+          grepl("Adaptive pool MPS", conditionMessage(e), fixed = TRUE)
+        if (!is_mps_pool_error) {
+          stop(e)
+        }
+        pooled_cpu <- nnf_adaptive_avg_pool2d(
+          x$to(device = "cpu"),
+          output_size = self$output_size
+        )
+        pooled_cpu$to(device = "mps")
+      }
+    )
+  }
+)
+
 PatchEncoder2D <- nn_module(
   "PatchEncoder2D",
   initialize = function(in_channels, out_dim = 128, dropout = 0.10) {
@@ -43,7 +68,7 @@ PatchEncoder2D <- nn_module(
       ConvBlock2D(32, 64, dropout = dropout),
       nn_max_pool2d(kernel_size = 2),
       ConvBlock2D(64, 96, dropout = dropout),
-      nn_adaptive_avg_pool2d(output_size = c(1, 1))
+      SafeAdaptiveAvgPool2D(output_size = c(1, 1))
     )
     self$head <- nn_sequential(
       nn_flatten(),
@@ -54,6 +79,68 @@ PatchEncoder2D <- nn_module(
   },
   forward = function(x_patch) {
     self$head(self$stem(x_patch))
+  }
+)
+
+# =============================================================================
+# MultiScalePatchEncoder2D
+#
+# Two-branch CNN encoder capturing both LOCAL and GLOBAL covariate context
+# from the same input patch. Addresses a key weakness of PatchEncoder2D:
+# single-scale CNN only sees hyper-local texture, missing global trends (e.g.
+# elevation gradients, broad climate zones) that are visible to tabular RF.
+#
+# Architecture:
+#   Local branch:  standard 3-layer CNN (same as PatchEncoder2D)
+#                  → captures local texture, soil variation, microrelief
+#   Global branch: aggressive adaptive avg pool (4×4) → 2-layer CNN
+#                  → captures broad covariate trends across the full patch
+#
+# Outputs are concatenated and projected to out_dim.
+# Both branches share in_channels, ensuring dimension compatibility.
+# =============================================================================
+MultiScalePatchEncoder2D <- nn_module(
+  "MultiScalePatchEncoder2D",
+  initialize = function(in_channels, out_dim = 128, dropout = 0.10) {
+    local_dim  <- as.integer(ceiling(out_dim * 0.60))   # 60% local
+    global_dim <- as.integer(out_dim - local_dim)        # 40% global
+
+    # Local branch: fine-grained texture (same 3-block design as PatchEncoder2D)
+    self$local_stem <- nn_sequential(
+      ConvBlock2D(in_channels, 32L, dropout = dropout),
+      nn_max_pool2d(kernel_size = 2L),
+      ConvBlock2D(32L, 64L, dropout = dropout),
+      nn_max_pool2d(kernel_size = 2L),
+      ConvBlock2D(64L, 96L, dropout = dropout),
+      SafeAdaptiveAvgPool2D(output_size = c(1L, 1L))
+    )
+    self$local_head <- nn_sequential(
+      nn_flatten(),
+      nn_linear(96L, local_dim),
+      nn_gelu(),
+      nn_dropout(dropout)
+    )
+
+    # Global branch: coarse summary of the entire patch (4×4 → 2×2)
+    # Sees broad covariate context: slope trends, vegetation gradients, etc.
+    self$global_stem <- nn_sequential(
+      SafeAdaptiveAvgPool2D(output_size = c(4L, 4L)),   # compress to 4×4
+      ConvBlock2D(in_channels, 32L, dropout = dropout / 2),
+      SafeAdaptiveAvgPool2D(output_size = c(2L, 2L)),
+      ConvBlock2D(32L, 48L, dropout = dropout / 2),
+      SafeAdaptiveAvgPool2D(output_size = c(1L, 1L))
+    )
+    self$global_head <- nn_sequential(
+      nn_flatten(),
+      nn_linear(48L, global_dim),
+      nn_gelu(),
+      nn_dropout(dropout / 2)
+    )
+  },
+  forward = function(x_patch) {
+    z_local  <- self$local_head(self$local_stem(x_patch))
+    z_global <- self$global_head(self$global_stem(x_patch))
+    torch_cat(list(z_local, z_global), dim = 2L)
   }
 )
 

@@ -272,10 +272,9 @@ After warmup, the full model is trained with:
 \end{aligned}
 ```
 
-For the pure GeoVersa benchmark:
+For the current standalone GeoVersa benchmark:
 
-- `\lambda_{\mathrm{RF}} = 0`;
-- RF distillation is disabled;
+- the model is trained only against the observed target;
 - `r2` is reported as **Pearson squared** in the current benchmark path.
 
 ---
@@ -358,13 +357,13 @@ The current v5 rules are:
 ```math
 \begin{aligned}
 \lambda_{\mathrm{base}} &= \max(0.05,\; 0.10r), \\
-\alpha_{\mathrm{ME}} &= 0.75r, \\
+\alpha_{\mathrm{ME}} &= 0.375r, \\
 \lambda_{\mathrm{cov}} &= 0.025(1-r), \\
 \mathrm{max\_warmup} &= \mathrm{clamp}\!\left(\mathrm{round}(4 + 16r), 4, 20\right).
 \end{aligned}
 ```
 
-The `0.05` floor on `\lambda_{\mathrm{base}}` is active because the pure benchmark no longer uses RF distillation. Without that floor, the backbone under-learns in strongly spatial folds.
+The `0.05` floor on `\lambda_{\mathrm{base}}` is active because the standalone benchmark needs a minimum direct backbone signal in strongly spatial folds. Without that floor, the backbone under-learns.
 
 ### Optimization Rules
 
@@ -477,36 +476,37 @@ Tracked upstream reference:
 - mirrored commit: `ba3ad39bfa8474a09e8ac4cd82a0161649648794`;
 - local documentation: `docs/wadoux2021-reference/`.
 
-### Current confirmed comparison
+### Current clean comparison
 
 Setup:
 
 - scenario: `random`;
 - protocol: `DesignBased`;
 - sample size: `500`;
-- repetitions: `10`;
+- repetitions: `3`;
+- model profile: `auto`;
+- device: `mps`;
 - metric convention: `Pearson^2`.
 
 | Model | ME | RMSE | Pearson^2 | MEC |
 |---|---:|---:|---:|---:|
-| Wadoux RF reference | 1.340 | 32.444 | 0.882 | 0.879 |
-| GeoVersa, auto, `lambda_base = 0.05` floor | -0.203 | 33.814 | 0.866 | 0.862 |
-| GeoVersa, same setup, `lambda_base = 0.20` | -0.257 | 33.852 | 0.865 | 0.862 |
+| RF benchmark | 0.187 | 32.313 | 0.883 | 0.877 |
+| GeoVersa, standalone auto | 0.403 | 33.033 | 0.873 | 0.870 |
 
 Current reading:
 
-- the `0.05` floor is confirmed as slightly better than `0.20`;
-- GeoVersa is close to the reproduced RF reference;
-- GeoVersa still does not yet beat the reproduced RF on `DesignBased`.
+- this is the current clean benchmark for the standalone `auto` path in this repository;
+- GeoVersa is now being evaluated without any RF-guided training path;
+- GeoVersa still does not yet beat the RF benchmark on `DesignBased`.
 
-The current best confirmed gap relative to the RF reference is:
+The current clean gap relative to the RF benchmark is:
 
 ```math
-\Delta \mathrm{RMSE} = +1.370,
+\Delta \mathrm{RMSE} = +0.720,
 \qquad
-\Delta \mathrm{Pearson}^2 = -0.016,
+\Delta \mathrm{Pearson}^2 = -0.010,
 \qquad
-\Delta \mathrm{MEC} = -0.017
+\Delta \mathrm{MEC} = -0.007
 ```
 
 The original saved Wadoux `.Rdata` outputs are still not present in the mirrored upstream checkout. Their availability is tracked in `docs/wadoux2021-reference/official_rdata_manifest.csv`.
