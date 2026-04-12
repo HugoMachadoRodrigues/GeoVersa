@@ -476,6 +476,93 @@ Tracked upstream reference:
 - mirrored commit: `ba3ad39bfa8474a09e8ac4cd82a0161649648794`;
 - local documentation: `docs/wadoux2021-reference/`.
 
+### Role Of Each Validation Protocol
+
+The validation suite is not a collection of interchangeable scores. Each protocol estimates a different empirical risk functional, so a scientifically correct reading must respect the estimand behind the split design, in the sense emphasized by Wadoux et al. (2021).
+
+Let $\ell(y,\hat{y})$ denote a prediction loss and let $\mathcal{D}$ be the full prediction domain.
+
+For the optional full-domain benchmark, the population-style target is:
+
+```math
+\widehat{\mathcal{R}}_{\mathrm{Population}}
+=
+\frac{1}{|\mathcal{D}|}
+\sum_{\mathbf{s} \in \mathcal{D}}
+\ell\!\left(y(\mathbf{s}), \hat{y}(\mathbf{s})\right)
+```
+
+The `DesignBased` protocol instead estimates map error from an independent simple-random test sample $\mathcal{S}_{\mathrm{SRS}} \subset \mathcal{D}$:
+
+```math
+\widehat{\mathcal{R}}_{\mathrm{Design}}
+=
+\frac{1}{|\mathcal{S}_{\mathrm{SRS}}|}
+\sum_{\mathbf{s} \in \mathcal{S}_{\mathrm{SRS}}}
+\ell\!\left(y(\mathbf{s}), \hat{y}(\mathbf{s})\right)
+```
+
+This is why `DesignBased` is the main benchmark in this repository whenever the scientific claim is **map accuracy** rather than only local interpolation skill.
+
+For `RandomKFold`, the repository evaluates the out-of-fold risk under random partitioning:
+
+```math
+\widehat{\mathcal{R}}_{\mathrm{RandomKFold}}
+=
+\frac{1}{K}
+\sum_{k=1}^{K}
+\frac{1}{|F_k|}
+\sum_{i \in F_k}
+\ell\!\left(y_i, \hat{y}_i^{(-k)}\right)
+```
+
+For `SpatialKFold`, the same out-of-fold estimator is applied after replacing random folds by spatially separated blocks $B_k$:
+
+```math
+\widehat{\mathcal{R}}_{\mathrm{SpatialKFold}}
+=
+\frac{1}{K}
+\sum_{k=1}^{K}
+\frac{1}{|B_k|}
+\sum_{i \in B_k}
+\ell\!\left(y_i, \hat{y}_i^{(-k)}\right)
+```
+
+For `BLOOCV`, each focal test location is evaluated after excluding a buffer of radius $h$ around that location from calibration:
+
+```math
+\widehat{\mathcal{R}}_{\mathrm{BLOO}}(h)
+=
+\frac{1}{M}
+\sum_{m=1}^{M}
+\ell\!\left(
+y(\mathbf{s}_m),
+\hat{y}^{(-\mathcal{N}_h(\mathbf{s}_m))}(\mathbf{s}_m)
+\right)
+```
+
+```mermaid
+flowchart LR
+    A["Population"] --> A1["Full-domain empirical risk"]
+    B["DesignBased"] --> B1["Independent SRS estimate of map accuracy"]
+    C["RandomKFold"] --> C1["Random out-of-fold predictive risk"]
+    D["SpatialKFold"] --> D1["Blocked spatial generalization risk"]
+    E["BLOOCV"] --> E1["Buffered local extrapolation/interpolation stress test"]
+```
+
+The correct interpretation is therefore:
+
+- `DesignBased` is the principal benchmark for claims about map accuracy;
+- `RandomKFold` is useful but can be optimistic when train and test remain too close in feature or geographic space;
+- `SpatialKFold` diagnoses robustness under explicit spatial separation;
+- `BLOOCV` probes a buffered leave-location-out regime and is especially informative about short-range spatial dependence;
+- winning `3/4` protocols is not, by itself, a sufficient scientific claim unless the primary estimand has been declared in advance.
+
+GeoVersa's thesis is not weakened by this distinction. On the contrary: the model is designed to combine a deep covariate-driven backbone with spatial residual correction, so it should be read as a system with **two complementary ambitions**:
+
+- strong local residual recovery when nearby signal is genuinely informative;
+- competitive map-level accuracy under design-based evaluation when the backbone has learned the large-scale structure well.
+
 ### Current clean comparison
 
 Setup:
