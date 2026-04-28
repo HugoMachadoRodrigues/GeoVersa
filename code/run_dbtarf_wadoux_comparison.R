@@ -181,16 +181,9 @@ eval_designbased_dbt <- function(valuetable, iter) {
       coord_names = c("x", "y")
     ), params_iter))
     pred_map$DBTARF <- out$pred_test
-    diag_rows[[1L]] <- data.frame(
+    diag_rows[[1L]] <- cbind(
       iteration = iter,
-      selected_mode = out$diagnostics$selected_mode,
-      selected_lambda = out$diagnostics$selected_lambda,
-      oof_rf_rmse = out$diagnostics$oof_rf_rmse,
-      selected_oof_rmse = out$diagnostics$selected_oof_rmse,
-      selected_oof_delta = out$diagnostics$selected_oof_delta,
-      n_folds = out$diagnostics$n_folds,
-      n_train = out$diagnostics$n_train,
-      stringsAsFactors = FALSE)
+      as.data.frame(out$diagnostics, stringsAsFactors = FALSE))
     candidate_rows[[1L]] <- cbind(iteration = iter, out$candidate_table)
     fold_rows[[1L]] <- cbind(iteration = iter, out$fold_diagnostics)
   }
