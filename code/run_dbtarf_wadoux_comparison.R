@@ -16,6 +16,22 @@
 #   DBT_N_FOLDS             DBTARF internal cross-fitting folds, default 5
 #   DBT_LAMBDA_GRID         comma list, e.g. "-0.25,0,0.25,0.5"
 #   DBT_MIN_OOF_IMPROVEMENT default 0
+#   DBT_RF_TUNE             TRUE/FALSE, default TRUE
+#   DBT_RF_TUNE_METHOD      oob | cv | none, default oob
+#   DBT_RF_TUNE_INNER_FOLDS default 3, used when DBT_RF_TUNE_METHOD=cv
+#   DBT_RF_TUNE_MAX_GRID    max RF base candidates, default 18
+#   DBT_RF_NUM_TREES        optional comma list, e.g. "500,1000,2000,3000"
+#   DBT_RF_MTRY             optional comma list
+#   DBT_RF_MIN_NODE_SIZE    optional comma list
+#   DBT_RF_SAMPLE_FRACTION  optional comma list, e.g. "0.632,0.8,1"
+#   DBT_RESID_RF_TUNE       TRUE/FALSE, default TRUE
+#   DBT_RESID_RF_TUNE_MAX_GRID default 12
+#   DBT_RESID_RF_NUM_TREES       optional comma list
+#   DBT_RESID_RF_MTRY            optional comma list
+#   DBT_RESID_RF_MIN_NODE_SIZE   optional comma list
+#   DBT_RESID_RF_SAMPLE_FRACTION optional comma list
+#   DBT_FAIR_PROFILE_SEARCH      TRUE/FALSE, default TRUE
+#   DBT_FAIR_PROFILE_MAX         default 6
 #   DBT_TRAIN_SEED          default 123
 #   DBT_RESULTS_DIR         default results/dbtarf_run
 #   DBT_CHECKPOINT_EVERY    default 1
@@ -87,7 +103,23 @@ dbtarf_params <- modifyList(
     train_seed = train_seed,
     n_folds = as.integer(parse_num_dbt("DBT_N_FOLDS", 5L)),
     lambda_grid = parse_num_list_dbt("DBT_LAMBDA_GRID", NULL),
-    min_oof_improvement = parse_num_dbt("DBT_MIN_OOF_IMPROVEMENT", 0)
+    min_oof_improvement = parse_num_dbt("DBT_MIN_OOF_IMPROVEMENT", 0),
+    rf_tune = parse_bool_dbt("DBT_RF_TUNE", TRUE),
+    rf_tune_method = Sys.getenv("DBT_RF_TUNE_METHOD", unset = "oob"),
+    rf_tune_inner_folds = as.integer(parse_num_dbt("DBT_RF_TUNE_INNER_FOLDS", 3L)),
+    rf_tune_max_grid = as.integer(parse_num_dbt("DBT_RF_TUNE_MAX_GRID", 18L)),
+    rf_num_trees = parse_num_list_dbt("DBT_RF_NUM_TREES", NULL),
+    rf_mtry = parse_num_list_dbt("DBT_RF_MTRY", NULL),
+    rf_min_node_size = parse_num_list_dbt("DBT_RF_MIN_NODE_SIZE", NULL),
+    rf_sample_fraction = parse_num_list_dbt("DBT_RF_SAMPLE_FRACTION", NULL),
+    resid_rf_tune = parse_bool_dbt("DBT_RESID_RF_TUNE", TRUE),
+    resid_rf_tune_max_grid = as.integer(parse_num_dbt("DBT_RESID_RF_TUNE_MAX_GRID", 12L)),
+    resid_rf_num_trees = parse_num_list_dbt("DBT_RESID_RF_NUM_TREES", NULL),
+    resid_rf_mtry = parse_num_list_dbt("DBT_RESID_RF_MTRY", NULL),
+    resid_rf_min_node_size = parse_num_list_dbt("DBT_RESID_RF_MIN_NODE_SIZE", NULL),
+    resid_rf_sample_fraction = parse_num_list_dbt("DBT_RESID_RF_SAMPLE_FRACTION", NULL),
+    fair_profile_search = parse_bool_dbt("DBT_FAIR_PROFILE_SEARCH", TRUE),
+    fair_profile_max = as.integer(parse_num_dbt("DBT_FAIR_PROFILE_MAX", 6L))
   )
 )
 
@@ -159,6 +191,7 @@ eval_designbased_dbt <- function(valuetable, iter) {
   diag_rows <- list()
   candidate_rows <- list()
   fold_rows <- list()
+  tuning_rows <- list()
 
   if ("RF" %in% models) {
     rf <- fit_rf_default_wadoux(valuetable, form_rf)
@@ -186,20 +219,22 @@ eval_designbased_dbt <- function(valuetable, iter) {
       as.data.frame(out$diagnostics, stringsAsFactors = FALSE))
     candidate_rows[[1L]] <- cbind(iteration = iter, out$candidate_table)
     fold_rows[[1L]] <- cbind(iteration = iter, out$fold_diagnostics)
+    tuning_rows[[1L]] <- cbind(iteration = iter, out$rf_tuning_table)
   }
 
   list(
     metrics = emit_metric_rows_dbt(obs, pred_map, "DesignBased", iter, scenario),
     diagnostics = if (length(diag_rows)) do.call(rbind, diag_rows) else data.frame(),
     candidates = if (length(candidate_rows)) do.call(rbind, candidate_rows) else data.frame(),
-    fold_diagnostics = if (length(fold_rows)) do.call(rbind, fold_rows) else data.frame()
+    fold_diagnostics = if (length(fold_rows)) do.call(rbind, fold_rows) else data.frame(),
+    rf_tuning = if (length(tuning_rows)) do.call(rbind, tuning_rows) else data.frame()
   )
 }
 
 # ---- Save helpers -----------------------------------------------------------
 
 save_dbt_checkpoint <- function(iter, metric_rows, diagnostic_rows,
-                                candidate_rows, fold_rows) {
+                                candidate_rows, fold_rows, tuning_rows) {
   df <- do.call(rbind, metric_rows[!vapply(metric_rows, is.null, logical(1))])
   if (is.null(df) || nrow(df) == 0L) return(invisible(NULL))
   write.csv(df, file.path(results_dir, "dbtarf_all_results.csv"),
@@ -218,6 +253,11 @@ save_dbt_checkpoint <- function(iter, metric_rows, diagnostic_rows,
   fold_df <- do.call(rbind, fold_rows[!vapply(fold_rows, is.null, logical(1))])
   if (!is.null(fold_df) && nrow(fold_df) > 0L) {
     write.csv(fold_df, file.path(results_dir, "dbtarf_fold_diagnostics.csv"),
+              row.names = FALSE)
+  }
+  tune_df <- do.call(rbind, tuning_rows[!vapply(tuning_rows, is.null, logical(1))])
+  if (!is.null(tune_df) && nrow(tune_df) > 0L) {
+    write.csv(tune_df, file.path(results_dir, "dbtarf_rf_tuning_scores.csv"),
               row.names = FALSE)
   }
 
@@ -275,6 +315,24 @@ write.csv(
              sample_size = sample_size, n_iter = n_iter,
              n_folds = dbtarf_params$n_folds,
              min_oof_improvement = dbtarf_params$min_oof_improvement,
+             rf_tune = dbtarf_params$rf_tune,
+             rf_tune_method = dbtarf_params$rf_tune_method,
+             rf_tune_inner_folds = dbtarf_params$rf_tune_inner_folds,
+             rf_tune_max_grid = dbtarf_params$rf_tune_max_grid,
+             rf_num_trees = paste(dbtarf_params$rf_num_trees, collapse = ","),
+             rf_mtry = paste(dbtarf_params$rf_mtry, collapse = ","),
+             rf_min_node_size = paste(dbtarf_params$rf_min_node_size, collapse = ","),
+             rf_sample_fraction = paste(dbtarf_params$rf_sample_fraction, collapse = ","),
+             resid_rf_tune = dbtarf_params$resid_rf_tune,
+             resid_rf_tune_method = ifelse(dbtarf_params$resid_rf_tune,
+                                           dbtarf_params$rf_tune_method, "none"),
+             resid_rf_tune_max_grid = dbtarf_params$resid_rf_tune_max_grid,
+             resid_rf_num_trees = paste(dbtarf_params$resid_rf_num_trees, collapse = ","),
+             resid_rf_mtry = paste(dbtarf_params$resid_rf_mtry, collapse = ","),
+             resid_rf_min_node_size = paste(dbtarf_params$resid_rf_min_node_size, collapse = ","),
+             resid_rf_sample_fraction = paste(dbtarf_params$resid_rf_sample_fraction, collapse = ","),
+             fair_profile_search = dbtarf_params$fair_profile_search,
+             fair_profile_max = dbtarf_params$fair_profile_max,
              train_seed = train_seed, stringsAsFactors = FALSE),
   file.path(results_dir, "dbtarf_config.csv"), row.names = FALSE)
 
@@ -282,6 +340,7 @@ all_metric_rows <- list()
 all_diagnostic_rows <- list()
 all_candidate_rows <- list()
 all_fold_rows <- list()
+all_tuning_rows <- list()
 
 for (iter in seq_len(n_iter)) {
   cat(sprintf("\n==================================================\n"))
@@ -305,10 +364,13 @@ for (iter in seq_len(n_iter)) {
   if (!is.null(iter_out$fold_diagnostics) && nrow(iter_out$fold_diagnostics) > 0L) {
     all_fold_rows[[iter]] <- iter_out$fold_diagnostics
   }
+  if (!is.null(iter_out$rf_tuning) && nrow(iter_out$rf_tuning) > 0L) {
+    all_tuning_rows[[iter]] <- iter_out$rf_tuning
+  }
 
   if (iter %% checkpoint_every == 0L || iter == n_iter) {
     save_dbt_checkpoint(iter, all_metric_rows, all_diagnostic_rows,
-                        all_candidate_rows, all_fold_rows)
+                        all_candidate_rows, all_fold_rows, all_tuning_rows)
     summarise_and_save_dbt(all_metric_rows)
   }
 }

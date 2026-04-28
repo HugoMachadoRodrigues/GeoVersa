@@ -5,13 +5,13 @@
 #
 # Prediction form:
 #
-#   y_hat(s, x) = RF_default(s, x) + lambda * correction(s, x)
+#   y_hat(s, x) = RF_tuned(s, x) + lambda * correction(s, x)
 #
-# The RF component is the Wadoux-style default ranger model. Candidate
-# corrections are learned from cross-fitted RF residuals and are accepted only
-# when their out-of-fold RMSE beats the RF-only prediction on the calibration
-# sample. This makes the model a targeted residual updater rather than a
-# replacement for the RF baseline.
+# The complete DB-TARF pipeline is tuned by comparing full candidate profiles
+# with out-of-fold RMSE. The default RF/residual-RF profile is one candidate in
+# the same optimization space, not a separate fallback. Candidate corrections
+# are learned from cross-fitted RF residuals and are accepted only when their
+# out-of-fold RMSE beats the RF-only prediction on the calibration sample.
 #
 # Dependencies:
 #   - ranger
@@ -193,9 +193,369 @@
   p
 }
 
-.dbt_fit_rf <- function(train_df, response_name, predictor_names) {
+.dbt_as_bool <- function(x) {
+  if (is.logical(x)) return(isTRUE(x))
+  if (length(x) == 0L || is.null(x)) return(FALSE)
+  toupper(as.character(x[1L])) %in% c("TRUE", "1", "YES", "Y")
+}
+
+.dbt_numeric_values <- function(x, default, integer = FALSE) {
+  if (is.null(x)) x <- default
+  out <- suppressWarnings(as.numeric(x))
+  out <- out[is.finite(out)]
+  if (length(out) == 0L) out <- suppressWarnings(as.numeric(default))
+  out <- sort(unique(out))
+  if (integer) out <- as.integer(round(out))
+  out
+}
+
+.dbt_default_mtry_values <- function(p) {
+  p <- as.integer(max(1L, p))
+  sqrt_p <- max(1L, as.integer(round(sqrt(p))))
+  if (p <= 6L) {
+    vals <- seq_len(p)
+  } else {
+    vals <- c(1L, floor(sqrt_p / 2), sqrt_p, ceiling(1.5 * sqrt_p),
+              round(p / 3), round(p / 2), p)
+  }
+  sort(unique(as.integer(.dbt_clamp(vals, 1L, p))))
+}
+
+.dbt_default_min_node_values <- function(n, role = "base") {
+  n <- as.integer(max(2L, n))
+  vals <- if (identical(role, "residual")) {
+    c(2L, 3L, 5L, max(5L, floor(n / 80)), 10L, 20L)
+  } else {
+    c(1L, 3L, 5L, 10L, 20L)
+  }
+  sort(unique(as.integer(.dbt_clamp(vals, 1L, max(1L, n - 2L)))))
+}
+
+.dbt_default_tree_values <- function(n, role = "base") {
+  n <- as.integer(max(1L, n))
+  if (identical(role, "residual")) {
+    if (n < 120L) c(300L, 500L, 1000L) else c(300L, 500L, 1000L, 1500L)
+  } else {
+    if (n < 120L) c(500L, 1000L, 1500L) else c(500L, 1000L, 1500L, 2000L, 2500L, 3000L)
+  }
+}
+
+.dbt_rf_default_params <- function(p, n, role = "base") {
+  list(
+    num.trees = if (identical(role, "residual")) 300L else 500L,
+    mtry = max(1L, as.integer(round(sqrt(max(1L, p))))),
+    min.node.size = if (identical(role, "residual")) {
+      max(5L, floor(max(1L, n) / 80))
+    } else 5L,
+    sample.fraction = 1.0
+  )
+}
+
+.dbt_first_numeric <- function(x, default, integer = FALSE) {
+  if (is.null(x)) return(default)
+  out <- suppressWarnings(as.numeric(x))
+  out <- out[is.finite(out)]
+  if (length(out) == 0L) return(default)
+  if (integer) as.integer(round(out[1L])) else out[1L]
+}
+
+.dbt_rf_fixed_grid <- function(p, n, role = "base",
+                               num_trees = NULL,
+                               mtry = NULL,
+                               min_node_size = NULL,
+                               sample_fraction = NULL) {
+  p <- as.integer(max(1L, p))
+  n <- as.integer(max(2L, n))
+  defaults <- .dbt_rf_default_params(p, n, role)
+  out <- data.frame(
+    num.trees = .dbt_first_numeric(num_trees, defaults$num.trees, integer = TRUE),
+    mtry = .dbt_first_numeric(mtry, defaults$mtry, integer = TRUE),
+    min.node.size = .dbt_first_numeric(
+      min_node_size, defaults$min.node.size, integer = TRUE),
+    sample.fraction = .dbt_first_numeric(
+      sample_fraction, defaults$sample.fraction, integer = FALSE),
+    stringsAsFactors = FALSE
+  )
+  out$num.trees <- as.integer(max(1L, out$num.trees))
+  out$mtry <- as.integer(.dbt_clamp(out$mtry, 1L, p))
+  out$min.node.size <- as.integer(.dbt_clamp(
+    out$min.node.size, 1L, max(1L, n - 2L)))
+  out$sample.fraction <- as.numeric(.dbt_clamp(out$sample.fraction, 0.10, 1.00))
+  out
+}
+
+.dbt_rf_param_grid <- function(p, n, role = "base",
+                               num_trees = NULL,
+                               mtry = NULL,
+                               min_node_size = NULL,
+                               sample_fraction = NULL,
+                               max_grid = 18L,
+                               seed = 1L) {
+  p <- as.integer(max(1L, p))
+  n <- as.integer(max(2L, n))
+  defaults <- .dbt_rf_default_params(p, n, role)
+  num_trees <- .dbt_numeric_values(
+    num_trees, .dbt_default_tree_values(n, role), integer = TRUE)
+  mtry <- .dbt_numeric_values(
+    mtry, .dbt_default_mtry_values(p), integer = TRUE)
+  min_node_size <- .dbt_numeric_values(
+    min_node_size, .dbt_default_min_node_values(n, role), integer = TRUE)
+  sample_fraction <- .dbt_numeric_values(
+    sample_fraction, c(0.632, 0.80, 1.00), integer = FALSE)
+
+  num_trees <- as.integer(pmax(1L, num_trees))
+  mtry <- as.integer(.dbt_clamp(mtry, 1L, p))
+  min_node_size <- as.integer(.dbt_clamp(min_node_size, 1L, max(1L, n - 2L)))
+  sample_fraction <- .dbt_clamp(sample_fraction, 0.10, 1.00)
+
+  grid <- expand.grid(
+    num.trees = num_trees,
+    mtry = mtry,
+    min.node.size = min_node_size,
+    sample.fraction = sample_fraction,
+    KEEP.OUT.ATTRS = FALSE,
+    stringsAsFactors = FALSE
+  )
+  default_row <- data.frame(
+    num.trees = defaults$num.trees,
+    mtry = defaults$mtry,
+    min.node.size = defaults$min.node.size,
+    sample.fraction = defaults$sample.fraction,
+    stringsAsFactors = FALSE
+  )
+  grid <- unique(rbind(default_row, grid))
+  grid$num.trees <- as.integer(grid$num.trees)
+  grid$mtry <- as.integer(grid$mtry)
+  grid$min.node.size <- as.integer(grid$min.node.size)
+  grid$sample.fraction <- as.numeric(grid$sample.fraction)
+
+  max_grid <- as.integer(max(1L, max_grid))
+  if (nrow(grid) > max_grid) {
+    default_key <- do.call(paste, c(default_row, sep = "|"))
+    grid_keys <- do.call(paste, c(grid, sep = "|"))
+    keep <- which(grid_keys == default_key)
+    keep <- if (length(keep) > 0L) keep[1L] else 1L
+    anchor_idx <- unique(c(
+      keep,
+      which(grid$num.trees == max(grid$num.trees) &
+              grid$mtry == defaults$mtry &
+              grid$min.node.size == defaults$min.node.size)[1L],
+      which(grid$mtry == max(grid$mtry) &
+              grid$num.trees == defaults$num.trees)[1L],
+      which(grid$min.node.size == min(grid$min.node.size) &
+              grid$num.trees == defaults$num.trees)[1L],
+      which(grid$sample.fraction == min(grid$sample.fraction) &
+              grid$mtry == defaults$mtry)[1L]
+    ))
+    anchor_idx <- anchor_idx[!is.na(anchor_idx) & is.finite(anchor_idx)]
+    keep <- unique(c(keep, anchor_idx))
+    if (length(keep) > max_grid) keep <- keep[seq_len(max_grid)]
+    remaining <- setdiff(seq_len(nrow(grid)), keep)
+    if (length(keep) < max_grid && length(remaining) > 0L) {
+      set.seed(as.integer(seed))
+      keep <- c(keep, sample(remaining, min(length(remaining), max_grid - length(keep))))
+    }
+    grid <- grid[unique(keep), , drop = FALSE]
+  }
+  rownames(grid) <- NULL
+  grid
+}
+
+.dbt_params_from_row <- function(row) {
+  list(
+    num.trees = as.integer(row[["num.trees"]]),
+    mtry = as.integer(row[["mtry"]]),
+    min.node.size = as.integer(row[["min.node.size"]]),
+    sample.fraction = as.numeric(row[["sample.fraction"]])
+  )
+}
+
+.dbt_rf_args <- function(params = NULL, seed = NULL) {
+  if (is.null(params)) {
+    out <- list()
+    if (!is.null(seed)) out$seed <- as.integer(seed)
+    return(out)
+  }
+  out <- list(
+    num.trees = as.integer(params$num.trees),
+    mtry = as.integer(params$mtry),
+    min.node.size = as.integer(params$min.node.size),
+    sample.fraction = as.numeric(params$sample.fraction)
+  )
+  if (!is.null(seed)) out$seed <- as.integer(seed)
+  out
+}
+
+.dbt_fit_rf <- function(train_df, response_name, predictor_names,
+                        rf_params = NULL, seed = NULL) {
   form <- .dbt_formula(response_name, predictor_names)
-  ranger::ranger(formula = form, data = train_df)
+  args <- c(list(formula = form, data = train_df), .dbt_rf_args(rf_params, seed))
+  do.call(ranger::ranger, args)
+}
+
+.dbt_score_rf_cv <- function(train_df, response_name, predictor_names,
+                             rf_params, inner_folds = 3L, seed = 1L) {
+  y <- suppressWarnings(as.numeric(train_df[[response_name]]))
+  k <- as.integer(max(2L, min(inner_folds, sum(is.finite(y)), nrow(train_df))))
+  set.seed(as.integer(seed))
+  folds <- caret::createFolds(y, k = k, list = TRUE, returnTrain = FALSE)
+  pred <- rep(NA_real_, nrow(train_df))
+  for (j in seq_along(folds)) {
+    id_val <- folds[[j]]
+    id_tr <- setdiff(seq_len(nrow(train_df)), id_val)
+    mdl <- .dbt_fit_rf(
+      train_df[id_tr, , drop = FALSE], response_name, predictor_names,
+      rf_params = rf_params, seed = seed + j)
+    pred[id_val] <- .dbt_predict_rf(mdl, train_df[id_val, , drop = FALSE])
+  }
+  .dbt_rmse(y, pred)
+}
+
+.dbt_tune_rf_model <- function(train_df, response_name, predictor_names,
+                               role = "base",
+                               tune = TRUE,
+                               tune_method = "oob",
+                               inner_folds = 3L,
+                               max_grid = 18L,
+                               num_trees = NULL,
+                               mtry = NULL,
+                               min_node_size = NULL,
+                               sample_fraction = NULL,
+                               seed = 1L) {
+  train_df <- as.data.frame(train_df)
+  role_grid <- if (grepl("resid", role)) "residual" else "base"
+  tune <- .dbt_as_bool(tune)
+  tune_method <- tolower(as.character(tune_method)[1L])
+  if (!tune) tune_method <- "none"
+  if (!tune_method %in% c("oob", "cv", "none")) tune_method <- "oob"
+  grid <- if (identical(tune_method, "none")) {
+    .dbt_rf_fixed_grid(
+      p = length(predictor_names),
+      n = nrow(train_df),
+      role = role_grid,
+      num_trees = num_trees,
+      mtry = mtry,
+      min_node_size = min_node_size,
+      sample_fraction = sample_fraction)
+  } else {
+    .dbt_rf_param_grid(
+      p = length(predictor_names),
+      n = nrow(train_df),
+      role = role_grid,
+      num_trees = num_trees,
+      mtry = mtry,
+      min_node_size = min_node_size,
+      sample_fraction = sample_fraction,
+      max_grid = max_grid,
+      seed = seed)
+  }
+
+  if (identical(tune_method, "none")) {
+    params <- .dbt_params_from_row(grid[1L, , drop = FALSE])
+    model <- .dbt_fit_rf(train_df, response_name, predictor_names,
+                         rf_params = params, seed = seed)
+    score <- .dbt_rmse(
+      suppressWarnings(as.numeric(train_df[[response_name]])),
+      .dbt_oob_or_in_sample(model, train_df))
+    scores <- cbind(
+      data.frame(role = role, tune_method = tune_method, candidate_id = 1L,
+                 tuning_rmse = score, selected = TRUE,
+                 stringsAsFactors = FALSE),
+      grid[1L, , drop = FALSE])
+    return(list(model = model, params = params, best_rmse = score,
+                scores = scores))
+  }
+
+  score_rows <- vector("list", nrow(grid))
+  models <- vector("list", nrow(grid))
+  y <- suppressWarnings(as.numeric(train_df[[response_name]]))
+  for (i in seq_len(nrow(grid))) {
+    params <- .dbt_params_from_row(grid[i, , drop = FALSE])
+    fit <- tryCatch({
+      if (identical(tune_method, "cv")) {
+        rm <- .dbt_score_rf_cv(
+          train_df, response_name, predictor_names, params,
+          inner_folds = inner_folds, seed = seed + 1000L + i)
+        list(model = NULL, rmse = rm)
+      } else {
+        mdl <- .dbt_fit_rf(train_df, response_name, predictor_names,
+                           rf_params = params, seed = seed + i)
+        list(model = mdl, rmse = .dbt_rmse(y, .dbt_oob_or_in_sample(mdl, train_df)))
+      }
+    }, error = function(e) list(model = NULL, rmse = Inf))
+    models[i] <- list(fit$model)
+    score_rows[[i]] <- cbind(
+      data.frame(role = role, tune_method = tune_method, candidate_id = i,
+                 tuning_rmse = fit$rmse, selected = FALSE,
+                 stringsAsFactors = FALSE),
+      grid[i, , drop = FALSE])
+  }
+  scores <- do.call(rbind, score_rows)
+  ok <- is.finite(scores$tuning_rmse)
+  best_i <- if (any(ok)) which.min(scores$tuning_rmse) else 1L
+  scores$selected[best_i] <- TRUE
+  params <- .dbt_params_from_row(grid[best_i, , drop = FALSE])
+  model <- models[[best_i]]
+  if (is.null(model) || identical(tune_method, "cv")) {
+    model <- .dbt_fit_rf(train_df, response_name, predictor_names,
+                         rf_params = params, seed = seed + 99999L)
+  }
+  list(model = model, params = params,
+       best_rmse = scores$tuning_rmse[best_i], scores = scores)
+}
+
+.dbt_default_profile_specs <- function(p, n, max_profiles = 6L) {
+  p <- as.integer(max(1L, p))
+  n <- as.integer(max(2L, n))
+  max_profiles <- as.integer(max(1L, max_profiles))
+  sqrt_p <- max(1L, as.integer(round(sqrt(p))))
+  half_p <- as.integer(.dbt_clamp(round(p / 2), 1L, p))
+  third_p <- as.integer(.dbt_clamp(round(p / 3), 1L, p))
+  base <- rbind(
+    data.frame(profile = "default_rf",
+               rf_num_trees = 500L, rf_mtry = sqrt_p,
+               rf_min_node_size = 5L, rf_sample_fraction = 1.00,
+               resid_rf_num_trees = 300L, resid_rf_mtry = NA_integer_,
+               resid_rf_min_node_size = max(5L, floor(n / 80)),
+               resid_rf_sample_fraction = 1.00,
+               stringsAsFactors = FALSE),
+    data.frame(profile = "more_trees",
+               rf_num_trees = 1000L, rf_mtry = sqrt_p,
+               rf_min_node_size = 5L, rf_sample_fraction = 1.00,
+               resid_rf_num_trees = 300L, resid_rf_mtry = NA_integer_,
+               resid_rf_min_node_size = max(5L, floor(n / 80)),
+               resid_rf_sample_fraction = 1.00,
+               stringsAsFactors = FALSE),
+    data.frame(profile = "deeper_trees",
+               rf_num_trees = 1000L, rf_mtry = sqrt_p,
+               rf_min_node_size = 1L, rf_sample_fraction = 1.00,
+               resid_rf_num_trees = 500L, resid_rf_mtry = NA_integer_,
+               resid_rf_min_node_size = 3L,
+               resid_rf_sample_fraction = 1.00,
+               stringsAsFactors = FALSE),
+    data.frame(profile = "subsample",
+               rf_num_trees = 1500L, rf_mtry = sqrt_p,
+               rf_min_node_size = 5L, rf_sample_fraction = 0.80,
+               resid_rf_num_trees = 500L, resid_rf_mtry = NA_integer_,
+               resid_rf_min_node_size = max(3L, floor(n / 120)),
+               resid_rf_sample_fraction = 0.80,
+               stringsAsFactors = FALSE),
+    data.frame(profile = "wide_mtry",
+               rf_num_trees = 1000L, rf_mtry = half_p,
+               rf_min_node_size = 5L, rf_sample_fraction = 0.80,
+               resid_rf_num_trees = 300L, resid_rf_mtry = NA_integer_,
+               resid_rf_min_node_size = max(5L, floor(n / 80)),
+               resid_rf_sample_fraction = 1.00,
+               stringsAsFactors = FALSE),
+    data.frame(profile = "wide_deep_subsample",
+               rf_num_trees = 2000L, rf_mtry = max(third_p, sqrt_p),
+               rf_min_node_size = 1L, rf_sample_fraction = 0.632,
+               resid_rf_num_trees = 500L, resid_rf_mtry = NA_integer_,
+               resid_rf_min_node_size = 3L,
+               resid_rf_sample_fraction = 0.80,
+               stringsAsFactors = FALSE)
+  )
+  base[seq_len(min(nrow(base), max_profiles)), , drop = FALSE]
 }
 
 .dbt_fit_cubist <- function(x, y) {
@@ -332,11 +692,13 @@
   feat
 }
 
-.dbt_fit_residual_rf <- function(features, residuals) {
+.dbt_fit_residual_rf <- function(features, residuals, rf_params = NULL,
+                                 seed = NULL) {
   df <- as.data.frame(features)
   df$.resid <- as.numeric(residuals)
-  ranger::ranger(.resid ~ ., data = df, num.trees = 300,
-                 min.node.size = max(5L, floor(nrow(df) / 80)))
+  args <- c(list(formula = .resid ~ ., data = df),
+            .dbt_rf_args(rf_params, seed))
+  do.call(ranger::ranger, args)
 }
 
 .dbt_predict_residual_rf <- function(model, features) {
@@ -370,18 +732,32 @@
   }
 }
 
-train_dbtarf_one_fold <- function(train_df,
-                                  test_df,
-                                  response_name,
-                                  predictor_names = NULL,
-                                  coord_names = "auto",
-                                  n_folds = NULL,
-                                  lambda_grid = NULL,
-                                  n_basis = NULL,
-                                  bandwidth = NULL,
-                                  min_oof_improvement = 0.00,
-                                  train_seed = 123L,
-                                  ...) {
+.dbt_train_dbtarf_profile <- function(train_df,
+                                      test_df,
+                                      response_name,
+                                      predictor_names = NULL,
+                                      coord_names = "auto",
+                                      n_folds = NULL,
+                                      lambda_grid = NULL,
+                                      n_basis = NULL,
+                                      bandwidth = NULL,
+                                      min_oof_improvement = 0.00,
+                                      train_seed = 123L,
+                                      rf_tune = TRUE,
+                                      rf_tune_method = "oob",
+                                      rf_tune_inner_folds = 3L,
+                                      rf_tune_max_grid = 18L,
+                                      rf_num_trees = NULL,
+                                      rf_mtry = NULL,
+                                      rf_min_node_size = NULL,
+                                      rf_sample_fraction = NULL,
+                                      resid_rf_tune = TRUE,
+                                      resid_rf_tune_max_grid = 12L,
+                                      resid_rf_num_trees = NULL,
+                                      resid_rf_mtry = NULL,
+                                      resid_rf_min_node_size = NULL,
+                                      resid_rf_sample_fraction = NULL,
+                                      ...) {
   if (!requireNamespace("ranger", quietly = TRUE)) {
     stop("DBTARF requires ranger.")
   }
@@ -439,6 +815,15 @@ train_dbtarf_one_fold <- function(train_df,
   if (is.null(n_folds)) n_folds <- .dbt_auto_folds(n)
   n_folds <- as.integer(max(2L, min(n_folds, n)))
   lambda_grid <- .dbt_lambda_grid(lambda_grid, n = n)
+  rf_tune <- .dbt_as_bool(rf_tune)
+  resid_rf_tune <- .dbt_as_bool(resid_rf_tune)
+  rf_tune_method <- tolower(as.character(rf_tune_method)[1L])
+  if (!rf_tune_method %in% c("oob", "cv", "none")) rf_tune_method <- "oob"
+  base_rf_tune_method <- if (rf_tune) rf_tune_method else "none"
+  resid_rf_tune_method <- if (resid_rf_tune) rf_tune_method else "none"
+  rf_tune_inner_folds <- as.integer(max(2L, rf_tune_inner_folds))
+  rf_tune_max_grid <- as.integer(max(1L, rf_tune_max_grid))
+  resid_rf_tune_max_grid <- as.integer(max(1L, resid_rf_tune_max_grid))
 
   restore_rng <- .dbt_preserve_global_rng()
   on.exit(restore_rng(), add = TRUE)
@@ -457,6 +842,7 @@ train_dbtarf_one_fold <- function(train_df,
   )
   if (use_spatial) corr_oof$resid_spatial <- rep(NA_real_, n)
   fold_rows <- list()
+  rf_tune_rows <- list()
 
   cat(sprintf("[DBTARF] cross-fitting residual candidates (n=%d, folds=%d)...\n",
               n, n_folds))
@@ -466,7 +852,21 @@ train_dbtarf_one_fold <- function(train_df,
     tr <- train_df[id_tr, , drop = FALSE]
     va <- train_df[id_val, , drop = FALSE]
 
-    rf_j <- .dbt_fit_rf(tr, response_name, predictor_names)
+    rf_fit_j <- .dbt_tune_rf_model(
+      tr, response_name, predictor_names,
+      role = sprintf("base_fold_%02d", j),
+      tune = rf_tune,
+      tune_method = base_rf_tune_method,
+      inner_folds = rf_tune_inner_folds,
+      max_grid = rf_tune_max_grid,
+      num_trees = rf_num_trees,
+      mtry = rf_mtry,
+      min_node_size = rf_min_node_size,
+      sample_fraction = rf_sample_fraction,
+      seed = train_seed + 1000L * j)
+    rf_tune_rows[[length(rf_tune_rows) + 1L]] <- cbind(
+      stage = "crossfit", fold = j, rf_fit_j$scores)
+    rf_j <- rf_fit_j$model
     pred_tr_rf <- .dbt_oob_or_in_sample(rf_j, tr)
     pred_va_rf <- .dbt_predict_rf(rf_j, va)
     base_oof[id_val] <- pred_va_rf
@@ -497,10 +897,26 @@ train_dbtarf_one_fold <- function(train_df,
     feat_va <- .dbt_residual_features(
       va, predictor_names, coord_names, pred_va_rf, pred_va_cb, basis_j)
 
-    resid_rf_j <- tryCatch(.dbt_fit_residual_rf(feat_tr, resid_tr),
-                           error = function(e) NULL)
-    if (!is.null(resid_rf_j)) {
-      corr_oof$resid_rf[id_val] <- .dbt_predict_residual_rf(resid_rf_j, feat_va)
+    resid_rf_fit_j <- tryCatch(
+      .dbt_tune_rf_model(
+        cbind(as.data.frame(feat_tr), .resid = as.numeric(resid_tr)),
+        ".resid", names(as.data.frame(feat_tr)),
+        role = sprintf("resid_fold_%02d", j),
+        tune = resid_rf_tune,
+        tune_method = resid_rf_tune_method,
+        inner_folds = rf_tune_inner_folds,
+        max_grid = resid_rf_tune_max_grid,
+        num_trees = resid_rf_num_trees,
+        mtry = resid_rf_mtry,
+        min_node_size = resid_rf_min_node_size,
+        sample_fraction = resid_rf_sample_fraction,
+        seed = train_seed + 2000L * j),
+      error = function(e) NULL)
+    if (!is.null(resid_rf_fit_j)) {
+      rf_tune_rows[[length(rf_tune_rows) + 1L]] <- cbind(
+        stage = "crossfit", fold = j, resid_rf_fit_j$scores)
+      corr_oof$resid_rf[id_val] <- .dbt_predict_residual_rf(
+        resid_rf_fit_j$model, feat_va)
     }
 
     resid_cb_j <- .dbt_fit_cubist(feat_tr, resid_tr)
@@ -520,6 +936,16 @@ train_dbtarf_one_fold <- function(train_df,
       rf_rmse = .dbt_rmse(va[[response_name]], pred_va_rf),
       cubist_rmse = .dbt_rmse(va[[response_name]], pred_va_cb),
       residual_sd = stats::sd(resid_tr, na.rm = TRUE),
+      rf_num_trees = rf_fit_j$params$num.trees,
+      rf_mtry = rf_fit_j$params$mtry,
+      rf_min_node_size = rf_fit_j$params$min.node.size,
+      rf_sample_fraction = rf_fit_j$params$sample.fraction,
+      rf_tuning_rmse = rf_fit_j$best_rmse,
+      resid_rf_num_trees = if (is.null(resid_rf_fit_j)) NA_integer_ else resid_rf_fit_j$params$num.trees,
+      resid_rf_mtry = if (is.null(resid_rf_fit_j)) NA_integer_ else resid_rf_fit_j$params$mtry,
+      resid_rf_min_node_size = if (is.null(resid_rf_fit_j)) NA_integer_ else resid_rf_fit_j$params$min.node.size,
+      resid_rf_sample_fraction = if (is.null(resid_rf_fit_j)) NA_real_ else resid_rf_fit_j$params$sample.fraction,
+      resid_rf_tuning_rmse = if (is.null(resid_rf_fit_j)) NA_real_ else resid_rf_fit_j$best_rmse,
       n_basis = if (is.null(basis_j)) NA_integer_ else basis_j$n_basis,
       bandwidth = if (is.null(basis_j)) NA_real_ else basis_j$bandwidth,
       range_major = if (is.null(basis_j)) NA_real_ else basis_j$range_major,
@@ -592,7 +1018,21 @@ train_dbtarf_one_fold <- function(train_df,
               ifelse(is.na(best$lambda), "NA", sprintf("%.2f", best$lambda)),
               best$oof_rmse))
 
-  rf_full <- .dbt_fit_rf(train_df, response_name, predictor_names)
+  rf_full_fit <- .dbt_tune_rf_model(
+    train_df, response_name, predictor_names,
+    role = "base_full",
+    tune = rf_tune,
+    tune_method = base_rf_tune_method,
+    inner_folds = rf_tune_inner_folds,
+    max_grid = rf_tune_max_grid,
+    num_trees = rf_num_trees,
+    mtry = rf_mtry,
+    min_node_size = rf_min_node_size,
+    sample_fraction = rf_sample_fraction,
+    seed = train_seed + 900000L)
+  rf_tune_rows[[length(rf_tune_rows) + 1L]] <- cbind(
+    stage = "full", fold = NA_integer_, rf_full_fit$scores)
+  rf_full <- rf_full_fit$model
   base_train_full <- .dbt_oob_or_in_sample(rf_full, train_df)
   base_test <- .dbt_predict_rf(rf_full, test_df)
   x_train <- as.data.frame(train_df[, predictor_names, drop = FALSE])
@@ -605,6 +1045,7 @@ train_dbtarf_one_fold <- function(train_df,
   lambda <- suppressWarnings(as.numeric(best$lambda))
   pred_test <- base_test
   selected_correction_test <- rep(0, length(base_test))
+  resid_rf_full_fit <- NULL
 
   if (mode == "linear_cal") {
     lm1 <- stats::lm(y ~ rf, data = cal_df)
@@ -630,6 +1071,27 @@ train_dbtarf_one_fold <- function(train_df,
     feat_test <- .dbt_residual_features(
       test_df, predictor_names, coord_names, base_test,
       cubist_test, basis_full)
+    if (mode %in% c("resid_rf", "resid_ensemble")) {
+      resid_rf_full_fit <- tryCatch(
+        .dbt_tune_rf_model(
+          cbind(as.data.frame(feat_train), .resid = as.numeric(residual_full)),
+          ".resid", names(as.data.frame(feat_train)),
+          role = "resid_full",
+          tune = resid_rf_tune,
+          tune_method = resid_rf_tune_method,
+          inner_folds = rf_tune_inner_folds,
+          max_grid = resid_rf_tune_max_grid,
+          num_trees = resid_rf_num_trees,
+          mtry = resid_rf_mtry,
+          min_node_size = resid_rf_min_node_size,
+          sample_fraction = resid_rf_sample_fraction,
+          seed = train_seed + 950000L),
+        error = function(e) NULL)
+      if (!is.null(resid_rf_full_fit)) {
+        rf_tune_rows[[length(rf_tune_rows) + 1L]] <- cbind(
+          stage = "full", fold = NA_integer_, resid_rf_full_fit$scores)
+      }
+    }
 
     if (mode == "bias") {
       selected_correction_test <- rep(mean(residual_full, na.rm = TRUE),
@@ -637,8 +1099,10 @@ train_dbtarf_one_fold <- function(train_df,
     } else if (mode == "cubist_delta") {
       selected_correction_test <- cubist_test - base_test
     } else if (mode == "resid_rf") {
-      mdl <- .dbt_fit_residual_rf(feat_train, residual_full)
-      selected_correction_test <- .dbt_predict_residual_rf(mdl, feat_test)
+      if (!is.null(resid_rf_full_fit)) {
+        selected_correction_test <- .dbt_predict_residual_rf(
+          resid_rf_full_fit$model, feat_test)
+      }
     } else if (mode == "resid_cubist") {
       mdl <- .dbt_fit_cubist(feat_train, residual_full)
       selected_correction_test <- .dbt_predict_cubist(mdl, feat_test)
@@ -648,9 +1112,10 @@ train_dbtarf_one_fold <- function(train_df,
         as.matrix(test_df[, coord_names, drop = FALSE]), basis_full$bandwidth)
     } else if (mode == "resid_ensemble") {
       parts <- list()
-      mdl_rf <- tryCatch(.dbt_fit_residual_rf(feat_train, residual_full),
-                         error = function(e) NULL)
-      if (!is.null(mdl_rf)) parts$resid_rf <- .dbt_predict_residual_rf(mdl_rf, feat_test)
+      if (!is.null(resid_rf_full_fit)) {
+        parts$resid_rf <- .dbt_predict_residual_rf(
+          resid_rf_full_fit$model, feat_test)
+      }
       mdl_cb <- .dbt_fit_cubist(feat_train, residual_full)
       if (!is.null(mdl_cb)) parts$resid_cubist <- .dbt_predict_cubist(mdl_cb, feat_test)
       if (use_spatial) {
@@ -700,11 +1165,172 @@ train_dbtarf_one_fold <- function(train_df,
       use_spatial = use_spatial,
       lambda_min = min(lambda_grid, na.rm = TRUE),
       lambda_max = max(lambda_grid, na.rm = TRUE),
-      min_oof_improvement = min_oof_improvement
+      min_oof_improvement = min_oof_improvement,
+      rf_tune = rf_tune,
+      rf_tune_method = base_rf_tune_method,
+      rf_tune_inner_folds = rf_tune_inner_folds,
+      rf_tune_max_grid = rf_tune_max_grid,
+      resid_rf_tune = resid_rf_tune,
+      resid_rf_tune_method = resid_rf_tune_method,
+      resid_rf_tune_max_grid = resid_rf_tune_max_grid,
+      base_rf_num_trees = rf_full_fit$params$num.trees,
+      base_rf_mtry = rf_full_fit$params$mtry,
+      base_rf_min_node_size = rf_full_fit$params$min.node.size,
+      base_rf_sample_fraction = rf_full_fit$params$sample.fraction,
+      base_rf_tuning_rmse = rf_full_fit$best_rmse,
+      resid_rf_num_trees = if (is.null(resid_rf_full_fit)) NA_integer_ else resid_rf_full_fit$params$num.trees,
+      resid_rf_mtry = if (is.null(resid_rf_full_fit)) NA_integer_ else resid_rf_full_fit$params$mtry,
+      resid_rf_min_node_size = if (is.null(resid_rf_full_fit)) NA_integer_ else resid_rf_full_fit$params$min.node.size,
+      resid_rf_sample_fraction = if (is.null(resid_rf_full_fit)) NA_real_ else resid_rf_full_fit$params$sample.fraction,
+      resid_rf_tuning_rmse = if (is.null(resid_rf_full_fit)) NA_real_ else resid_rf_full_fit$best_rmse
     ),
     candidate_table = candidates,
-    fold_diagnostics = do.call(rbind, fold_rows)
+    fold_diagnostics = do.call(rbind, fold_rows),
+    rf_tuning_table = do.call(rbind, rf_tune_rows)
   )
+}
+
+train_dbtarf_one_fold <- function(train_df,
+                                  test_df,
+                                  response_name,
+                                  predictor_names = NULL,
+                                  coord_names = "auto",
+                                  n_folds = NULL,
+                                  lambda_grid = NULL,
+                                  n_basis = NULL,
+                                  bandwidth = NULL,
+                                  min_oof_improvement = 0.00,
+                                  train_seed = 123L,
+                                  rf_tune = TRUE,
+                                  rf_tune_method = "oob",
+                                  rf_tune_inner_folds = 3L,
+                                  rf_tune_max_grid = 18L,
+                                  rf_num_trees = NULL,
+                                  rf_mtry = NULL,
+                                  rf_min_node_size = NULL,
+                                  rf_sample_fraction = NULL,
+                                  resid_rf_tune = TRUE,
+                                  resid_rf_tune_max_grid = 12L,
+                                  resid_rf_num_trees = NULL,
+                                  resid_rf_mtry = NULL,
+                                  resid_rf_min_node_size = NULL,
+                                  resid_rf_sample_fraction = NULL,
+                                  fair_profile_search = TRUE,
+                                  fair_profile_max = 6L,
+                                  ...) {
+  tag_profile <- function(out, label) {
+    out$diagnostics$selected_profile <- label
+    out$candidate_table <- cbind(profile = label, out$candidate_table)
+    out$fold_diagnostics <- cbind(profile = label, out$fold_diagnostics)
+    out$rf_tuning_table <- cbind(profile = label, out$rf_tuning_table)
+    out
+  }
+
+  run_fixed_profile <- function(spec) {
+    out <- .dbt_train_dbtarf_profile(
+      train_df = train_df,
+      test_df = test_df,
+      response_name = response_name,
+      predictor_names = predictor_names,
+      coord_names = coord_names,
+      n_folds = n_folds,
+      lambda_grid = lambda_grid,
+      n_basis = n_basis,
+      bandwidth = bandwidth,
+      min_oof_improvement = min_oof_improvement,
+      train_seed = train_seed,
+      rf_tune = FALSE,
+      rf_tune_method = "none",
+      rf_tune_inner_folds = rf_tune_inner_folds,
+      rf_tune_max_grid = 1L,
+      rf_num_trees = spec$rf_num_trees,
+      rf_mtry = spec$rf_mtry,
+      rf_min_node_size = spec$rf_min_node_size,
+      rf_sample_fraction = spec$rf_sample_fraction,
+      resid_rf_tune = FALSE,
+      resid_rf_tune_max_grid = 1L,
+      resid_rf_num_trees = spec$resid_rf_num_trees,
+      resid_rf_mtry = spec$resid_rf_mtry,
+      resid_rf_min_node_size = spec$resid_rf_min_node_size,
+      resid_rf_sample_fraction = spec$resid_rf_sample_fraction,
+      ...)
+    tag_profile(out, spec$profile)
+  }
+
+  if (.dbt_as_bool(fair_profile_search) &&
+      (.dbt_as_bool(rf_tune) || .dbt_as_bool(resid_rf_tune))) {
+    train_df_for_specs <- as.data.frame(train_df)
+    coord_for_specs <- .dbt_resolve_coord_names(train_df_for_specs, coord_names)
+    pred_for_specs <- .dbt_infer_predictors(
+      train_df_for_specs, response_name, predictor_names, coord_for_specs)
+    profile_specs <- .dbt_default_profile_specs(
+      p = length(pred_for_specs),
+      n = nrow(train_df_for_specs),
+      max_profiles = fair_profile_max)
+    profile_out <- vector("list", nrow(profile_specs))
+    for (i in seq_len(nrow(profile_specs))) {
+      profile_out[[i]] <- run_fixed_profile(profile_specs[i, , drop = FALSE])
+    }
+    oof <- vapply(profile_out, function(x) {
+      suppressWarnings(as.numeric(x$diagnostics$selected_oof_rmse))
+    }, numeric(1))
+    best_i <- if (any(is.finite(oof))) which.min(oof) else 1L
+    selected <- profile_out[[best_i]]
+    selected$diagnostics$fair_profile_search <- TRUE
+    selected$diagnostics$fair_profile_max <- as.integer(fair_profile_max)
+    selected$diagnostics$profile_search_n <- nrow(profile_specs)
+    selected$diagnostics$profile_search_best_oof_rmse <- oof[best_i]
+    selected$diagnostics$default_profile_oof_rmse <- oof[
+      match("default_rf", profile_specs$profile)]
+    selected$candidate_table <- do.call(rbind, lapply(profile_out, `[[`, "candidate_table"))
+    selected$rf_tuning_table <- do.call(rbind, lapply(profile_out, `[[`, "rf_tuning_table"))
+    return(selected)
+  }
+
+  requested_label <- if (.dbt_as_bool(rf_tune) || .dbt_as_bool(resid_rf_tune)) {
+    "single_tuned"
+  } else {
+    "default_rf"
+  }
+  requested <- .dbt_train_dbtarf_profile(
+    train_df = train_df,
+    test_df = test_df,
+    response_name = response_name,
+    predictor_names = predictor_names,
+    coord_names = coord_names,
+    n_folds = n_folds,
+    lambda_grid = lambda_grid,
+    n_basis = n_basis,
+    bandwidth = bandwidth,
+    min_oof_improvement = min_oof_improvement,
+    train_seed = train_seed,
+    rf_tune = rf_tune,
+    rf_tune_method = rf_tune_method,
+    rf_tune_inner_folds = rf_tune_inner_folds,
+    rf_tune_max_grid = rf_tune_max_grid,
+    rf_num_trees = rf_num_trees,
+    rf_mtry = rf_mtry,
+    rf_min_node_size = rf_min_node_size,
+    rf_sample_fraction = rf_sample_fraction,
+    resid_rf_tune = resid_rf_tune,
+    resid_rf_tune_max_grid = resid_rf_tune_max_grid,
+    resid_rf_num_trees = resid_rf_num_trees,
+    resid_rf_mtry = resid_rf_mtry,
+    resid_rf_min_node_size = resid_rf_min_node_size,
+    resid_rf_sample_fraction = resid_rf_sample_fraction,
+	    ...)
+
+  requested <- tag_profile(requested, requested_label)
+  requested$diagnostics$fair_profile_search <- FALSE
+  requested$diagnostics$fair_profile_max <- as.integer(fair_profile_max)
+  requested$diagnostics$profile_search_n <- NA_integer_
+  requested$diagnostics$profile_search_best_oof_rmse <-
+    requested$diagnostics$selected_oof_rmse
+  requested$diagnostics$default_profile_oof_rmse <-
+    if (identical(requested_label, "default_rf")) {
+      requested$diagnostics$selected_oof_rmse
+    } else NA_real_
+  requested
 }
 
 dbtarf_default_params <- list(
@@ -713,7 +1339,23 @@ dbtarf_default_params <- list(
   n_basis = NULL,
   bandwidth = NULL,
   min_oof_improvement = 0.00,
-  train_seed = 123L
+  train_seed = 123L,
+  rf_tune = TRUE,
+  rf_tune_method = "oob",
+  rf_tune_inner_folds = 3L,
+  rf_tune_max_grid = 18L,
+  rf_num_trees = NULL,
+  rf_mtry = NULL,
+  rf_min_node_size = NULL,
+  rf_sample_fraction = NULL,
+  resid_rf_tune = TRUE,
+  resid_rf_tune_max_grid = 12L,
+  resid_rf_num_trees = NULL,
+  resid_rf_mtry = NULL,
+  resid_rf_min_node_size = NULL,
+  resid_rf_sample_fraction = NULL,
+  fair_profile_search = TRUE,
+  fair_profile_max = 6L
 )
 
 dbtarf_train_predict <- function(train_df,
