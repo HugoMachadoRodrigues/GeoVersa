@@ -4,6 +4,27 @@ All notable changes to this project should be documented in this file.
 
 The project is currently in research-stage development and follows a `0.x` versioning line.
 
+## [0.3.0-dev] - 2026-06-20
+
+### Added
+
+- **DB-TARF** (Design-Based Targeted Adaptive Residual Forest): `y_hat = RF_selected + lambda * correction`, where the base RF is chosen by a fair profile search (or optional OOB/CV grid tuning) and a cross-fitted, out-of-fold-selected residual correction is added only when it improves OOF RMSE (`code/DBTARF.R`; runner `code/run_dbtarf_wadoux_comparison.R`; validation `docs/dbtarf_wadoux_validation.md`)
+- DB-TARF is the first model in this repository to beat the Wadoux (2021) default-RF reference under the `DesignBased` protocol: RMSE 30.75 vs 31.63, winning 27/30 paired runs (mean ΔRMSE = −0.872, paired Wilcoxon p = 1.3e-08, 95% CI [−1.06, −0.68]), while reducing design-based bias to ≈0 (ME −0.04 vs 0.21). Tuning the forest alone is ≈neutral (`RF_tuned` ≈ RF), so the gain is the residual correction
+- `RF_tuned` transparency model in the benchmark (base RF of the selected profile, no correction) plus a script-generated paired win-rate summary (`dbtarf_winrate_vs_RF.csv`) and RF tuning trace (`dbtarf_rf_tuning_scores.csv`)
+
+### Changed
+
+- fully reproducible benchmark via explicit per-fit `ranger` seeds (ranger >= 0.18 is seed-reproducible across thread counts); `fit_rf_default_wadoux` gained optional `num.threads`/`seed` arguments (defaults preserve prior behaviour) and the default-RF baseline is now seeded
+- DB-TARF model selection scores the linear/quadratic/stacking recalibration candidates with the same cross-fit folds as the residual candidates (OOF vs OOF, removing in-sample optimism)
+
+### Fixed
+
+- fair profile search isolates each profile (one degenerate profile/fold no longer aborts an iteration)
+- RBF k-means basis: clamp to the number of distinct coordinates with a graceful fallback (avoids a possible `kmeans` error)
+- summary aggregation uses `na.action = na.pass` so a single NA metric no longer drops a whole iteration
+- DB-TARF auto fold-count is honored unless `DBT_N_FOLDS` is explicitly set; a malformed `DBT_LAMBDA_GRID` now falls back to the default grid
+- removed an unused internal function (`.dbt_fit_residual_rf`)
+
 ## [0.2.0-dev] - 2026-04-01
 
 ### Added

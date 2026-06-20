@@ -68,8 +68,12 @@ wadoux_eval <- function(obs, pred, corr_method = getOption("wadoux_corr_method",
   data.frame(ME = me, RMSE = rmse, r2 = r2, MEC = mec)
 }
 
-fit_rf_default_wadoux <- function(train_df, form_rf) {
-  ranger::ranger(formula = form_rf, data = train_df)
+fit_rf_default_wadoux <- function(train_df, form_rf, num.threads = NULL,
+                                  seed = NULL) {
+  # num.threads/seed default to NULL (unchanged ranger behaviour for existing
+  # callers); pass num.threads = 1L and a seed for fully reproducible runs.
+  ranger::ranger(formula = form_rf, data = train_df,
+                 num.threads = num.threads, seed = seed)
 }
 
 predict_rf_default_wadoux <- function(model, new_df) {

@@ -598,6 +598,28 @@ The current clean gap relative to the RF benchmark is:
 
 The original saved Wadoux `.Rdata` outputs are still not present in the mirrored upstream checkout. Their availability is tracked in `docs/wadoux2021-reference/official_rdata_manifest.csv`.
 
+### DB-TARF: first model to beat the RF reference on DesignBased
+
+While the standalone deep backbone does not yet beat RF on `DesignBased`, **DB-TARF** (Design-Based Targeted Adaptive Residual Forest) does. DB-TARF predicts `RF_selected + lambda * correction`, choosing an RF profile and a cross-fitted residual correction that is accepted only when it improves the out-of-fold RMSE. Same setup (`random`, `DesignBased`, n = 500), 30 reproducible repetitions (seed 123):
+
+| Model | ME | RMSE | Pearson^2 | MEC |
+|---|---:|---:|---:|---:|
+| RF benchmark (Wadoux default) | 0.21 | 31.63 | 0.88 | 0.88 |
+| RF_tuned (selected profile, no correction) | 0.25 | 31.61 | 0.88 | 0.88 |
+| **DB-TARF** | **-0.04** | **30.75** | **0.89** | **0.89** |
+
+DB-TARF wins **27 / 30** paired runs against the untuned Wadoux default RF, with mean gains
+
+```math
+\Delta \mathrm{RMSE} = -0.872,
+\qquad
+\Delta \mathrm{Pearson}^2 = +0.004,
+\qquad
+\Delta \mathrm{MEC} = +0.007
+```
+
+(paired Wilcoxon signed-rank $p = 1.3\times10^{-8}$; 95% CI for $\Delta\mathrm{RMSE}$ $[-1.06, -0.68]$). Tuning the forest alone buys essentially nothing here (`RF_tuned` ≈ `RF`), so the gain comes from the **residual correction**, not the tuning — and DB-TARF drives the design-based bias to ≈0 (ME `-0.04` vs `0.21`). The reference is the untuned default RF, as in Wadoux et al. (2021); DB-TARF performs internal selection on the calibration sample. Full method, honest caveats, reproduction command, and paired statistics: see [`docs/dbtarf_wadoux_validation.md`](docs/dbtarf_wadoux_validation.md).
+
 ---
 
 ## How To Run
@@ -653,6 +675,21 @@ source("code/run_wadoux_rf_reference.R")
 
 ```r
 source("code/import_wadoux_official_rdata.R")
+```
+
+### DB-TARF DesignBased benchmark
+
+```r
+Sys.setenv(
+  DBT_MODELS      = "RF,Cubist,DBTARF",
+  DBT_PROTOCOLS   = "DesignBased",
+  DBT_N_ITER      = "30",
+  DBT_SAMPLE_SIZE = "500",
+  DBT_TRAIN_SEED  = "123",
+  DBT_RESULTS_DIR = "results/dbtarf_n500_confirm30"
+)
+
+source("code/run_dbtarf_wadoux_comparison.R")
 ```
 
 ---

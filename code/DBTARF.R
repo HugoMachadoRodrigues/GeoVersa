@@ -46,7 +46,9 @@
 }
 
 .dbt_lambda_grid <- function(lambda_grid = NULL, n = NULL) {
-  if (!is.null(lambda_grid)) return(sort(unique(as.numeric(lambda_grid))))
+  if (!is.null(lambda_grid) && length(lambda_grid) > 0L) {
+    return(sort(unique(as.numeric(lambda_grid))))
+  }
   if (is.null(n) || !is.finite(n)) n <- 500L
   if (n < 80L) {
     seq(-0.20, 0.40, by = 0.05)
@@ -637,7 +639,10 @@
     n_basis_theory <- 4 * area / (pi * rho ^ 2) * (1 - nugget_ratio)
     n_basis <- as.integer(.dbt_clamp(round(n_basis_theory), 8L, 48L))
   }
-  n_basis <- as.integer(min(max(n_basis, 0L), nrow(coords)))
+  # kmeans requires centers <= number of DISTINCT rows, not just nrow(coords).
+  dup <- duplicated(round(coords, 6))
+  n_distinct <- sum(!dup)
+  n_basis <- as.integer(min(max(n_basis, 0L), n_distinct))
   if (is.null(bandwidth)) bandwidth <- max(rho / 2, 1e-6)
 
   if (n_basis <= 0L) {
@@ -650,8 +655,12 @@
   centers <- if (n_basis == 1L) {
     matrix(colMeans(coords), nrow = 1L)
   } else {
-    stats::kmeans(coords, centers = n_basis, iter.max = 50L,
-                  nstart = 5L)$centers
+    km <- tryCatch(
+      stats::kmeans(coords, centers = n_basis, iter.max = 50L, nstart = 5L)$centers,
+      error = function(e) NULL)
+    if (is.null(km)) {
+      coords[!dup, , drop = FALSE][seq_len(n_basis), , drop = FALSE]
+    } else km
   }
   list(centers = as.matrix(centers), bandwidth = bandwidth,
        range_major = rho, nugget_ratio = nugget_ratio, n_basis = n_basis)
@@ -692,15 +701,6 @@
   feat
 }
 
-.dbt_fit_residual_rf <- function(features, residuals, rf_params = NULL,
-                                 seed = NULL) {
-  df <- as.data.frame(features)
-  df$.resid <- as.numeric(residuals)
-  args <- c(list(formula = .resid ~ ., data = df),
-            .dbt_rf_args(rf_params, seed))
-  do.call(ranger::ranger, args)
-}
-
 .dbt_predict_residual_rf <- function(model, features) {
   as.numeric(predict(model, data = as.data.frame(features))$predictions)
 }
@@ -730,6 +730,23 @@
       rm(".Random.seed", envir = .GlobalEnv)
     }
   }
+}
+
+# Honest out-of-fold predictions for an lm-based recalibration candidate, using
+# the SAME folds as the residual candidates so model selection compares OOF to OOF
+# (not resubstitution to OOF). The deploy step still re-fits on the full cal_df,
+# which is the standard stacked-generalization protocol.
+.dbt_oof_calibrate <- function(cal_df, folds, form) {
+  pred <- rep(NA_real_, nrow(cal_df))
+  for (j in seq_along(folds)) {
+    idx <- folds[[j]]
+    fit <- tryCatch(stats::lm(form, data = cal_df[-idx, , drop = FALSE]),
+                    error = function(e) NULL)
+    if (is.null(fit)) next
+    pred[idx] <- suppressWarnings(
+      as.numeric(stats::predict(fit, newdata = cal_df[idx, , drop = FALSE])))
+  }
+  pred
 }
 
 .dbt_train_dbtarf_profile <- function(train_df,
@@ -981,23 +998,20 @@
 
   cal_df <- data.frame(y = y, rf = base_oof, cubist = cubist_oof)
   if (sum(is.finite(cal_df$rf)) >= 20L) {
-    lm1 <- stats::lm(y ~ rf, data = cal_df)
-    p_lm1 <- as.numeric(stats::predict(lm1, newdata = cal_df))
+    p_lm1 <- .dbt_oof_calibrate(cal_df, folds, y ~ rf)
     candidate_rows[[length(candidate_rows) + 1L]] <- data.frame(
       mode = "linear_cal", lambda = NA_real_, oof_rmse = .dbt_rmse(y, p_lm1),
       delta_rmse = .dbt_rmse(y, p_lm1) - baseline_rmse,
       stringsAsFactors = FALSE)
 
-    lm2 <- stats::lm(y ~ rf + I(rf ^ 2), data = cal_df)
-    p_lm2 <- as.numeric(stats::predict(lm2, newdata = cal_df))
+    p_lm2 <- .dbt_oof_calibrate(cal_df, folds, y ~ rf + I(rf ^ 2))
     candidate_rows[[length(candidate_rows) + 1L]] <- data.frame(
       mode = "quadratic_cal", lambda = NA_real_, oof_rmse = .dbt_rmse(y, p_lm2),
       delta_rmse = .dbt_rmse(y, p_lm2) - baseline_rmse,
       stringsAsFactors = FALSE)
   }
   if (sum(is.finite(cal_df$rf) & is.finite(cal_df$cubist)) >= 20L) {
-    stk <- stats::lm(y ~ rf + cubist, data = cal_df)
-    p_stk <- as.numeric(stats::predict(stk, newdata = cal_df))
+    p_stk <- .dbt_oof_calibrate(cal_df, folds, y ~ rf + cubist)
     candidate_rows[[length(candidate_rows) + 1L]] <- data.frame(
       mode = "stack_rf_cubist", lambda = NA_real_,
       oof_rmse = .dbt_rmse(y, p_stk),
@@ -1269,8 +1283,19 @@ train_dbtarf_one_fold <- function(train_df,
       max_profiles = fair_profile_max)
     profile_out <- vector("list", nrow(profile_specs))
     for (i in seq_len(nrow(profile_specs))) {
-      profile_out[[i]] <- run_fixed_profile(profile_specs[i, , drop = FALSE])
+      # Isolate each profile: one degenerate profile/fold must not abort the run.
+      profile_out[[i]] <- tryCatch(
+        run_fixed_profile(profile_specs[i, , drop = FALSE]),
+        error = function(e) NULL)
     }
+    ok_profiles <- !vapply(profile_out, is.null, logical(1))
+    if (!any(ok_profiles)) {
+      stop("DBTARF fair_profile_search: all ", nrow(profile_specs),
+           " profiles failed to fit.")
+    }
+    profile_out <- profile_out[ok_profiles]
+    profile_labels <- vapply(profile_out,
+      function(x) as.character(x$diagnostics$selected_profile), character(1))
     oof <- vapply(profile_out, function(x) {
       suppressWarnings(as.numeric(x$diagnostics$selected_oof_rmse))
     }, numeric(1))
@@ -1278,10 +1303,12 @@ train_dbtarf_one_fold <- function(train_df,
     selected <- profile_out[[best_i]]
     selected$diagnostics$fair_profile_search <- TRUE
     selected$diagnostics$fair_profile_max <- as.integer(fair_profile_max)
-    selected$diagnostics$profile_search_n <- nrow(profile_specs)
+    selected$diagnostics$profile_search_n <- length(profile_out)
     selected$diagnostics$profile_search_best_oof_rmse <- oof[best_i]
-    selected$diagnostics$default_profile_oof_rmse <- oof[
-      match("default_rf", profile_specs$profile)]
+    selected$diagnostics$default_profile_oof_rmse <- {
+      di <- match("default_rf", profile_labels)
+      if (is.na(di)) NA_real_ else oof[di]
+    }
     selected$candidate_table <- do.call(rbind, lapply(profile_out, `[[`, "candidate_table"))
     selected$rf_tuning_table <- do.call(rbind, lapply(profile_out, `[[`, "rf_tuning_table"))
     return(selected)

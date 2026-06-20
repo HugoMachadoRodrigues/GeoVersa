@@ -68,7 +68,8 @@ parse_num_list_dbt <- function(name, default = NULL) {
   raw <- Sys.getenv(name, unset = "")
   if (!nzchar(raw)) return(default)
   vals <- suppressWarnings(as.numeric(trimws(unlist(strsplit(raw, ",")))))
-  vals[is.finite(vals)]
+  vals <- vals[is.finite(vals)]
+  if (length(vals) == 0L) default else vals
 }
 
 # ---- Config -----------------------------------------------------------------
@@ -97,11 +98,15 @@ checkpoint_every <- as.integer(parse_num_dbt("DBT_CHECKPOINT_EVERY", 1L))
 dir.create(results_dir, recursive = TRUE, showWarnings = FALSE)
 options(wadoux_corr_method = "pearson")
 
+# Only override the cross-fitting fold count when DBT_N_FOLDS is explicitly set;
+# otherwise leave it NULL so DBTARF's data-driven auto-folds choice applies.
+n_folds_env <- Sys.getenv("DBT_N_FOLDS", unset = "")
 dbtarf_params <- modifyList(
   dbtarf_default_params,
   list(
     train_seed = train_seed,
-    n_folds = as.integer(parse_num_dbt("DBT_N_FOLDS", 5L)),
+    n_folds = if (nzchar(n_folds_env))
+                as.integer(parse_num_dbt("DBT_N_FOLDS", 5L)) else NULL,
     lambda_grid = parse_num_list_dbt("DBT_LAMBDA_GRID", NULL),
     min_oof_improvement = parse_num_dbt("DBT_MIN_OOF_IMPROVEMENT", 0),
     rf_tune = parse_bool_dbt("DBT_RF_TUNE", TRUE),
@@ -122,6 +127,7 @@ dbtarf_params <- modifyList(
     fair_profile_max = as.integer(parse_num_dbt("DBT_FAIR_PROFILE_MAX", 6L))
   )
 )
+n_folds_report <- if (is.null(dbtarf_params$n_folds)) "auto" else as.character(dbtarf_params$n_folds)
 
 cat(sprintf(
   "[DBTARF runner] scenario=%s  protocols=%s  models=%s  n_iter=%d  n=%d\n",
@@ -194,7 +200,9 @@ eval_designbased_dbt <- function(valuetable, iter) {
   tuning_rows <- list()
 
   if ("RF" %in% models) {
-    rf <- fit_rf_default_wadoux(valuetable, form_rf)
+    # seed makes the Wadoux default-RF baseline reproducible (ranger >= 0.18 is
+    # seed-reproducible across thread counts); threads left at default for speed.
+    rf <- fit_rf_default_wadoux(valuetable, form_rf, seed = train_seed + iter)
     pred_map$RF <- predict_rf_default_wadoux(rf, val_srs)
   }
   if ("Cubist" %in% models) {
@@ -214,6 +222,12 @@ eval_designbased_dbt <- function(valuetable, iter) {
       coord_names = c("x", "y")
     ), params_iter))
     pred_map$DBTARF <- out$pred_test
+    # Transparency: DBTARF's selected-profile tuned base RF with NO correction.
+    # Lets the benchmark show default-RF vs tuned-RF vs DBTARF, so the gain
+    # attributable to the residual correction (beyond RF tuning) is visible.
+    if (!is.null(out$pred_test_base)) {
+      pred_map$RF_tuned <- as.numeric(out$pred_test_base)
+    }
     diag_rows[[1L]] <- cbind(
       iteration = iter,
       as.data.frame(out$diagnostics, stringsAsFactors = FALSE))
@@ -277,6 +291,25 @@ save_dbt_checkpoint <- function(iter, metric_rows, diagnostic_rows,
       write.csv(merged, file.path(results_dir,
                                   "dbtarf_paired_deltas_vs_RF.csv"),
                 row.names = FALSE)
+
+      # Script-generated win-rate summary (so the headline "k/n wins" claim is
+      # reproducible from the run, not hand-counted).
+      d <- merged$delta_RMSE
+      winrate <- data.frame(
+        n_iter = length(d),
+        dbtarf_wins = sum(d < 0, na.rm = TRUE),
+        ties = sum(d == 0, na.rm = TRUE),
+        rf_wins = sum(d > 0, na.rm = TRUE),
+        mean_delta_RMSE = mean(d, na.rm = TRUE),
+        median_delta_RMSE = stats::median(d, na.rm = TRUE),
+        sd_delta_RMSE = stats::sd(d, na.rm = TRUE),
+        mean_delta_ME = mean(merged$delta_ME, na.rm = TRUE),
+        mean_delta_r2 = mean(merged$delta_r2, na.rm = TRUE),
+        mean_delta_MEC = mean(merged$delta_MEC, na.rm = TRUE),
+        stringsAsFactors = FALSE)
+      write.csv(winrate, file.path(results_dir,
+                                   "dbtarf_winrate_vs_RF.csv"),
+                row.names = FALSE)
     }
   }
 
@@ -296,7 +329,8 @@ summarise_and_save_dbt <- function(metric_rows) {
     cbind(ME, RMSE, r2, MEC) ~ scenario + protocol + model,
     data = df,
     FUN = function(x) c(mean = mean(x, na.rm = TRUE),
-                        sd = sd(x, na.rm = TRUE)))
+                        sd = sd(x, na.rm = TRUE)),
+    na.action = na.pass)
   stats_df <- do.call(cbind, lapply(c("ME", "RMSE", "r2", "MEC"),
                                     function(m) {
     mat <- by_protocol[[m]]
@@ -313,7 +347,7 @@ write.csv(
   data.frame(scenario = scenario, protocols = paste(protocols, collapse = ","),
              models = paste(models, collapse = ","),
              sample_size = sample_size, n_iter = n_iter,
-             n_folds = dbtarf_params$n_folds,
+             n_folds = n_folds_report,
              min_oof_improvement = dbtarf_params$min_oof_improvement,
              rf_tune = dbtarf_params$rf_tune,
              rf_tune_method = dbtarf_params$rf_tune_method,
