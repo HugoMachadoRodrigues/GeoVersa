@@ -954,6 +954,89 @@
   list(gate_c = gc, gate_length = gl)
 }
 
+# Density-ratio weights w_i ∝ p_pop/p_sample, by classification (calibration vs a
+# population reference). Used for design-aware (weighted) conformal calibration so
+# prediction-interval coverage is restored under clustered/biased sampling
+# (Tibshirani et al. 2019, conformal under covariate shift). RNG preserved.
+.dbt_density_ratio_weights <- function(train_df, ref_df, predictor_names, coord_names,
+                                       seed = 1L, wmax = 20) {
+  n <- nrow(train_df)
+  if (!requireNamespace("ranger", quietly = TRUE) || is.null(ref_df) ||
+      nrow(ref_df) < n) return(rep(1, n))
+  feats <- c(predictor_names, coord_names)
+  feats <- feats[feats %in% names(train_df) & feats %in% names(ref_df)]
+  if (length(feats) < 2L) return(rep(1, n))
+  had <- exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)
+  old <- if (had) get(".Random.seed", envir = .GlobalEnv) else NULL
+  on.exit(if (had) assign(".Random.seed", old, envir = .GlobalEnv) else
+    if (exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE))
+      rm(".Random.seed", envir = .GlobalEnv), add = TRUE)
+  set.seed(as.integer(seed))
+  m <- min(5L * n, nrow(ref_df))
+  ref_idx <- sample.int(nrow(ref_df), m)
+  Xc <- as.data.frame(train_df[, feats, drop = FALSE])
+  Xp <- as.data.frame(ref_df[ref_idx, feats, drop = FALSE])
+  dat <- rbind(cbind(Xc, .lab = "calib"), cbind(Xp, .lab = "pop"))
+  dat$.lab <- factor(dat$.lab, levels = c("pop", "calib"))
+  cls <- tryCatch(ranger::ranger(.lab ~ ., data = dat, probability = TRUE,
+                                 num.threads = 1L, seed = as.integer(seed)),
+                  error = function(e) NULL)
+  if (is.null(cls)) return(rep(1, n))
+  ph <- tryCatch(predict(cls, data = Xc, num.threads = 1L)$predictions[, "calib"],
+                 error = function(e) NULL)
+  if (is.null(ph) || any(!is.finite(ph))) return(rep(1, n))
+  ph <- pmin(pmax(ph, 1e-4), 1 - 1e-4)
+  w <- (1 - ph) / ph
+  w[!is.finite(w) | w < 0] <- 0
+  if (mean(w) <= 0) return(rep(1, n))
+  w <- w / mean(w); w <- pmin(w, wmax); w / mean(w)
+}
+
+# Spatial-block conformal calibration residuals: refit base + the selected
+# correction on spatial k-means blocks and predict each held-out block (an
+# extrapolation regime); the resulting |residuals| are larger than random-fold
+# residuals, so their quantile gives intervals that restore design-based coverage
+# under clustered sampling. Trees are capped for affordability.
+.dbt_spatial_conformal_resid <- function(train_df, response_name, predictor_names,
+                                         coord_names, mode, lambda, base_params,
+                                         n_basis, bandwidth, k_blocks = 5L, seed = 1L) {
+  if (length(coord_names) != 2L) return(NULL)
+  coords <- as.matrix(train_df[, coord_names, drop = FALSE])
+  n <- nrow(train_df)
+  if (!is.null(base_params)) {
+    base_params$num.trees <- as.integer(min(as.integer(base_params$num.trees), 300L))
+  }
+  k <- as.integer(max(2L, min(k_blocks, nrow(unique(round(coords, 6))) - 1L)))
+  set.seed(as.integer(seed))
+  km <- tryCatch(stats::kmeans(coords, centers = k, iter.max = 50L,
+                               nstart = 3L)$cluster, error = function(e) NULL)
+  if (is.null(km)) return(NULL)
+  y <- as.numeric(train_df[[response_name]])
+  res <- rep(NA_real_, n)
+  lam <- if (is.finite(lambda)) lambda else 0
+  for (b in sort(unique(km))) {
+    te <- which(km == b); tr <- which(km != b)
+    if (length(tr) < 20L || length(te) < 1L) next
+    bc <- tryCatch(.dbt_block_base_corr(
+      train_df[tr, , drop = FALSE], train_df[te, , drop = FALSE],
+      response_name, predictor_names, coord_names, mode, base_params,
+      n_basis, bandwidth, TRUE, seed + b), error = function(e) NULL)
+    if (is.null(bc)) next
+    res[te] <- y[te] - (bc$base + lam * bc$corr)
+  }
+  ra <- abs(res)
+  ra[is.finite(ra)]
+}
+
+# Weighted empirical quantile (weights need not sum to 1).
+.dbt_wquantile <- function(v, w, p) {
+  ok <- is.finite(v) & is.finite(w) & w >= 0
+  if (sum(ok) < 5L || sum(w[ok]) <= 0) return(NA_real_)
+  v <- v[ok]; w <- w[ok]; o <- order(v); v <- v[o]; w <- w[o]
+  cw <- cumsum(w) / sum(w)
+  v[which(cw >= p)[1L]]
+}
+
 .dbt_preserve_global_rng <- function() {
   had_seed <- exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)
   old_seed <- if (had_seed) get(".Random.seed", envir = .GlobalEnv) else NULL
@@ -1437,11 +1520,69 @@
     suppressWarnings(as.numeric(test_df[[response_name]]))
   } else rep(NA_real_, nrow(test_df))
   has_test_obs <- any(is.finite(test_obs))
+
+  # ---- Conformal prediction quantiles from cross-fitted (OOF) residuals -------
+  # The OOF prediction of the DEPLOYED configuration gives leakage-free residuals;
+  # their absolute conformal quantile yields prediction intervals ŷ(s) ± q with
+  # valid marginal coverage, which becomes design-based coverage on a probability
+  # sample (extends the Wadoux design-based assessment from RMSE to intervals).
+  oof_pred <- base_oof
+  if (mode %in% c("linear_cal", "quadratic_cal", "stack_rf_cubist")) {
+    oof_pred <- switch(mode,
+      linear_cal = .dbt_oof_calibrate(cal_df, folds, y ~ rf),
+      quadratic_cal = .dbt_oof_calibrate(cal_df, folds, y ~ rf + I(rf ^ 2)),
+      stack_rf_cubist = .dbt_oof_calibrate(cal_df, folds, y ~ rf + cubist))
+  } else if (mode != "RF_noharm" && !is.null(valid_corr[[mode]]) &&
+             is.finite(lambda)) {
+    cc <- as.numeric(valid_corr[[mode]]); cc[!is.finite(cc)] <- 0
+    oof_pred <- base_oof + lambda * cc
+  }
+  resid_oof <- abs(y - oof_pred)
+  finite_r <- is.finite(resid_oof)
+  .dbt_conf_q <- function(a) {
+    rr <- resid_oof[finite_r]
+    if (length(rr) < 5L) return(NA_real_)
+    k <- min(length(rr), ceiling((length(rr) + 1) * (1 - a)))
+    sort(rr)[k]
+  }
+  conformal_q90 <- .dbt_conf_q(0.10)
+  conformal_q95 <- .dbt_conf_q(0.05)
+  # Design-aware (weighted) conformal: density-ratio weights (calibration vs the
+  # population-reference covariates of test_df) restore design-based coverage under
+  # clustered/biased sampling, where plain conformal under-covers.
+  dr_w <- .dbt_density_ratio_weights(train_df, test_df, predictor_names,
+                                     coord_names, seed = train_seed + 4242L)
+  conformal_q90_w <- .dbt_wquantile(resid_oof[finite_r], dr_w[finite_r], 0.90)
+  conformal_q95_w <- .dbt_wquantile(resid_oof[finite_r], dr_w[finite_r], 0.95)
+  if (!is.finite(conformal_q90_w)) conformal_q90_w <- conformal_q90
+  if (!is.finite(conformal_q95_w)) conformal_q95_w <- conformal_q95
+  # Spatial-block conformal: calibrate on extrapolation-aware residuals so the
+  # interval widens appropriately under clustered sampling (restores coverage).
+  conformal_q90_sp <- conformal_q90; conformal_q95_sp <- conformal_q95
+  if (use_spatial && (mode %in% additive_modes || mode == "RF_noharm")) {
+    rsp <- .dbt_spatial_conformal_resid(train_df, response_name, predictor_names,
+             coord_names, mode, lambda, rf_full_fit$params, n_basis, bandwidth,
+             k_blocks = 5L, seed = train_seed + 8888L)
+    if (!is.null(rsp) && length(rsp) >= 20L) {
+      .qsp <- function(a) {
+        k <- min(length(rsp), ceiling((length(rsp) + 1) * (1 - a)))
+        sort(rsp)[k]
+      }
+      conformal_q90_sp <- .qsp(0.10); conformal_q95_sp <- .qsp(0.05)
+    }
+  }
+
   list(
     pred_test = as.numeric(pred_test),
     pred_test_base = as.numeric(base_test),
     pred_test_cubist = as.numeric(cubist_test),
     correction_test = as.numeric(selected_correction_test),
+    pi_q90 = conformal_q90,
+    pi_q95 = conformal_q95,
+    pi_q90_w = conformal_q90_w,
+    pi_q95_w = conformal_q95_w,
+    pi_q90_sp = conformal_q90_sp,
+    pi_q95_sp = conformal_q95_sp,
     metrics_test = data.frame(
       N = length(test_obs),
       RMSE = if (has_test_obs) .dbt_rmse(test_obs, pred_test) else NA_real_,
@@ -1467,6 +1608,12 @@
       gate_length = gate_length,
       gate_rho = gate_rho,
       gate_active = is.finite(gate_length),
+      conformal_q90 = conformal_q90,
+      conformal_q95 = conformal_q95,
+      conformal_q90_w = conformal_q90_w,
+      conformal_q95_w = conformal_q95_w,
+      conformal_q90_sp = conformal_q90_sp,
+      conformal_q95_sp = conformal_q95_sp,
       rf_tune = rf_tune,
       rf_tune_method = base_rf_tune_method,
       rf_tune_inner_folds = rf_tune_inner_folds,

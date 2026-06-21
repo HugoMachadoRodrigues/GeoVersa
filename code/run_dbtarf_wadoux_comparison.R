@@ -206,6 +206,59 @@ fit_predict_cubist_dbt <- function(X_train, y_train, X_test,
                      neighbors = neighbors))
 }
 
+# ---- Uncertainty (design-based prediction intervals) ------------------------
+
+# Quantile-regression-forest 90% interval (Meinshausen QRF), the uncertainty
+# baseline for the DB-TARF conformal interval.
+fit_rf_quantile_interval <- function(train_df, test_df, alpha = 0.10, seed = 1L) {
+  if (!requireNamespace("ranger", quietly = TRUE)) return(NULL)
+  m <- tryCatch(ranger::ranger(form_rf, data = train_df, quantreg = TRUE,
+                               num.threads = 1L, seed = as.integer(seed)),
+                error = function(e) NULL)
+  if (is.null(m)) return(NULL)
+  p <- tryCatch(predict(m, data = test_df, type = "quantiles",
+                        quantiles = c(alpha / 2, 1 - alpha / 2),
+                        num.threads = 1L)$predictions, error = function(e) NULL)
+  if (is.null(p)) return(NULL)
+  list(lwr = as.numeric(p[, 1]), upr = as.numeric(p[, 2]))
+}
+
+# Design-based interval assessment on the probability validation sample:
+# PICP90 = coverage (design-unbiased estimate of population coverage),
+# MPIW90 = mean interval width. Compares DB-TARF conformal vs QRF at nominal 0.90.
+eval_uncertainty_dbt <- function(obs, dbt_out, pred_dbt, valuetable, test_df,
+                                 iter, protocol, seed) {
+  rows <- list()
+  wrow <- function(model, lwr, upr) {
+    ok <- is.finite(lwr) & is.finite(upr) & is.finite(obs)
+    if (sum(ok) == 0L) return(NULL)
+    data.frame(iteration = iter, scenario = scenario, protocol = protocol,
+      model = model,
+      PICP90 = mean(obs[ok] >= lwr[ok] & obs[ok] <= upr[ok]),
+      MPIW90 = mean(upr[ok] - lwr[ok]), stringsAsFactors = FALSE)
+  }
+  if (!is.null(dbt_out) && !is.null(dbt_out$pi_q90) &&
+      is.finite(dbt_out$pi_q90) && !is.null(pred_dbt)) {
+    q <- dbt_out$pi_q90
+    rows[[length(rows) + 1L]] <- wrow("DBTARF", pred_dbt - q, pred_dbt + q)
+    # Design-aware (density-ratio weighted) conformal: restores coverage under
+    # clustered sampling where plain conformal under-covers.
+    if (!is.null(dbt_out$pi_q90_w) && is.finite(dbt_out$pi_q90_w)) {
+      qw <- dbt_out$pi_q90_w
+      rows[[length(rows) + 1L]] <- wrow("DBTARF_dbcal", pred_dbt - qw, pred_dbt + qw)
+    }
+    # Spatial-block-calibrated conformal (extrapolation-aware).
+    if (!is.null(dbt_out$pi_q90_sp) && is.finite(dbt_out$pi_q90_sp)) {
+      qs <- dbt_out$pi_q90_sp
+      rows[[length(rows) + 1L]] <- wrow("DBTARF_spcal", pred_dbt - qs, pred_dbt + qs)
+    }
+  }
+  qi <- fit_rf_quantile_interval(valuetable, test_df, alpha = 0.10, seed = seed)
+  if (!is.null(qi)) rows[[length(rows) + 1L]] <- wrow("RF_quantile", qi$lwr, qi$upr)
+  rows <- rows[!vapply(rows, is.null, logical(1))]
+  if (length(rows)) do.call(rbind, rows) else data.frame()
+}
+
 # ---- Metrics ----------------------------------------------------------------
 
 emit_metric_rows_dbt <- function(obs, pred_map, protocol, iter, scenario) {
@@ -286,14 +339,22 @@ eval_protocol_dbt <- function(protocol, valuetable, iter) {
   if (identical(protocol, "DesignBased")) {
     val_srs <- sample_simple_random_rows_wadoux(common_data$s_df, sample_size)
     fp <- fit_predict_all_dbt(valuetable, val_srs, iter, capture_diag = TRUE)
+    unc <- eval_uncertainty_dbt(val_srs[[response_name_wadoux]], fp$dbtarf,
+             fp$pred_map$DBTARF, valuetable, val_srs, iter, protocol,
+             seed = train_seed + iter)
     return(c(list(metrics = emit_metric_rows_dbt(
-      val_srs[[response_name_wadoux]], fp$pred_map, protocol, iter, scenario)),
+      val_srs[[response_name_wadoux]], fp$pred_map, protocol, iter, scenario),
+      uncertainty = unc),
       collect_dbtarf_diag(fp$dbtarf, protocol, iter)))
   }
   if (identical(protocol, "Population")) {
     fp <- fit_predict_all_dbt(valuetable, pop_eval_df, iter, capture_diag = TRUE)
+    unc <- eval_uncertainty_dbt(pop_eval_df[[response_name_wadoux]], fp$dbtarf,
+             fp$pred_map$DBTARF, valuetable, pop_eval_df, iter, protocol,
+             seed = train_seed + iter)
     return(c(list(metrics = emit_metric_rows_dbt(
-      pop_eval_df[[response_name_wadoux]], fp$pred_map, protocol, iter, scenario)),
+      pop_eval_df[[response_name_wadoux]], fp$pred_map, protocol, iter, scenario),
+      uncertainty = unc),
       collect_dbtarf_diag(fp$dbtarf, protocol, iter)))
   }
   if (identical(protocol, "SpatialKFold")) {
@@ -321,7 +382,8 @@ eval_protocol_dbt <- function(protocol, valuetable, iter) {
     }
     cat(sprintf("[DBTARF] SpatialKFold: %d spatial folds (val_dist=%g km, cores=%d)\n",
                 length(groups), val_dist_km, fold_cores))
-    return(c(list(metrics = emit_metric_rows_dbt(obs_all, acc, protocol, iter, scenario)),
+    return(c(list(metrics = emit_metric_rows_dbt(obs_all, acc, protocol, iter, scenario),
+      uncertainty = data.frame()),
       collect_dbtarf_diag(NULL, protocol, iter)))
   }
   stop("Unsupported protocol: ", protocol)
@@ -462,6 +524,7 @@ all_diagnostic_rows <- list()
 all_candidate_rows <- list()
 all_fold_rows <- list()
 all_tuning_rows <- list()
+all_unc_rows <- list()
 
 for (iter in seq_len(n_iter)) {
   cat(sprintf("\n==================================================\n"))
@@ -472,13 +535,16 @@ for (iter in seq_len(n_iter)) {
   valuetable <- na.omit(as.data.frame(sample_calibration_dbt()))
 
   metric_parts <- list(); diag_parts <- list(); cand_parts <- list()
-  fold_parts <- list(); tune_parts <- list()
+  fold_parts <- list(); tune_parts <- list(); unc_parts <- list()
   for (protocol in protocols) {
     cat(sprintf("--- protocol: %s ---\n", protocol))
     po <- eval_protocol_dbt(protocol, valuetable, iter)
     if (!is.null(po$metrics) && nrow(po$metrics) > 0L) {
       print(po$metrics)
       metric_parts[[length(metric_parts) + 1L]] <- po$metrics
+    }
+    if (!is.null(po$uncertainty) && nrow(po$uncertainty) > 0L) {
+      unc_parts[[length(unc_parts) + 1L]] <- po$uncertainty
     }
     if (!is.null(po$diagnostics) && nrow(po$diagnostics) > 0L) {
       diag_parts[[length(diag_parts) + 1L]] <- po$diagnostics
@@ -498,11 +564,28 @@ for (iter in seq_len(n_iter)) {
   if (length(cand_parts)) all_candidate_rows[[iter]] <- do.call(rbind, cand_parts)
   if (length(fold_parts)) all_fold_rows[[iter]] <- do.call(rbind, fold_parts)
   if (length(tune_parts)) all_tuning_rows[[iter]] <- do.call(rbind, tune_parts)
+  if (length(unc_parts)) all_unc_rows[[iter]] <- do.call(rbind, unc_parts)
 
   if (iter %% checkpoint_every == 0L || iter == n_iter) {
     save_dbt_checkpoint(iter, all_metric_rows, all_diagnostic_rows,
                         all_candidate_rows, all_fold_rows, all_tuning_rows)
     summarise_and_save_dbt(all_metric_rows)
+    unc_df <- do.call(rbind, all_unc_rows[!vapply(all_unc_rows, is.null, logical(1))])
+    if (!is.null(unc_df) && nrow(unc_df) > 0L) {
+      write.csv(unc_df, file.path(results_dir, "dbtarf_uncertainty.csv"),
+                row.names = FALSE)
+      usum <- aggregate(cbind(PICP90, MPIW90) ~ scenario + protocol + model,
+                        data = unc_df, na.action = na.pass,
+                        FUN = function(x) c(mean = mean(x, na.rm = TRUE),
+                                            sd = sd(x, na.rm = TRUE)))
+      ustat <- do.call(cbind, lapply(c("PICP90", "MPIW90"), function(m) {
+        mat <- usum[[m]]
+        setNames(as.data.frame(mat), c(paste0(m, "_mean"), paste0(m, "_sd")))
+      }))
+      write.csv(cbind(usum[, c("scenario", "protocol", "model")], ustat),
+                file.path(results_dir, "dbtarf_uncertainty_summary.csv"),
+                row.names = FALSE)
+    }
   }
 }
 
