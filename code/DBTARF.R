@@ -5,7 +5,10 @@
 #
 # Prediction form:
 #
-#   y_hat(s, x) = RF_tuned(s, x) + lambda * correction(s, x)
+#   y_hat(s, x) = RF_tuned(s, x) + lambda * w(s) * correction(s, x)
+#   w(s) = exp(-d1(s) / ell): spatially-adaptive shrinkage gate (d1 = distance to
+#   nearest calibration point, ell = gate_c * residual variogram range; gate_c
+#   incl. Inf=off chosen by OOF). Down-weights the correction under extrapolation.
 #
 # The complete DB-TARF pipeline is tuned by comparing full candidate profiles
 # with out-of-fold RMSE. The default RF/residual-RF profile is one candidate in
@@ -826,6 +829,131 @@
   out
 }
 
+# Distance from each query location to its nearest reference (calibration) point.
+# Drives the spatial confidence gate; chunked over queries for the full grid.
+.dbt_nn_dist <- function(coords_query, coords_ref, chunk = 20000L) {
+  coords_query <- as.matrix(coords_query)
+  coords_ref <- as.matrix(coords_ref)
+  cr2 <- rowSums(coords_ref ^ 2)
+  n_q <- nrow(coords_query)
+  out <- numeric(n_q)
+  for (s in seq.int(1L, n_q, by = chunk)) {
+    e <- min(s + chunk - 1L, n_q)
+    cq <- coords_query[s:e, , drop = FALSE]
+    d2 <- outer(rowSums(cq ^ 2), cr2, `+`) - 2 * cq %*% t(coords_ref)
+    d2[d2 < 0] <- 0
+    out[s:e] <- sqrt(apply(d2, 1L, min))
+  }
+  out
+}
+
+# Refit the base RF + a single residual-correction `mode` on a training subset
+# and predict a held-out subset. Used by the spatial-CV gate selector; mirrors
+# the cross-fit/apply correction logic for one mode.
+.dbt_block_base_corr <- function(tr, va, response_name, predictor_names, coord_names,
+                                 mode, base_params, n_basis, bandwidth,
+                                 use_spatial, seed) {
+  rf <- .dbt_fit_rf(tr, response_name, predictor_names, rf_params = base_params,
+                    seed = seed)
+  base_tr <- .dbt_oob_or_in_sample(rf, tr)
+  base_va <- .dbt_predict_rf(rf, va)
+  resid_tr <- as.numeric(tr[[response_name]]) - base_tr
+  if (identical(mode, "bias")) {
+    return(list(base = base_va, corr = rep(mean(resid_tr, na.rm = TRUE), nrow(va))))
+  }
+  x_tr <- as.data.frame(tr[, predictor_names, drop = FALSE])
+  x_va <- as.data.frame(va[, predictor_names, drop = FALSE])
+  cb <- .dbt_fit_cubist(x_tr, tr[[response_name]])
+  cb_tr <- .dbt_predict_cubist(cb, x_tr); cb_va <- .dbt_predict_cubist(cb, x_va)
+  if (identical(mode, "cubist_delta")) {
+    return(list(base = base_va, corr = cb_va - base_va))
+  }
+  basis <- NULL; coords_tr <- coords_va <- NULL
+  if (use_spatial) {
+    coords_tr <- as.matrix(tr[, coord_names, drop = FALSE])
+    coords_va <- as.matrix(va[, coord_names, drop = FALSE])
+    basis <- .dbt_fit_basis(coords_tr, resid_tr, n_basis = n_basis,
+                            bandwidth = bandwidth, seed = seed)
+  }
+  feat_tr <- .dbt_residual_features(tr, predictor_names, coord_names, base_tr, cb_tr, basis)
+  feat_va <- .dbt_residual_features(va, predictor_names, coord_names, base_va, cb_va, basis)
+  fit_rrf <- function() .dbt_tune_rf_model(
+    cbind(as.data.frame(feat_tr), .resid = as.numeric(resid_tr)), ".resid",
+    names(as.data.frame(feat_tr)), tune = FALSE, tune_method = "none", seed = seed)
+  corr <- switch(mode,
+    resid_cubist = .dbt_predict_cubist(.dbt_fit_cubist(feat_tr, resid_tr), feat_va),
+    resid_rf = .dbt_predict_residual_rf(fit_rrf()$model, feat_va),
+    resid_mlp = { pm <- .dbt_predict_mlp(.dbt_fit_mlp(feat_tr, resid_tr, seed = seed), feat_va)
+                  if (is.null(pm)) rep(0, nrow(va)) else pm },
+    resid_spatial = if (use_spatial) .dbt_kernel_residual_predict(
+      coords_tr, resid_tr, coords_va, basis$bandwidth) else rep(0, nrow(va)),
+    resid_kriging = if (use_spatial) .dbt_krige_residual_predict(
+      coords_tr, resid_tr, coords_va, fallback_bandwidth = basis$bandwidth) else rep(0, nrow(va)),
+    resid_ensemble = {
+      parts <- list(rf = .dbt_predict_residual_rf(fit_rrf()$model, feat_va),
+                    cb = .dbt_predict_cubist(.dbt_fit_cubist(feat_tr, resid_tr), feat_va))
+      if (use_spatial) parts$sp <- .dbt_kernel_residual_predict(
+        coords_tr, resid_tr, coords_va, basis$bandwidth)
+      rowMeans(as.data.frame(parts), na.rm = TRUE)
+    },
+    rep(0, nrow(va)))
+  corr <- as.numeric(corr); corr[!is.finite(corr)] <- 0
+  list(base = base_va, corr = corr)
+}
+
+# Select the spatial-confidence gate factor by SPATIAL cross-validation: split the
+# calibration sample into k spatial blocks (k-means on coordinates), refit base +
+# the selected correction on the other blocks, predict each held-out block (an
+# extrapolation regime), and choose the gate length that minimises spatially-
+# blocked RMSE. Returns gate_c = Inf (no gate) if nothing beats the ungated fit.
+.dbt_select_gate_spatial <- function(train_df, response_name, predictor_names,
+                                     coord_names, mode, lambda, base_params,
+                                     n_basis, bandwidth, gate_rho,
+                                     k_blocks = 4L, seed = 1L) {
+  if (!is.finite(gate_rho) || gate_rho <= 0 || !is.finite(lambda)) {
+    return(list(gate_c = Inf, gate_length = Inf))
+  }
+  # Cap trees for the block refits: the gate only needs the length scale, not a
+  # full-fidelity forest, so this keeps the spatial-CV selection affordable.
+  if (!is.null(base_params)) {
+    base_params$num.trees <- as.integer(min(as.integer(base_params$num.trees), 300L))
+  }
+  coords <- as.matrix(train_df[, coord_names, drop = FALSE])
+  n <- nrow(train_df)
+  k <- as.integer(max(2L, min(k_blocks, nrow(unique(round(coords, 6))) - 1L)))
+  set.seed(as.integer(seed))
+  km <- tryCatch(stats::kmeans(coords, centers = k, iter.max = 50L,
+                               nstart = 3L)$cluster, error = function(e) NULL)
+  if (is.null(km)) return(list(gate_c = Inf, gate_length = Inf))
+  y <- as.numeric(train_df[[response_name]])
+  base_sp <- rep(NA_real_, n); corr_sp <- rep(NA_real_, n); d1 <- rep(NA_real_, n)
+  for (b in sort(unique(km))) {
+    te_idx <- which(km == b); tr_idx <- which(km != b)
+    if (length(tr_idx) < 20L || length(te_idx) < 1L) next
+    bc <- tryCatch(.dbt_block_base_corr(
+      train_df[tr_idx, , drop = FALSE], train_df[te_idx, , drop = FALSE],
+      response_name, predictor_names, coord_names, mode, base_params,
+      n_basis, bandwidth, TRUE, seed + b), error = function(e) NULL)
+    if (is.null(bc)) next
+    base_sp[te_idx] <- bc$base; corr_sp[te_idx] <- bc$corr
+    d1[te_idx] <- .dbt_nn_dist(coords[te_idx, , drop = FALSE],
+                               coords[tr_idx, , drop = FALSE])
+  }
+  ok <- is.finite(base_sp) & is.finite(corr_sp) & is.finite(d1) & is.finite(y)
+  if (sum(ok) < 20L) return(list(gate_c = Inf, gate_length = Inf))
+  yy <- y[ok]; bb <- base_sp[ok]; cv <- corr_sp[ok]; dd <- d1[ok]
+  best_rmse <- .dbt_rmse(yy, bb + lambda * cv)
+  gc <- Inf; gl <- Inf
+  for (cf in c(3, 2, 1.5, 1, 0.75, 0.5, 0.25, 0.1)) {
+    w <- exp(-dd / (cf * gate_rho))
+    rmg <- .dbt_rmse(yy, bb + lambda * w * cv)
+    if (is.finite(rmg) && rmg < best_rmse - 1e-9) {
+      best_rmse <- rmg; gc <- cf; gl <- cf * gate_rho
+    }
+  }
+  list(gate_c = gc, gate_length = gl)
+}
+
 .dbt_preserve_global_rng <- function() {
   had_seed <- exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)
   old_seed <- if (had_seed) get(".Random.seed", envir = .GlobalEnv) else NULL
@@ -1145,6 +1273,14 @@
     best <- candidates[candidates$mode == "RF_noharm", , drop = FALSE][1L, ]
   }
 
+  # Spatially-adaptive shrinkage gate (novel component): the gate strength is
+  # selected by SPATIAL cross-validation in the apply step below, where the base
+  # RF configuration is available. Initialised to "off" here.
+  additive_modes <- c("bias", "cubist_delta", "resid_rf", "resid_cubist",
+                      "resid_mlp", "resid_spatial", "resid_kriging", "resid_ensemble")
+  gate_c <- Inf; gate_length <- Inf; gate_rho <- NA_real_
+  best_mode_chr <- as.character(best$mode)
+
   cat(sprintf("[DBTARF] OOF RF RMSE=%.3f | selected=%s lambda=%s OOF RMSE=%.3f\n",
               baseline_rmse, best$mode,
               ifelse(is.na(best$lambda), "NA", sprintf("%.2f", best$lambda)),
@@ -1272,7 +1408,27 @@
       }
     }
     selected_correction_test[!is.finite(selected_correction_test)] <- 0
-    pred_test <- base_test + lambda * selected_correction_test
+    if (use_spatial && length(coord_names) == 2L &&
+        best_mode_chr %in% additive_modes && is.finite(lambda)) {
+      vg_gate <- .dbt_fit_variogram(
+        residual_full, as.matrix(train_df[, coord_names, drop = FALSE]))
+      gate_rho <- if (!is.null(vg_gate)) vg_gate$range_major else NA_real_
+      if (is.finite(gate_rho) && gate_rho > 0) {
+        gsel <- .dbt_select_gate_spatial(
+          train_df, response_name, predictor_names, coord_names,
+          best_mode_chr, lambda, base_params = rf_full_fit$params,
+          n_basis = n_basis, bandwidth = bandwidth, gate_rho = gate_rho,
+          k_blocks = 4L, seed = train_seed + 7L)
+        gate_c <- gsel$gate_c; gate_length <- gsel$gate_length
+      }
+    }
+    gate_w_test <- rep(1, length(base_test))
+    if (is.finite(gate_length) && length(coord_names) == 2L) {
+      d_test <- .dbt_nn_dist(as.matrix(test_df[, coord_names, drop = FALSE]),
+                             as.matrix(train_df[, coord_names, drop = FALSE]))
+      gate_w_test <- exp(-d_test / gate_length)
+    }
+    pred_test <- base_test + lambda * gate_w_test * selected_correction_test
   }
 
   if (any(!is.finite(pred_test))) pred_test[!is.finite(pred_test)] <- base_test[!is.finite(pred_test)]
@@ -1307,6 +1463,10 @@
       lambda_min = min(lambda_grid, na.rm = TRUE),
       lambda_max = max(lambda_grid, na.rm = TRUE),
       min_oof_improvement = min_oof_improvement,
+      gate_c = gate_c,
+      gate_length = gate_length,
+      gate_rho = gate_rho,
+      gate_active = is.finite(gate_length),
       rf_tune = rf_tune,
       rf_tune_method = base_rf_tune_method,
       rf_tune_inner_folds = rf_tune_inner_folds,
