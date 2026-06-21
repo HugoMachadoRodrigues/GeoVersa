@@ -43,7 +43,7 @@ rm(list = ls())
 set.seed(123)
 
 source("./code/wadoux2021_rf_reproduction_helpers.R")
-source("./code/DBTARF.R")
+source("./R/dbtarf.R")  # DB-TARF lives in the package R/ directory
 
 suppressPackageStartupMessages({
   if (requireNamespace("Cubist", quietly = TRUE)) library(Cubist)

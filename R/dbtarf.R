@@ -1819,6 +1819,41 @@ dbtarf_default_params <- list(
   fair_profile_max = 6L
 )
 
+#' Fit DB-TARF and predict a test set
+#'
+#' DB-TARF (Design-Based Targeted Adaptive Residual Forest) fits a random-forest
+#' base learner on \code{train_df} and adds a cross-fitted, out-of-fold-selected
+#' residual correction, then predicts \code{test_df}. A correction is adopted
+#' only when it lowers the out-of-fold RMSE of the calibration sample.
+#'
+#' @param train_df A data frame with the response, predictors and (optionally)
+#'   coordinate columns.
+#' @param test_df A data frame with the same predictor (and coordinate) columns
+#'   as \code{train_df}.
+#' @param response_name Character; name of the response column in \code{train_df}.
+#' @param predictor_names Character vector of predictor column names, or
+#'   \code{NULL} (default) to infer them from \code{train_df}.
+#' @param coord_names Length-2 character vector of coordinate column names, or
+#'   \code{"auto"} (default) to detect them.
+#' @param ... Further arguments passed to the internal training routine (e.g.
+#'   \code{n_folds}, \code{lambda_grid}, \code{rf_tune}, \code{train_seed});
+#'   see \code{dbtarf_default_params}.
+#' @return A list with the test predictions (\code{pred_test}), the base-RF
+#'   predictions (\code{pred_test_base}), conformal prediction-interval
+#'   half-widths (\code{pi_q90}, \code{pi_q95}), per-run \code{diagnostics} and
+#'   the \code{candidate_table}.
+#' @examples
+#' \dontrun{
+#' set.seed(1)
+#' n <- 200
+#' tr <- data.frame(y = rnorm(n), a = rnorm(n), b = rnorm(n),
+#'                  x = runif(n), z = runif(n))
+#' te <- tr[1:20, ]
+#' out <- dbtarf_train_predict(tr, te, "y", c("a", "b"), c("x", "z"))
+#' head(out$pred_test)
+#' }
+#' @importFrom stats predict
+#' @export
 dbtarf_train_predict <- function(train_df,
                                  test_df,
                                  response_name,

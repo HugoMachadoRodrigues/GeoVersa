@@ -43,3 +43,7 @@ wadoux_extract.txt
 *.tmp
 *.bak
 *.log
+
+# R package build artifacts
+*.Rcheck/
+*.tar.gz
