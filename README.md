@@ -618,7 +618,9 @@ DB-TARF wins **27 / 30** paired runs against the untuned Wadoux default RF, with
 \Delta \mathrm{MEC} = +0.007
 ```
 
-(paired Wilcoxon signed-rank $p = 1.3\times10^{-8}$; 95% CI for $\Delta\mathrm{RMSE}$ $[-1.06, -0.68]$). Tuning the forest alone buys essentially nothing here (`RF_tuned` ≈ `RF`), so the gain comes from the **residual correction**, not the tuning — and DB-TARF drives the design-based bias to ≈0 (ME `-0.04` vs `0.21`). The reference is the untuned default RF, as in Wadoux et al. (2021); DB-TARF performs internal selection on the calibration sample. Full method, honest caveats, reproduction command, and paired statistics: see [`docs/dbtarf_wadoux_validation.md`](docs/dbtarf_wadoux_validation.md).
+(paired Wilcoxon signed-rank $p = 1.3\times10^{-8}$; 95% CI for $\Delta\mathrm{RMSE}$ $[-1.06, -0.68]$). Tuning the forest alone buys essentially nothing here (`RF_tuned` ≈ `RF`), so the gain comes from the **residual correction**, not the tuning — and DB-TARF drives the design-based bias to ≈0 (ME `-0.04` vs `0.21`). The reference is the untuned default RF, as in Wadoux et al. (2021); DB-TARF performs internal selection on the calibration sample.
+
+The result holds across all three Wadoux sampling designs — `random`, `regular_grid` (systematic), and `clustered_random` (two-stage): DB-TARF wins 27–28/30 in each (Wilcoxon $p < 10^{-7}$), with the largest gain under the hardest clustered design ($\Delta\mathrm{RMSE}=-1.16$). Full method, honest caveats, per-scenario table, reproduction commands, and paired statistics: see [`docs/dbtarf_wadoux_validation.md`](docs/dbtarf_wadoux_validation.md).
 
 ---
 

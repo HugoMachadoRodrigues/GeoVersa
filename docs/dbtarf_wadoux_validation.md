@@ -127,6 +127,27 @@ DB-TARF also drives the design-based bias to essentially zero (ME -0.04 vs RF
   The deltas here are ~-0.9 (far from 0) with no ties, so the win count is robust
   to rounding.
 
+## Generalization across Wadoux sampling designs
+
+Wadoux et al. (2021) consider three calibration sampling designs. Repeating the
+same n = 500, 30-rep, seed-123 protocol for each (DB-TARF vs the untuned Wadoux
+default RF):
+
+| Scenario | RF RMSE | RF_tuned RMSE | DBTARF RMSE | DBTARF wins | Mean delta RMSE | 95% CI | Wilcoxon p |
+| --- | ---: | ---: | ---: | ---: | ---: | --- | ---: |
+| `random` (simple random) | 31.63 | 31.61 | 30.75 | 27/30 | -0.872 | [-1.06, -0.68] | 1.3e-08 |
+| `regular_grid` (systematic) | 32.16 | 32.13 | 31.41 | 28/30 | -0.750 | [-0.95, -0.55] | 3.7e-08 |
+| `clustered_random` (two-stage) | 35.65 | 35.63 | 34.49 | 28/30 | -1.156 | [-1.45, -0.87] | 4.9e-08 |
+
+DB-TARF wins ~28/30 with a statistically significant RMSE reduction under all
+three designs, and `RF_tuned` ≈ RF in every case (tuning the forest is neutral;
+the gain is the residual correction). The improvement is largest under the
+hardest clustered design (mean delta RMSE -1.16), where DB-TARF also nearly
+eliminates the design-based bias (ME 0.06 vs RF -0.73). Reproduce the other two
+designs by setting `DBT_SCENARIO=regular_grid` or `DBT_SCENARIO=clustered_random`
+(outputs in `results/dbtarf_n500_regular_grid30` and
+`results/dbtarf_n500_clustered_random30`).
+
 ## Local Evidence Files
 
 Generated outputs, intentionally gitignored through `results/**`:

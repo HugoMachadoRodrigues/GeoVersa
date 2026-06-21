@@ -9,7 +9,7 @@ The project is currently in research-stage development and follows a `0.x` versi
 ### Added
 
 - **DB-TARF** (Design-Based Targeted Adaptive Residual Forest): `y_hat = RF_selected + lambda * correction`, where the base RF is chosen by a fair profile search (or optional OOB/CV grid tuning) and a cross-fitted, out-of-fold-selected residual correction is added only when it improves OOF RMSE (`code/DBTARF.R`; runner `code/run_dbtarf_wadoux_comparison.R`; validation `docs/dbtarf_wadoux_validation.md`)
-- DB-TARF is the first model in this repository to beat the Wadoux (2021) default-RF reference under the `DesignBased` protocol: RMSE 30.75 vs 31.63, winning 27/30 paired runs (mean ΔRMSE = −0.872, paired Wilcoxon p = 1.3e-08, 95% CI [−1.06, −0.68]), while reducing design-based bias to ≈0 (ME −0.04 vs 0.21). Tuning the forest alone is ≈neutral (`RF_tuned` ≈ RF), so the gain is the residual correction
+- DB-TARF is the first model in this repository to beat the Wadoux (2021) default-RF reference under the `DesignBased` protocol: RMSE 30.75 vs 31.63, winning 27/30 paired runs (mean ΔRMSE = −0.872, paired Wilcoxon p = 1.3e-08, 95% CI [−1.06, −0.68]), while reducing design-based bias to ≈0 (ME −0.04 vs 0.21). Tuning the forest alone is ≈neutral (`RF_tuned` ≈ RF), so the gain is the residual correction. The win generalizes across all three Wadoux sampling designs (`random`, `regular_grid`, `clustered_random`), 27–28/30 each (Wilcoxon p < 1e-7)
 - `RF_tuned` transparency model in the benchmark (base RF of the selected profile, no correction) plus a script-generated paired win-rate summary (`dbtarf_winrate_vs_RF.csv`) and RF tuning trace (`dbtarf_rf_tuning_scores.csv`)
 
 ### Changed
