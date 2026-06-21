@@ -17,6 +17,7 @@
 #   - ranger
 #   - caret
 #   - Cubist (optional residual expert)
+#   - nnet (optional single-hidden-layer MLP residual expert)
 #   - gstat, sp (variogram-informed RBF features; ordinary kriging of residuals)
 # =============================================================================
 
@@ -705,6 +706,45 @@
   as.numeric(predict(model, data = as.data.frame(features))$predictions)
 }
 
+# Single-hidden-layer MLP (neural network) residual learner via nnet. Features
+# and the residual target are standardised (nnet is scale-sensitive); weight
+# decay regularises. Deterministic given the seed (random initial weights).
+# Returns NULL if nnet is unavailable or the fit fails, so it is safe to call.
+.dbt_fit_mlp <- function(features, residuals, seed = NULL, size = NULL,
+                         decay = 1e-3, maxit = 200L) {
+  if (!requireNamespace("nnet", quietly = TRUE)) return(NULL)
+  X <- suppressWarnings(data.matrix(as.data.frame(features)))
+  y <- as.numeric(residuals)
+  ok <- is.finite(y) & apply(is.finite(X), 1L, all)
+  if (sum(ok) < 20L) return(NULL)
+  X <- X[ok, , drop = FALSE]; y <- y[ok]
+  ctr <- colMeans(X)
+  scl <- apply(X, 2L, stats::sd); scl[!is.finite(scl) | scl < 1e-8] <- 1
+  Xs <- scale(X, center = ctr, scale = scl)
+  ymu <- mean(y); ysd <- stats::sd(y)
+  if (!is.finite(ysd) || ysd < 1e-8) ysd <- 1
+  ys <- (y - ymu) / ysd
+  if (is.null(size)) size <- max(2L, min(10L, round(sqrt(ncol(Xs))) + 1L))
+  if (!is.null(seed)) set.seed(as.integer(seed))
+  fit <- tryCatch(
+    nnet::nnet(Xs, ys, size = size, decay = decay, maxit = maxit,
+               linout = TRUE, trace = FALSE, MaxNWts = 50000L),
+    error = function(e) NULL)
+  if (is.null(fit)) return(NULL)
+  list(fit = fit, ctr = ctr, scl = scl, ymu = ymu, ysd = ysd, cols = colnames(X))
+}
+
+.dbt_predict_mlp <- function(model, features) {
+  if (is.null(model)) return(NULL)
+  X <- suppressWarnings(data.matrix(as.data.frame(features)))
+  if (length(setdiff(model$cols, colnames(X))) > 0L) return(NULL)
+  X <- X[, model$cols, drop = FALSE]
+  X[!is.finite(X)] <- 0
+  Xs <- scale(X, center = model$ctr, scale = model$scl)
+  p <- suppressWarnings(as.numeric(stats::predict(model$fit, Xs)))
+  p * model$ysd + model$ymu
+}
+
 .dbt_kernel_residual_predict <- function(coords_train, residuals_train,
                                          coords_new, bandwidth,
                                          chunk = 20000L) {
@@ -921,7 +961,8 @@
     bias = rep(NA_real_, n),
     cubist_delta = rep(NA_real_, n),
     resid_rf = rep(NA_real_, n),
-    resid_cubist = rep(NA_real_, n)
+    resid_cubist = rep(NA_real_, n),
+    resid_mlp = rep(NA_real_, n)
   )
   if (use_spatial) {
     corr_oof$resid_spatial <- rep(NA_real_, n)
@@ -1008,6 +1049,12 @@
     resid_cb_j <- .dbt_fit_cubist(feat_tr, resid_tr)
     if (!is.null(resid_cb_j)) {
       corr_oof$resid_cubist[id_val] <- .dbt_predict_cubist(resid_cb_j, feat_va)
+    }
+
+    resid_mlp_j <- .dbt_fit_mlp(feat_tr, resid_tr, seed = train_seed + 3000L * j)
+    if (!is.null(resid_mlp_j)) {
+      pm <- .dbt_predict_mlp(resid_mlp_j, feat_va)
+      if (!is.null(pm)) corr_oof$resid_mlp[id_val] <- pm
     }
 
     if (use_spatial) {
@@ -1191,6 +1238,10 @@
     } else if (mode == "resid_cubist") {
       mdl <- .dbt_fit_cubist(feat_train, residual_full)
       selected_correction_test <- .dbt_predict_cubist(mdl, feat_test)
+    } else if (mode == "resid_mlp") {
+      mdl <- .dbt_fit_mlp(feat_train, residual_full, seed = train_seed + 970000L)
+      pm <- .dbt_predict_mlp(mdl, feat_test)
+      if (!is.null(pm)) selected_correction_test <- pm
     } else if (mode == "resid_spatial" && use_spatial) {
       selected_correction_test <- .dbt_kernel_residual_predict(
         as.matrix(train_df[, coord_names, drop = FALSE]), residual_full,
