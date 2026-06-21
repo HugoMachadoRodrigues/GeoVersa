@@ -18,3 +18,4 @@
 ^.*\.Rcheck$
 ^.*\.tar\.gz$
 ^\.git$
+^cran-comments\.md$

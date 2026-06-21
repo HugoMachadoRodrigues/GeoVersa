@@ -45,13 +45,12 @@ residual correction, then predicts \code{test_df}. A correction is adopted
 only when it lowers the out-of-fold RMSE of the calibration sample.
 }
 \examples{
-\dontrun{
 set.seed(1)
-n <- 200
-tr <- data.frame(y = rnorm(n), a = rnorm(n), b = rnorm(n),
-                 x = runif(n), z = runif(n))
-te <- tr[1:20, ]
-out <- dbtarf_train_predict(tr, te, "y", c("a", "b"), c("x", "z"))
+n <- 120
+tr <- data.frame(y = rnorm(n), a = rnorm(n), b = rnorm(n))
+te <- tr[1:15, ]
+out <- dbtarf_train_predict(tr, te, "y", c("a", "b"),
+                            coord_names = NULL, rf_tune = FALSE,
+                            fair_profile_search = FALSE)
 head(out$pred_test)
-}
 }
