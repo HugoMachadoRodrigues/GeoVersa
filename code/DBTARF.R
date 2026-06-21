@@ -706,17 +706,29 @@
 }
 
 .dbt_kernel_residual_predict <- function(coords_train, residuals_train,
-                                         coords_new, bandwidth) {
+                                         coords_new, bandwidth,
+                                         chunk = 20000L) {
   coords_train <- as.matrix(coords_train)
   coords_new <- as.matrix(coords_new)
   residuals_train <- as.numeric(residuals_train)
-  d2 <- outer(rowSums(coords_new ^ 2), rowSums(coords_train ^ 2), `+`) -
-    2 * coords_new %*% t(coords_train)
-  d2[d2 < 0] <- 0
-  w <- exp(-d2 / (2 * max(bandwidth, 1e-6) ^ 2))
-  denom <- rowSums(w)
-  out <- as.numeric(w %*% residuals_train) / pmax(denom, 1e-12)
-  out[!is.finite(out)] <- mean(residuals_train, na.rm = TRUE)
+  bw2 <- 2 * max(bandwidth, 1e-6) ^ 2
+  ct2 <- rowSums(coords_train ^ 2)
+  mu <- mean(residuals_train, na.rm = TRUE)
+  n_new <- nrow(coords_new)
+  out <- numeric(n_new)
+  # Chunk over new points so the dense weight matrix stays bounded (lets the
+  # Population protocol score the full ~1.3M-cell grid without exhausting memory).
+  for (s in seq.int(1L, n_new, by = chunk)) {
+    e <- min(s + chunk - 1L, n_new)
+    cn <- coords_new[s:e, , drop = FALSE]
+    d2 <- outer(rowSums(cn ^ 2), ct2, `+`) - 2 * cn %*% t(coords_train)
+    d2[d2 < 0] <- 0
+    w <- exp(-d2 / bw2)
+    denom <- rowSums(w)
+    o <- as.numeric(w %*% residuals_train) / pmax(denom, 1e-12)
+    o[!is.finite(o)] <- mu
+    out[s:e] <- o
+  }
   out
 }
 

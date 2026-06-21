@@ -9,7 +9,9 @@
 #
 # Environment overrides:
 #   DBT_SCENARIO            random | regular_grid | clustered_random
-#   DBT_PROTOCOLS           comma list, currently {DesignBased}
+#   DBT_PROTOCOLS           comma list of {Population, DesignBased, SpatialKFold}
+#   DBT_VAL_DIST_KM         SpatialKFold exclusion distance (km), default 350
+#   DBT_FOLD_CORES          fork-parallel SpatialKFold folds, default 1 (serial)
 #   DBT_MODELS              comma list of {RF, Cubist, DBTARF}
 #   DBT_N_ITER              default 5
 #   DBT_SAMPLE_SIZE         default 500
@@ -76,9 +78,10 @@ parse_num_list_dbt <- function(name, default = NULL) {
 
 scenario <- Sys.getenv("DBT_SCENARIO", unset = "random")
 protocols <- parse_list_dbt("DBT_PROTOCOLS", c("DesignBased"))
-unsupported_protocols <- setdiff(protocols, "DesignBased")
+allowed_protocols <- c("Population", "DesignBased", "SpatialKFold")
+unsupported_protocols <- setdiff(protocols, allowed_protocols)
 if (length(unsupported_protocols) > 0L) {
-  stop("DBTARF runner currently supports DesignBased only. Unsupported: ",
+  stop("DBTARF runner supports {Population, DesignBased, SpatialKFold}. Unsupported: ",
        paste(unsupported_protocols, collapse = ", "))
 }
 
@@ -94,6 +97,17 @@ sample_size <- as.integer(parse_num_dbt("DBT_SAMPLE_SIZE", 500L))
 train_seed <- as.integer(parse_num_dbt("DBT_TRAIN_SEED", 123L))
 results_dir <- Sys.getenv("DBT_RESULTS_DIR", unset = "results/dbtarf_run")
 checkpoint_every <- as.integer(parse_num_dbt("DBT_CHECKPOINT_EVERY", 1L))
+# SpatialKFold exclusion distance (km) for hclust/cutree spatial folds; the
+# Wadoux (2021) case study uses ~350 km (slightly above the AGB variogram range).
+val_dist_km <- parse_num_dbt("DBT_VAL_DIST_KM", 350)
+# Optional fork-parallel evaluation of SpatialKFold folds (each fold is seeded
+# independently, so results are identical to serial). Default 1 = serial.
+fold_cores <- as.integer(parse_num_dbt("DBT_FOLD_CORES", 1L))
+# Population protocol: score a fixed reference subset of the grid instead of all
+# ~1.3M cells. 0 = full grid (exact, slow). A large subset (e.g. 200000) is a
+# high-precision Monte-Carlo estimate of the population RMSE; the SAME cells are
+# used for every model and iteration, so the paired comparison is unaffected.
+pop_sample <- as.integer(parse_num_dbt("DBT_POP_SAMPLE", 0L))
 
 dir.create(results_dir, recursive = TRUE, showWarnings = FALSE)
 options(wadoux_corr_method = "pearson")
@@ -143,6 +157,25 @@ form_rf <- as.formula(
   paste(response_name_wadoux, "~", paste(predList, collapse = "+"))
 )
 
+# Fixed reference set the Population protocol scores against (full grid by
+# default). Drawn with a dedicated seed and the main RNG stream restored, so
+# calibration sampling in the loop is identical whether or not subsampling is on.
+pop_eval_df <- common_data$s_df
+if ("Population" %in% protocols && pop_sample > 0L &&
+    pop_sample < nrow(common_data$s_df)) {
+  .pop_old_seed <- if (exists(".Random.seed", envir = .GlobalEnv)) {
+    get(".Random.seed", envir = .GlobalEnv)
+  } else NULL
+  set.seed(20240620L)
+  pop_eval_df <- common_data$s_df[
+    sample.int(nrow(common_data$s_df), pop_sample), , drop = FALSE]
+  if (!is.null(.pop_old_seed)) {
+    assign(".Random.seed", .pop_old_seed, envir = .GlobalEnv)
+  }
+  cat(sprintf("[DBTARF runner] Population scored on a fixed %d-cell reference subset (of %d)\n",
+              pop_sample, nrow(common_data$s_df)))
+}
+
 # ---- Sampling ---------------------------------------------------------------
 
 sample_calibration_dbt <- function() {
@@ -190,33 +223,31 @@ emit_metric_rows_dbt <- function(obs, pred_map, protocol, iter, scenario) {
   do.call(rbind, rows)
 }
 
-eval_designbased_dbt <- function(valuetable, iter) {
-  val_srs <- sample_simple_random_rows_wadoux(common_data$s_df, sample_size)
-  obs <- val_srs[[response_name_wadoux]]
+# Fit RF / Cubist / DBTARF on train_df and predict test_df (shared by every
+# protocol so the comparison is identical across Population/DesignBased/SpatialKFold).
+fit_predict_all_dbt <- function(train_df, test_df, iter, seed_off = 0L,
+                                capture_diag = FALSE) {
   pred_map <- list()
-  diag_rows <- list()
-  candidate_rows <- list()
-  fold_rows <- list()
-  tuning_rows <- list()
-
+  out <- NULL
   if ("RF" %in% models) {
     # seed makes the Wadoux default-RF baseline reproducible (ranger >= 0.18 is
     # seed-reproducible across thread counts); threads left at default for speed.
-    rf <- fit_rf_default_wadoux(valuetable, form_rf, seed = train_seed + iter)
-    pred_map$RF <- predict_rf_default_wadoux(rf, val_srs)
+    rf <- fit_rf_default_wadoux(train_df, form_rf,
+                                seed = train_seed + iter + seed_off)
+    pred_map$RF <- predict_rf_default_wadoux(rf, test_df)
   }
   if ("Cubist" %in% models) {
     pred_map$Cubist <- fit_predict_cubist_dbt(
-      X_train = valuetable[, predList, drop = FALSE],
-      y_train = valuetable[[response_name_wadoux]],
-      X_test = val_srs[, predList, drop = FALSE])
+      X_train = train_df[, predList, drop = FALSE],
+      y_train = train_df[[response_name_wadoux]],
+      X_test = test_df[, predList, drop = FALSE])
   }
   if ("DBTARF" %in% models) {
     params_iter <- dbtarf_params
-    params_iter$train_seed <- train_seed + iter
+    params_iter$train_seed <- train_seed + iter + seed_off
     out <- do.call(train_dbtarf_one_fold, c(list(
-      train_df = valuetable,
-      test_df = val_srs,
+      train_df = train_df,
+      test_df = test_df,
       predictor_names = predList,
       response_name = response_name_wadoux,
       coord_names = c("x", "y")
@@ -228,21 +259,72 @@ eval_designbased_dbt <- function(valuetable, iter) {
     if (!is.null(out$pred_test_base)) {
       pred_map$RF_tuned <- as.numeric(out$pred_test_base)
     }
-    diag_rows[[1L]] <- cbind(
-      iteration = iter,
-      as.data.frame(out$diagnostics, stringsAsFactors = FALSE))
-    candidate_rows[[1L]] <- cbind(iteration = iter, out$candidate_table)
-    fold_rows[[1L]] <- cbind(iteration = iter, out$fold_diagnostics)
-    tuning_rows[[1L]] <- cbind(iteration = iter, out$rf_tuning_table)
   }
+  list(pred_map = pred_map, dbtarf = if (capture_diag) out else NULL)
+}
 
+# DBTARF diagnostic capture (only for single-train protocols). Tags by protocol.
+collect_dbtarf_diag <- function(out, protocol, iter) {
+  if (is.null(out)) {
+    return(list(diagnostics = data.frame(), candidates = data.frame(),
+                fold_diagnostics = data.frame(), rf_tuning = data.frame()))
+  }
   list(
-    metrics = emit_metric_rows_dbt(obs, pred_map, "DesignBased", iter, scenario),
-    diagnostics = if (length(diag_rows)) do.call(rbind, diag_rows) else data.frame(),
-    candidates = if (length(candidate_rows)) do.call(rbind, candidate_rows) else data.frame(),
-    fold_diagnostics = if (length(fold_rows)) do.call(rbind, fold_rows) else data.frame(),
-    rf_tuning = if (length(tuning_rows)) do.call(rbind, tuning_rows) else data.frame()
+    diagnostics = cbind(protocol = protocol, iteration = iter,
+                        as.data.frame(out$diagnostics, stringsAsFactors = FALSE)),
+    candidates = cbind(protocol = protocol, iteration = iter, out$candidate_table),
+    fold_diagnostics = cbind(protocol = protocol, iteration = iter, out$fold_diagnostics),
+    rf_tuning = cbind(protocol = protocol, iteration = iter, out$rf_tuning_table)
   )
+}
+
+# Evaluate one Wadoux protocol for one iteration, returning protocol-tagged rows.
+#   - DesignBased:  train on calibration, score an independent SRS validation draw
+#   - Population:   train on calibration, score the FULL population grid (truth)
+#   - SpatialKFold: spatial hclust/cutree folds on the calibration sample, pooled
+eval_protocol_dbt <- function(protocol, valuetable, iter) {
+  if (identical(protocol, "DesignBased")) {
+    val_srs <- sample_simple_random_rows_wadoux(common_data$s_df, sample_size)
+    fp <- fit_predict_all_dbt(valuetable, val_srs, iter, capture_diag = TRUE)
+    return(c(list(metrics = emit_metric_rows_dbt(
+      val_srs[[response_name_wadoux]], fp$pred_map, protocol, iter, scenario)),
+      collect_dbtarf_diag(fp$dbtarf, protocol, iter)))
+  }
+  if (identical(protocol, "Population")) {
+    fp <- fit_predict_all_dbt(valuetable, pop_eval_df, iter, capture_diag = TRUE)
+    return(c(list(metrics = emit_metric_rows_dbt(
+      pop_eval_df[[response_name_wadoux]], fp$pred_map, protocol, iter, scenario)),
+      collect_dbtarf_diag(fp$dbtarf, protocol, iter)))
+  }
+  if (identical(protocol, "SpatialKFold")) {
+    spatial_folds <- build_spatial_folds_wadoux(valuetable, val_dist_km)
+    groups <- sort(unique(spatial_folds))
+    one_fold <- function(jg) {
+      g <- groups[jg]
+      tr <- valuetable[spatial_folds != g, , drop = FALSE]
+      te <- valuetable[spatial_folds == g, , drop = FALSE]
+      fp <- fit_predict_all_dbt(tr, te, iter, seed_off = jg * 7919L)
+      list(obs = te[[response_name_wadoux]], pred = fp$pred_map)
+    }
+    fold_res <- if (fold_cores > 1L) {
+      parallel::mclapply(seq_along(groups), one_fold,
+                         mc.cores = fold_cores, mc.preschedule = FALSE)
+    } else {
+      lapply(seq_along(groups), one_fold)
+    }
+    obs_all <- numeric(0)
+    acc <- list()
+    for (fr in fold_res) {
+      if (is.null(fr) || inherits(fr, "try-error")) next
+      obs_all <- c(obs_all, fr$obs)
+      for (m in names(fr$pred)) acc[[m]] <- c(acc[[m]], fr$pred[[m]])
+    }
+    cat(sprintf("[DBTARF] SpatialKFold: %d spatial folds (val_dist=%g km, cores=%d)\n",
+                length(groups), val_dist_km, fold_cores))
+    return(c(list(metrics = emit_metric_rows_dbt(obs_all, acc, protocol, iter, scenario)),
+      collect_dbtarf_diag(NULL, protocol, iter)))
+  }
+  stop("Unsupported protocol: ", protocol)
 }
 
 # ---- Save helpers -----------------------------------------------------------
@@ -292,21 +374,24 @@ save_dbt_checkpoint <- function(iter, metric_rows, diagnostic_rows,
                                   "dbtarf_paired_deltas_vs_RF.csv"),
                 row.names = FALSE)
 
-      # Script-generated win-rate summary (so the headline "k/n wins" claim is
-      # reproducible from the run, not hand-counted).
-      d <- merged$delta_RMSE
-      winrate <- data.frame(
-        n_iter = length(d),
-        dbtarf_wins = sum(d < 0, na.rm = TRUE),
-        ties = sum(d == 0, na.rm = TRUE),
-        rf_wins = sum(d > 0, na.rm = TRUE),
-        mean_delta_RMSE = mean(d, na.rm = TRUE),
-        median_delta_RMSE = stats::median(d, na.rm = TRUE),
-        sd_delta_RMSE = stats::sd(d, na.rm = TRUE),
-        mean_delta_ME = mean(merged$delta_ME, na.rm = TRUE),
-        mean_delta_r2 = mean(merged$delta_r2, na.rm = TRUE),
-        mean_delta_MEC = mean(merged$delta_MEC, na.rm = TRUE),
-        stringsAsFactors = FALSE)
+      # Script-generated win-rate summary, per protocol (so the headline "k/n
+      # wins" claim is reproducible from the run, not hand-counted).
+      winrate <- do.call(rbind, lapply(split(merged, merged$protocol), function(mp) {
+        d <- mp$delta_RMSE
+        data.frame(
+          protocol = mp$protocol[1L],
+          n_iter = length(d),
+          dbtarf_wins = sum(d < 0, na.rm = TRUE),
+          ties = sum(d == 0, na.rm = TRUE),
+          rf_wins = sum(d > 0, na.rm = TRUE),
+          mean_delta_RMSE = mean(d, na.rm = TRUE),
+          median_delta_RMSE = stats::median(d, na.rm = TRUE),
+          sd_delta_RMSE = stats::sd(d, na.rm = TRUE),
+          mean_delta_ME = mean(mp$delta_ME, na.rm = TRUE),
+          mean_delta_r2 = mean(mp$delta_r2, na.rm = TRUE),
+          mean_delta_MEC = mean(mp$delta_MEC, na.rm = TRUE),
+          stringsAsFactors = FALSE)
+      }))
       write.csv(winrate, file.path(results_dir,
                                    "dbtarf_winrate_vs_RF.csv"),
                 row.names = FALSE)
@@ -367,6 +452,8 @@ write.csv(
              resid_rf_sample_fraction = paste(dbtarf_params$resid_rf_sample_fraction, collapse = ","),
              fair_profile_search = dbtarf_params$fair_profile_search,
              fair_profile_max = dbtarf_params$fair_profile_max,
+             val_dist_km = val_dist_km, fold_cores = fold_cores,
+             pop_sample = pop_sample,
              train_seed = train_seed, stringsAsFactors = FALSE),
   file.path(results_dir, "dbtarf_config.csv"), row.names = FALSE)
 
@@ -383,24 +470,34 @@ for (iter in seq_len(n_iter)) {
   cat(sprintf("==================================================\n"))
 
   valuetable <- na.omit(as.data.frame(sample_calibration_dbt()))
-  iter_out <- eval_designbased_dbt(valuetable, iter)
-  iter_df <- iter_out$metrics
-  if (!is.null(iter_df) && nrow(iter_df) > 0L) {
-    print(iter_df)
-    all_metric_rows[[iter]] <- iter_df
+
+  metric_parts <- list(); diag_parts <- list(); cand_parts <- list()
+  fold_parts <- list(); tune_parts <- list()
+  for (protocol in protocols) {
+    cat(sprintf("--- protocol: %s ---\n", protocol))
+    po <- eval_protocol_dbt(protocol, valuetable, iter)
+    if (!is.null(po$metrics) && nrow(po$metrics) > 0L) {
+      print(po$metrics)
+      metric_parts[[length(metric_parts) + 1L]] <- po$metrics
+    }
+    if (!is.null(po$diagnostics) && nrow(po$diagnostics) > 0L) {
+      diag_parts[[length(diag_parts) + 1L]] <- po$diagnostics
+    }
+    if (!is.null(po$candidates) && nrow(po$candidates) > 0L) {
+      cand_parts[[length(cand_parts) + 1L]] <- po$candidates
+    }
+    if (!is.null(po$fold_diagnostics) && nrow(po$fold_diagnostics) > 0L) {
+      fold_parts[[length(fold_parts) + 1L]] <- po$fold_diagnostics
+    }
+    if (!is.null(po$rf_tuning) && nrow(po$rf_tuning) > 0L) {
+      tune_parts[[length(tune_parts) + 1L]] <- po$rf_tuning
+    }
   }
-  if (!is.null(iter_out$diagnostics) && nrow(iter_out$diagnostics) > 0L) {
-    all_diagnostic_rows[[iter]] <- iter_out$diagnostics
-  }
-  if (!is.null(iter_out$candidates) && nrow(iter_out$candidates) > 0L) {
-    all_candidate_rows[[iter]] <- iter_out$candidates
-  }
-  if (!is.null(iter_out$fold_diagnostics) && nrow(iter_out$fold_diagnostics) > 0L) {
-    all_fold_rows[[iter]] <- iter_out$fold_diagnostics
-  }
-  if (!is.null(iter_out$rf_tuning) && nrow(iter_out$rf_tuning) > 0L) {
-    all_tuning_rows[[iter]] <- iter_out$rf_tuning
-  }
+  if (length(metric_parts)) all_metric_rows[[iter]] <- do.call(rbind, metric_parts)
+  if (length(diag_parts)) all_diagnostic_rows[[iter]] <- do.call(rbind, diag_parts)
+  if (length(cand_parts)) all_candidate_rows[[iter]] <- do.call(rbind, cand_parts)
+  if (length(fold_parts)) all_fold_rows[[iter]] <- do.call(rbind, fold_parts)
+  if (length(tune_parts)) all_tuning_rows[[iter]] <- do.call(rbind, tune_parts)
 
   if (iter %% checkpoint_every == 0L || iter == n_iter) {
     save_dbt_checkpoint(iter, all_metric_rows, all_diagnostic_rows,
