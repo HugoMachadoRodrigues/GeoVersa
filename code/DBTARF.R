@@ -17,7 +17,7 @@
 #   - ranger
 #   - caret
 #   - Cubist (optional residual expert)
-#   - gstat, sp (optional variogram-informed RBF features)
+#   - gstat, sp (variogram-informed RBF features; ordinary kriging of residuals)
 # =============================================================================
 
 .dbt_clamp <- function(x, lo, hi) pmax(lo, pmin(hi, x))
@@ -732,6 +732,60 @@
   out
 }
 
+# Ordinary kriging of the residuals (regression-kriging correction): fit an
+# exponential variogram to the residuals and krige them to new locations via
+# gstat. Unlike the kernel smoother, kriging solves the kriging system for BLUP
+# weights from the fitted covariance. Deterministic (no RNG). Falls back to the
+# kernel smoother (or the residual mean) if gstat/sp are unavailable or the
+# variogram fit fails, so it is always safe to call.
+.dbt_krige_residual_predict <- function(coords_train, residuals_train, coords_new,
+                                        fallback_bandwidth = NULL, chunk = 20000L) {
+  coords_train <- as.matrix(coords_train)
+  coords_new <- as.matrix(coords_new)
+  r <- as.numeric(residuals_train)
+  keep <- is.finite(r) & is.finite(coords_train[, 1]) & is.finite(coords_train[, 2])
+  r <- r[keep]; coords_train <- coords_train[keep, , drop = FALSE]
+  mu <- mean(r, na.rm = TRUE)
+  fb <- function() {
+    if (is.null(fallback_bandwidth) || !is.finite(fallback_bandwidth)) {
+      return(rep(mu, nrow(coords_new)))
+    }
+    .dbt_kernel_residual_predict(coords_train, r, coords_new, fallback_bandwidth,
+                                 chunk = chunk)
+  }
+  ok_pkg <- requireNamespace("gstat", quietly = TRUE) &&
+    requireNamespace("sp", quietly = TRUE)
+  if (!ok_pkg || length(r) < 20L || stats::sd(r, na.rm = TRUE) <= 1e-8) return(fb())
+
+  D <- as.matrix(stats::dist(coords_train))
+  cutoff <- max(D, na.rm = TRUE) * 0.50
+  if (!is.finite(cutoff) || cutoff <= 0) return(fb())
+  tr <- data.frame(r = r, x = coords_train[, 1], y2 = coords_train[, 2])
+  sp::coordinates(tr) <- ~ x + y2
+  vg_emp <- tryCatch(
+    gstat::variogram(r ~ 1, data = tr, cutoff = cutoff, width = cutoff / 15,
+                     cressie = TRUE), error = function(e) NULL)
+  if (is.null(vg_emp) || nrow(vg_emp) < 3L) return(fb())
+  sill <- stats::var(r, na.rm = TRUE)
+  vg_fit <- tryCatch(suppressWarnings(gstat::fit.variogram(
+    vg_emp, gstat::vgm(sill * 0.80, "Exp", cutoff * 0.30, sill * 0.20),
+    fit.method = 7L)), error = function(e) NULL)
+  if (is.null(vg_fit) || !any(is.finite(vg_fit$range) & vg_fit$range > 0)) return(fb())
+
+  n_new <- nrow(coords_new)
+  out <- numeric(n_new)
+  for (s in seq.int(1L, n_new, by = chunk)) {
+    e <- min(s + chunk - 1L, n_new)
+    nd <- data.frame(x = coords_new[s:e, 1], y2 = coords_new[s:e, 2])
+    sp::coordinates(nd) <- ~ x + y2
+    kk <- tryCatch(suppressWarnings(gstat::krige(
+      r ~ 1, tr, nd, model = vg_fit, debug.level = 0)), error = function(e) NULL)
+    out[s:e] <- if (is.null(kk)) mu else as.numeric(kk$var1.pred)
+  }
+  out[!is.finite(out)] <- mu
+  out
+}
+
 .dbt_preserve_global_rng <- function() {
   had_seed <- exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)
   old_seed <- if (had_seed) get(".Random.seed", envir = .GlobalEnv) else NULL
@@ -869,7 +923,10 @@
     resid_rf = rep(NA_real_, n),
     resid_cubist = rep(NA_real_, n)
   )
-  if (use_spatial) corr_oof$resid_spatial <- rep(NA_real_, n)
+  if (use_spatial) {
+    corr_oof$resid_spatial <- rep(NA_real_, n)
+    corr_oof$resid_kriging <- rep(NA_real_, n)
+  }
   fold_rows <- list()
   rf_tune_rows <- list()
 
@@ -956,6 +1013,8 @@
     if (use_spatial) {
       corr_oof$resid_spatial[id_val] <- .dbt_kernel_residual_predict(
         coords_tr, resid_tr, coords_va, basis_j$bandwidth)
+      corr_oof$resid_kriging[id_val] <- .dbt_krige_residual_predict(
+        coords_tr, resid_tr, coords_va, fallback_bandwidth = basis_j$bandwidth)
     }
 
     fold_rows[[j]] <- data.frame(
@@ -1136,6 +1195,11 @@
       selected_correction_test <- .dbt_kernel_residual_predict(
         as.matrix(train_df[, coord_names, drop = FALSE]), residual_full,
         as.matrix(test_df[, coord_names, drop = FALSE]), basis_full$bandwidth)
+    } else if (mode == "resid_kriging" && use_spatial) {
+      selected_correction_test <- .dbt_krige_residual_predict(
+        as.matrix(train_df[, coord_names, drop = FALSE]), residual_full,
+        as.matrix(test_df[, coord_names, drop = FALSE]),
+        fallback_bandwidth = basis_full$bandwidth)
     } else if (mode == "resid_ensemble") {
       parts <- list()
       if (!is.null(resid_rf_full_fit)) {
