@@ -1994,10 +1994,21 @@ tune_geobart_one_fold <- function(fd,
     grid_fd$X$train <- pool$X
     grid_fd$coords$train <- pool$coords
     grid_fd$y$train <- pool$y
-    fold_ids <- .gb_fold_ids(
-      pool$y, inner_folds,
-      seed = .gb_param(base_params, "train_seed", 123L)
-    )
+    # #5: spatial-block fold ids when the calibration pool is clustered
+    # (Clark-Evans), random folds otherwise.
+    fold_ids <- NULL
+    gb_pool_coords <- tryCatch(as.matrix(pool$coords), error = function(e) NULL)
+    if (!is.null(gb_pool_coords) && wadoux_is_clustered(gb_pool_coords)) {
+      fold_ids <- wadoux_spatial_block_fold_ids(
+        gb_pool_coords, inner_folds,
+        seed = .gb_param(base_params, "train_seed", 123L))
+    }
+    if (is.null(fold_ids)) {
+      fold_ids <- .gb_fold_ids(
+        pool$y, inner_folds,
+        seed = .gb_param(base_params, "train_seed", 123L)
+      )
+    }
     inner_folds <- length(unique(fold_ids))
   }
 

@@ -676,10 +676,20 @@ dkp_eval_candidate_cv <- function(cand, train_core, val_df, test_df,
     }
   } else {
     if (is.null(fold_ids) || length(fold_ids) != n_pool) {
-      set.seed(train_seed + 810000L + iter * 1000L)
-      fold_ids <- caret::createFolds(
-        pool[[response_name_wadoux]], k = inner_folds,
-        list = FALSE, returnTrain = FALSE)
+      # #5: spatial-block fold ids when the calibration pool is clustered.
+      dkp_pool_coords <- tryCatch(
+        as.matrix(pool[, c("x", "y"), drop = FALSE]), error = function(e) NULL)
+      fold_ids <- NULL
+      if (!is.null(dkp_pool_coords) && wadoux_is_clustered(dkp_pool_coords)) {
+        fold_ids <- wadoux_spatial_block_fold_ids(
+          dkp_pool_coords, inner_folds, seed = train_seed + 810000L + iter * 1000L)
+      }
+      if (is.null(fold_ids) || length(fold_ids) != n_pool) {
+        set.seed(train_seed + 810000L + iter * 1000L)
+        fold_ids <- caret::createFolds(
+          pool[[response_name_wadoux]], k = inner_folds,
+          list = FALSE, returnTrain = FALSE)
+      }
     }
     preds <- rep(NA_real_, n_pool)
     for (fold in sort(unique(fold_ids))) {
@@ -793,10 +803,19 @@ tune_dkp_on_split <- function(train_core, val_df, test_df,
   inner_folds <- min(dkp_tune_inner_folds, max(1L, floor(nrow(pool) / 2L)))
   fold_ids <- NULL
   if (inner_folds > 1L) {
-    set.seed(train_seed + 810000L + iter * 1000L)
-    fold_ids <- caret::createFolds(
-      pool[[response_name_wadoux]], k = inner_folds,
-      list = FALSE, returnTrain = FALSE)
+    # #5: spatial-block fold ids when the calibration pool is clustered.
+    dkp_pool_coords <- tryCatch(
+      as.matrix(pool[, c("x", "y"), drop = FALSE]), error = function(e) NULL)
+    if (!is.null(dkp_pool_coords) && wadoux_is_clustered(dkp_pool_coords)) {
+      fold_ids <- wadoux_spatial_block_fold_ids(
+        dkp_pool_coords, inner_folds, seed = train_seed + 810000L + iter * 1000L)
+    }
+    if (is.null(fold_ids)) {
+      set.seed(train_seed + 810000L + iter * 1000L)
+      fold_ids <- caret::createFolds(
+        pool[[response_name_wadoux]], k = inner_folds,
+        list = FALSE, returnTrain = FALSE)
+    }
   }
   # Persist the inner OOF fold map so the literal-RF blend lambda is selected
   # on EXACTLY the same leakage-free OOF folds the gate scored DKP on, and so
