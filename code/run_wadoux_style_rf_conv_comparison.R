@@ -5601,6 +5601,40 @@ compare_rf_conv_on_explicit_split <- function(train_core,
           rhs_suffix = "_policy_ensemble"
         )
       }
+      # --- #3: per-location extrapolation gate (soft RF<->ConvKrig blend) ------
+      # Per TEST point, blend RF (interpolation, strong in dense support) and
+      # ConvKrigingNet (spatial process, extrapolates) by local calibration
+      # support: w(s)~0 near calibration -> RF, w(s)~1 far -> ConvKrig. Engaged
+      # ONLY when the calibration is clustered (Clark-Evans); under representative
+      # sampling RF interpolation is fine everywhere so the gate is a no-op. Runs
+      # BEFORE the all-or-nothing literal-RF floor below. Not regression kriging.
+      if (isTRUE(getOption("wadoux_extrap_gate", TRUE)) &&
+          !is.null(out$pred_conv) && !is.null(out$pred_rf) &&
+          length(out$pred_conv) == length(out$pred_rf)) {
+        eg_cal <- tryCatch(
+          as.matrix(rbind(train_core, val_df)[, c("x", "y"), drop = FALSE]),
+          error = function(e) NULL)
+        eg_test <- tryCatch(
+          as.matrix(test_df[, c("x", "y"), drop = FALSE]), error = function(e) NULL)
+        if (!is.null(eg_cal) && !is.null(eg_test) &&
+            nrow(eg_test) == length(out$pred_conv) &&
+            exists("wadoux_is_clustered") && exists("wadoux_support_gate_weight") &&
+            wadoux_is_clustered(eg_cal)) {
+          w_extrap <- wadoux_support_gate_weight(
+            eg_test, eg_cal,
+            k = getOption("wadoux_extrap_gate_k", 4),
+            ref_quantile = getOption("wadoux_extrap_gate_q", 0.90))
+          rf_v <- as.numeric(out$pred_rf)
+          out$pred_conv <- (1 - w_extrap) * rf_v + w_extrap * as.numeric(out$pred_conv)
+          if (!is.null(out$pred_conv_full) &&
+              length(out$pred_conv_full) == length(w_extrap)) {
+            out$pred_conv_full <- (1 - w_extrap) * rf_v +
+              w_extrap * as.numeric(out$pred_conv_full)
+          }
+          out$conv_extrap_gate_applied <- TRUE
+          out$conv_extrap_gate_mean_w <- mean(w_extrap, na.rm = TRUE)
+        }
+      }
       # --- LITERAL-RF do-no-harm FLOOR for ConvKrigingNet (mirror of GPBoost floor) ---
       # When ConvKrigingNet does NOT beat the literal Wadoux RF on the paired-RF
       # selection (OOF) estimate by WADOUX_RF_FLOOR_MARGIN, overwrite the emitted

@@ -89,6 +89,34 @@ wadoux_spatial_block_fold_ids <- function(coords, k, seed = NULL) {
   ids
 }
 
+# ---- #3: per-location extrapolation gate ------------------------------------
+# Weight w(s) in [0,1] for blending a spatial model with RF PER TEST LOCATION by
+# local calibration support: w ~ 0 where a test point sits in dense calibration
+# support (RF / interpolation regime is strong), w ~ 1 where it is far from any
+# calibration point (extrapolation regime, favour the spatial process). Distances
+# are normalized by a high quantile of the WITHIN-calibration nearest-neighbour
+# distance, so it is scale-free. This is a learned-style, support-aware gate, NOT
+# fixed-variogram regression kriging.
+wadoux_support_gate_weight <- function(test_coords, cal_coords, k = 4,
+                                       ref_quantile = 0.90) {
+  test_coords <- as.matrix(test_coords)[, 1:2, drop = FALSE]
+  cal_coords <- as.matrix(cal_coords)[, 1:2, drop = FALSE]
+  nt <- nrow(test_coords)
+  if (nrow(cal_coords) < 2L || nt < 1L) return(rep(0, max(nt, 0L)))
+  dcal <- as.matrix(stats::dist(cal_coords)); diag(dcal) <- Inf
+  cal_nn <- apply(dcal, 1L, min)
+  d_ref <- suppressWarnings(stats::quantile(cal_nn, ref_quantile, na.rm = TRUE))
+  if (!is.finite(d_ref) || d_ref <= 0) d_ref <- mean(cal_nn[is.finite(cal_nn)])
+  if (!is.finite(d_ref) || d_ref <= 0) return(rep(0, nt))
+  calt <- t(cal_coords)
+  d_nn_test <- vapply(seq_len(nt), function(i) {
+    sqrt(min(colSums((calt - test_coords[i, ])^2)))
+  }, numeric(1))
+  w <- stats::plogis((d_nn_test / d_ref - 1) * k)
+  w[!is.finite(w)] <- 0
+  pmin(pmax(w, 0), 1)
+}
+
 pkgs_wadoux <- c("raster", "ranger", "caret", "dplyr", "sp")
 to_install_wadoux <- pkgs_wadoux[!sapply(pkgs_wadoux, requireNamespace, quietly = TRUE)]
 if (length(to_install_wadoux) > 0) {
