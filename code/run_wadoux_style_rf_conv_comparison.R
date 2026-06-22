@@ -5558,6 +5558,58 @@ compare_rf_conv_on_explicit_split <- function(train_core,
           rhs_suffix = "_policy_ensemble"
         )
       }
+      # --- LITERAL-RF do-no-harm FLOOR for ConvKrigingNet (mirror of GPBoost floor) ---
+      # When ConvKrigingNet does NOT beat the literal Wadoux RF on the paired-RF
+      # selection (OOF) estimate by WADOUX_RF_FLOOR_MARGIN, overwrite the emitted
+      # ConvKrig TEST prediction (out$pred_conv) with the literal RF TEST prediction
+      # (out$pred_rf), guaranteeing ConvKrig >= RF (a tie) on the design test draw.
+      # Deterministic (reuses existing paired-RF selection signal; no new RNG / retrain).
+      # Default ON only when paired-final + a valid OOF signal exist; strict no-op otherwise.
+      rf_literal_floor_requested <- parse_bool_env("WADOUX_RF_LITERAL_FLOOR", default = TRUE)
+      rf_literal_floor_margin <- parse_num_env("WADOUX_RF_FLOOR_MARGIN", 0)
+      if (!is.finite(rf_literal_floor_margin)) rf_literal_floor_margin <- 0
+      convkrig_rf_floor_oof_delta <- tryCatch(suppressWarnings(as.numeric(
+        final_operator$selected$delta_RMSE_vs_RF_median[1])), error = function(e) NA_real_)
+      convkrig_rf_floor_signal_valid <-
+        identical(geoversa_selection_objective, "paired_rf_delta") &&
+        is.finite(convkrig_rf_floor_oof_delta) &&
+        !is.null(out$pred_rf) && !is.null(out$pred_conv) &&
+        length(as.numeric(out$pred_rf)) == length(as.numeric(out$pred_conv)) &&
+        length(as.numeric(out$pred_rf)) > 0L
+      # Trigger when ConvKrig does not beat RF by the margin on the OOF estimate,
+      # i.e. (conv - rf) selection delta >= -margin  (delta>0 means ConvKrig worse).
+      convkrig_rf_floor_should_apply <- isTRUE(rf_literal_floor_requested) &&
+        isTRUE(convkrig_rf_floor_signal_valid) &&
+        (convkrig_rf_floor_oof_delta >= -rf_literal_floor_margin)
+      convkrig_rf_floor_applied <- FALSE
+      if (isTRUE(convkrig_rf_floor_should_apply)) {
+        rf_test_pred <- as.numeric(out$pred_rf)
+        out$pred_conv <- rf_test_pred
+        out$pred_conv_full <- rf_test_pred
+        out$pred_conv_base <- rf_test_pred
+        # Scaled / UQ ConvKrig outputs are no longer consistent with the RF point
+        # prediction; drop them so nothing downstream scores a stale ConvKrig surface.
+        out$pred_conv_test_scaled <- NULL
+        out$pred_conv_test_logvar_scaled <- NULL
+        out$pred_conv_cal_scaled <- NULL
+        out$pred_conv_cal_logvar_scaled <- NULL
+        convkrig_rf_floor_applied <- TRUE
+        cat(sprintf(
+          "[GeoVersa RF literal floor] ConvKrig OOF delta_RMSE_vs_RF=%.6f >= -margin=%.6f: overwriting ConvKrig TEST prediction with literal RF.\n",
+          convkrig_rf_floor_oof_delta, rf_literal_floor_margin))
+      }
+      out$conv_diagnostics <- bind_diag_columns_unique(
+        out$conv_diagnostics,
+        data.frame(
+          convkrig_rf_literal_floor_requested = rf_literal_floor_requested,
+          convkrig_rf_literal_floor_margin = rf_literal_floor_margin,
+          convkrig_rf_floor_oof_delta_RMSE_vs_RF = convkrig_rf_floor_oof_delta,
+          convkrig_rf_floor_signal_valid = convkrig_rf_floor_signal_valid,
+          convkrig_rf_floor_applied = convkrig_rf_floor_applied,
+          stringsAsFactors = FALSE
+        ),
+        rhs_suffix = "_rf_literal_floor"
+      )
     }
   }
 
