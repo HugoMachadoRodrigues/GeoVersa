@@ -454,6 +454,63 @@
   lapply(seq_len(k), function(j) which(fold_id == j))
 }
 
+# Spatial-block CV folds: k-means on (scaled) calibration coordinates so each
+# held-out fold is a contiguous spatial block. Used for the gate/selection OOF
+# so the estimate reflects the clustered / extrapolation regime that defines the
+# design-based test draw (random folds are optimistic about spatial
+# generalization). Returns NULL (caller falls back to regression folds) if the
+# coordinates are unusable. RNG is preserved/restored like the regression folds.
+.gpb_make_spatial_folds <- function(coords, k, seed = NULL) {
+  coords <- as.matrix(coords)
+  n <- nrow(coords)
+  k <- as.integer(.gpb_clamp(k, 2L, max(2L, n)))
+  ok <- stats::complete.cases(coords)
+  if (sum(ok) < k || ncol(coords) < 1L) return(NULL)
+  cs <- scale(coords)
+  cs[!is.finite(cs)] <- 0
+  restore_rng <- .gpb_preserve_global_rng()
+  on.exit(restore_rng(), add = TRUE)
+  if (!is.null(seed) && is.finite(seed)) set.seed(as.integer(seed))
+  km <- tryCatch(
+    stats::kmeans(cs[ok, , drop = FALSE], centers = k,
+                  iter.max = 50L, nstart = 5L)$cluster,
+    error = function(e) NULL)
+  if (is.null(km)) return(NULL)
+  fold_id <- rep(NA_integer_, n)
+  fold_id[which(ok)] <- as.integer(km)
+  missing <- which(!is.finite(fold_id))
+  if (length(missing) > 0L) {
+    fold_id[missing] <- rep(seq_len(k), length.out = length(missing))
+  }
+  folds <- lapply(seq_len(k), function(j) which(fold_id == j))
+  folds <- folds[vapply(folds, length, integer(1)) > 0L]
+  if (length(folds) < 2L) return(NULL)
+  folds
+}
+
+# Clark-Evans aggregation index R = (observed mean nearest-neighbour distance) /
+# (expected NN distance under complete spatial randomness over the bounding box,
+# 0.5 / sqrt(n / area)). R < 1 => clustered, R ~= 1 => random, R > 1 => dispersed.
+# Used to auto-detect whether the calibration sampling is clustered, so spatial-
+# block CV is engaged ONLY when it helps (clustered/extrapolative regime) and
+# random folds are kept under representative sampling. Returns NA if undefined.
+.gpb_clark_evans <- function(coords) {
+  coords <- as.matrix(coords)
+  ok <- stats::complete.cases(coords)
+  coords <- coords[ok, , drop = FALSE]
+  n <- nrow(coords)
+  if (n < 10L || ncol(coords) < 2L) return(NA_real_)
+  d <- as.matrix(stats::dist(coords[, 1:2, drop = FALSE]))
+  diag(d) <- Inf
+  obs <- mean(apply(d, 1L, min), na.rm = TRUE)
+  rx <- diff(range(coords[, 1], na.rm = TRUE))
+  ry <- diff(range(coords[, 2], na.rm = TRUE))
+  area <- rx * ry
+  if (!is.finite(area) || area <= 0 || !is.finite(obs) || obs <= 0) return(NA_real_)
+  exp_nn <- 0.5 / sqrt(n / area)
+  obs / exp_nn
+}
+
 .gpb_build_tune_specs <- function(cfg,
                                   learning_rate = NULL,
                                   max_depth = NULL,
@@ -1451,7 +1508,35 @@ train_gpboost_dsm_one_fold <- function(
   cv_fold_sizes <- NA_character_
   if (use_cv_tuning) {
     cv_seed <- if (is.null(train_seed)) 7919L else as.integer(train_seed + 7919L)
-    cv_folds <- .gpb_make_regression_folds(ycal, tune_inner_folds, seed = cv_seed)
+    # #5 spatial-block CV for the gate/selection OOF. REGIME-DEPENDENT: it
+    # genuinely improves selection under clustered/extrapolative calibration
+    # (matches the design-based test gap) but HURTS under representative
+    # (random) calibration, where random folds match the SRS test. Default OFF
+    # (no regression on representative sampling); opt-in via the option, and
+    # auto-selection by sampling geometry is the principled extension.
+    # Falls back to regression folds if coords are unusable.
+    cv_folds <- NULL
+    # mode: "auto" (default) detects clustering via Clark-Evans; TRUE forces
+    # spatial blocks; FALSE forces random folds.
+    spatial_cv_mode <- getOption("gpb_gate_spatial_cv", "auto")
+    gate_cv_geometry <- "random"
+    use_spatial_cv <- FALSE
+    if (!is.null(Ccal)) {
+      if (isTRUE(spatial_cv_mode)) {
+        use_spatial_cv <- TRUE
+      } else if (!identical(spatial_cv_mode, FALSE)) {
+        ce_index <- .gpb_clark_evans(Ccal)
+        thr <- getOption("gpb_spatial_cv_clark_thresh", 0.80)
+        use_spatial_cv <- is.finite(ce_index) && ce_index < thr
+      }
+    }
+    if (isTRUE(use_spatial_cv)) {
+      cv_folds <- .gpb_make_spatial_folds(Ccal, tune_inner_folds, seed = cv_seed)
+      if (!is.null(cv_folds)) gate_cv_geometry <- "spatial_block"
+    }
+    if (is.null(cv_folds)) {
+      cv_folds <- .gpb_make_regression_folds(ycal, tune_inner_folds, seed = cv_seed)
+    }
     cv_fold_sizes <- paste(vapply(cv_folds, length, integer(1)), collapse = "|")
     cv_fold_data <- lapply(seq_along(cv_folds), function(j) {
       idx_val <- cv_folds[[j]]
