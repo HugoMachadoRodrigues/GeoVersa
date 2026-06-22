@@ -1728,10 +1728,21 @@ tune_nmk_on_split <- function(train_core, val_df, test_df,
   tune_n <- if (use_cv_tuning) nrow(tune_pool) else nrow(val_df)
   tune_fold_sizes <- NA_character_
   if (use_cv_tuning) {
-    fold_ids <- make_regression_folds_nmk(
-      tune_pool[[response_name_wadoux]],
-      nmk_tune_inner_folds,
-      seed = train_seed + 91000L + iter)
+    # #5: spatial-block CV for the selection OOF, auto-engaged only when the
+    # calibration pool is clustered (Clark-Evans); random folds otherwise.
+    fold_ids <- NULL
+    nmk_tp_coords <- tryCatch(
+      as.matrix(tune_pool[, c("x", "y"), drop = FALSE]), error = function(e) NULL)
+    if (!is.null(nmk_tp_coords) && wadoux_is_clustered(nmk_tp_coords)) {
+      fold_ids <- wadoux_spatial_block_fold_ids(
+        nmk_tp_coords, nmk_tune_inner_folds, seed = train_seed + 91000L + iter)
+    }
+    if (is.null(fold_ids)) {
+      fold_ids <- make_regression_folds_nmk(
+        tune_pool[[response_name_wadoux]],
+        nmk_tune_inner_folds,
+        seed = train_seed + 91000L + iter)
+    }
     tune_fold_sizes <- paste(as.integer(table(fold_ids)), collapse = "|")
   }
   rf_inner <- nmk_inner_rf_baseline(
@@ -2892,7 +2903,15 @@ if (!is.finite(nmk_rf_final_oof_folds) || nmk_rf_final_oof_folds < 2L) {
 nmk_select_rf_shrinkage_lambda <- function(calibration_full, nmk_oof_fn) {
   obs <- as.numeric(calibration_full[[response_name_wadoux]])
   n <- length(obs)
-  fold_id <- make_regression_folds_nmk(
+  # #5: spatial-block OOF folds when the calibration is clustered.
+  fold_id <- NULL
+  nmk_cal_coords <- tryCatch(
+    as.matrix(calibration_full[, c("x", "y"), drop = FALSE]), error = function(e) NULL)
+  if (!is.null(nmk_cal_coords) && wadoux_is_clustered(nmk_cal_coords)) {
+    fold_id <- wadoux_spatial_block_fold_ids(
+      nmk_cal_coords, nmk_rf_final_oof_folds, seed = train_seed + 73000L)
+  }
+  if (is.null(fold_id)) fold_id <- make_regression_folds_nmk(
     obs, nmk_rf_final_oof_folds, seed = train_seed + 73000L)
   pred_rf <- rep(NA_real_, n)
   pred_nmk <- rep(NA_real_, n)

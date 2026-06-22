@@ -24,6 +24,71 @@ code_root_wadoux <- local({
   if (length(hit) > 0L) hit[1L] else file.path(getwd(), "code")
 })
 
+# ---- Spatial-block CV utilities (shared across models; "#5") ----------------
+# Clark-Evans aggregation index R = observed / expected nearest-neighbour
+# distance under complete spatial randomness over the bounding box. R < 1 =>
+# clustered, ~1 => random, > 1 => dispersed. NA if undefined.
+wadoux_clark_evans <- function(coords) {
+  coords <- as.matrix(coords)
+  ok <- stats::complete.cases(coords)
+  coords <- coords[ok, , drop = FALSE]
+  n <- nrow(coords)
+  if (n < 10L || ncol(coords) < 2L) return(NA_real_)
+  d <- as.matrix(stats::dist(coords[, 1:2, drop = FALSE])); diag(d) <- Inf
+  obs <- mean(apply(d, 1L, min), na.rm = TRUE)
+  rx <- diff(range(coords[, 1], na.rm = TRUE))
+  ry <- diff(range(coords[, 2], na.rm = TRUE))
+  area <- rx * ry
+  if (!is.finite(area) || area <= 0 || !is.finite(obs) || obs <= 0) return(NA_real_)
+  obs / (0.5 / sqrt(n / area))
+}
+
+# TRUE when the calibration coords are detectably clustered (engage spatial CV).
+# Used so spatial-block CV helps under clustered/extrapolative sampling without
+# regressing representative (random) sampling, where random folds match the SRS
+# test draw.
+wadoux_is_clustered <- function(coords, thresh = getOption("wadoux_clark_thresh", 0.80)) {
+  ce <- wadoux_clark_evans(coords)
+  is.finite(ce) && ce < thresh
+}
+
+# k spatial blocks via k-means on scaled coordinates -> list of validation-index
+# vectors (same shape as a random k-fold). Returns NULL if coords unusable.
+wadoux_spatial_block_folds <- function(coords, k, seed = NULL) {
+  coords <- as.matrix(coords); n <- nrow(coords)
+  k <- max(2L, min(as.integer(k), n))
+  ok <- stats::complete.cases(coords)
+  if (sum(ok) < k || ncol(coords) < 1L) return(NULL)
+  cs <- scale(coords); cs[!is.finite(cs)] <- 0
+  if (!is.null(seed) && is.finite(seed)) {
+    if (exists(".Random.seed", envir = .GlobalEnv)) {
+      .old_seed <- get(".Random.seed", envir = .GlobalEnv)
+      on.exit(assign(".Random.seed", .old_seed, envir = .GlobalEnv), add = TRUE)
+    }
+    set.seed(as.integer(seed))
+  }
+  km <- tryCatch(stats::kmeans(cs[ok, , drop = FALSE], centers = k,
+                               iter.max = 50L, nstart = 5L)$cluster,
+                 error = function(e) NULL)
+  if (is.null(km)) return(NULL)
+  fid <- rep(NA_integer_, n); fid[which(ok)] <- as.integer(km)
+  miss <- which(!is.finite(fid))
+  if (length(miss) > 0L) fid[miss] <- rep(seq_len(k), length.out = length(miss))
+  folds <- lapply(seq_len(k), function(j) which(fid == j))
+  folds <- folds[vapply(folds, length, integer(1)) > 0L]
+  if (length(folds) < 2L) NULL else folds
+}
+
+# Same spatial blocks but returned as a per-row fold-id vector (for callers that
+# use a fold_id vector instead of a list of index vectors). NULL if unusable.
+wadoux_spatial_block_fold_ids <- function(coords, k, seed = NULL) {
+  folds <- wadoux_spatial_block_folds(coords, k, seed)
+  if (is.null(folds)) return(NULL)
+  ids <- rep(NA_integer_, nrow(as.matrix(coords)))
+  for (j in seq_along(folds)) ids[folds[[j]]] <- j
+  ids
+}
+
 pkgs_wadoux <- c("raster", "ranger", "caret", "dplyr", "sp")
 to_install_wadoux <- pkgs_wadoux[!sapply(pkgs_wadoux, requireNamespace, quietly = TRUE)]
 if (length(to_install_wadoux) > 0) {
