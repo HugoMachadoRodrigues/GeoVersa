@@ -306,7 +306,7 @@ load_nmk_env <- function() {
     resolved <- if (is_absolute) {
       file
     } else {
-      file.path(project_root_wadoux, sub("^\\./", "", file))
+      file.path(dirname(code_root_wadoux), sub("^\\./", "", file))
     }
     sys.source(resolved, envir = env)
     invisible(NULL)
@@ -1117,6 +1117,14 @@ nmk_empty_rf_inner <- function(status = "not_available", error = NA_character_) 
   )
 }
 
+# NOTE (do-no-harm alignment): the inner RF below is used ONLY for candidate
+# SELECTION inside tuning. It is intentionally NOT relied upon as the final
+# do-no-harm certificate, because it is trained on train_core / tune_pool and
+# is therefore NOT bit-identical to the scored RF_500 = fit_rf_default_wadoux(
+# calibration_full). The binding do-no-harm guarantee is enforced AFTER refit
+# by nmk_select_rf_shrinkage_lambda(), whose RF leg reuses the literal scored
+# RF. fit_rf_default_wadoux uses a fixed seed (getOption('wadoux_rf_seed',123))
+# so both the inner and the final RF are deterministic given identical data.
 nmk_inner_rf_baseline <- function(train_core, val_df, tune_pool = NULL,
                                   fold_ids = NULL, use_cv = FALSE) {
   out <- tryCatch({
@@ -2843,6 +2851,113 @@ split_audit_designbased_nmk <- function(calibration_full, inner, test_df, iter) 
 }
 
 # -----------------------------------------------------------------------------
+# FINAL do-no-harm gate against the LITERAL Wadoux default RF.
+#
+# The inner gate in tune_nmk_on_split only ever reverts to a conservative NMK
+# profile, and decides on an inner RF that is NOT bit-identical to the scored
+# RF. This final gate closes that gap: on the FULL calibration set it computes
+# leakage-free OOF RMSE for (a) the emitted NMK prediction surrogate and (b)
+# the LITERAL Wadoux RF (fit_rf_default_wadoux / predict_rf_default_wadoux),
+# then selects a continuous shrinkage lambda in [0,1] (grid including 0 = pure
+# literal RF) that minimises OOF RMSE of  lambda*NMK + (1-lambda)*RF_literal.
+# The emitted test prediction is the same convex blend evaluated at the
+# already-fit, bit-identical scored RF. lambda = 0 GUARANTEES the emitted
+# prediction is the literal Wadoux RF, so NMK can never do worse than RF on
+# the OOF criterion (ties at worst).
+#
+# Controlled by NMK_RF_FINAL_GATE (default = nmk_rf_noharm_policy). The lambda
+# grid is NMK_RF_FINAL_LAMBDA_GRID (default 0,0.25,0.5,0.75,1). OOF folds are
+# NMK_RF_FINAL_OOF_FOLDS (default 5). The required OOF improvement margin to
+# move lambda above 0 reuses the rf_noharm margins.
+nmk_rf_final_gate_enabled <- parse_bool_env_nmk(
+  "NMK_RF_FINAL_GATE", nmk_rf_noharm_policy)
+nmk_rf_final_lambda_grid <- parse_num_list_env_nmk(
+  "NMK_RF_FINAL_LAMBDA_GRID", c(0, 0.25, 0.50, 0.75, 1.00))
+nmk_rf_final_lambda_grid <- sort(unique(pmax(0, pmin(1, nmk_rf_final_lambda_grid))))
+if (length(nmk_rf_final_lambda_grid) == 0L) {
+  nmk_rf_final_lambda_grid <- c(0, 0.25, 0.50, 0.75, 1.00)
+}
+if (!any(abs(nmk_rf_final_lambda_grid - 0) < 1e-9)) {
+  nmk_rf_final_lambda_grid <- sort(unique(c(0, nmk_rf_final_lambda_grid)))
+}
+nmk_rf_final_oof_folds <- as.integer(parse_num_env_nmk("NMK_RF_FINAL_OOF_FOLDS", 5L))
+if (!is.finite(nmk_rf_final_oof_folds) || nmk_rf_final_oof_folds < 2L) {
+  nmk_rf_final_oof_folds <- 5L
+}
+
+# Select the do-no-harm shrinkage lambda toward the literal RF on OOF data.
+# nmk_oof_fn(train_df, score_df) must return NMK predictions for the rows of
+# score_df, trained only on train_df (leakage-free). Returns a list with the
+# chosen lambda and the OOF RMSE table.
+nmk_select_rf_shrinkage_lambda <- function(calibration_full, nmk_oof_fn) {
+  obs <- as.numeric(calibration_full[[response_name_wadoux]])
+  n <- length(obs)
+  fold_id <- make_regression_folds_nmk(
+    obs, nmk_rf_final_oof_folds, seed = train_seed + 73000L)
+  pred_rf <- rep(NA_real_, n)
+  pred_nmk <- rep(NA_real_, n)
+  for (fold in sort(unique(fold_id))) {
+    score_idx <- which(fold_id == fold)
+    fit_idx <- which(fold_id != fold)
+    if (length(fit_idx) < 5L || length(score_idx) < 1L) next
+    rf_f <- tryCatch(
+      fit_rf_default_wadoux(calibration_full[fit_idx, , drop = FALSE], form_rf),
+      error = function(e) NULL)
+    if (!is.null(rf_f)) {
+      pred_rf[score_idx] <- predict_rf_default_wadoux(
+        rf_f, calibration_full[score_idx, , drop = FALSE])
+    }
+    nmk_f <- tryCatch(
+      nmk_oof_fn(calibration_full[fit_idx, , drop = FALSE],
+                 calibration_full[score_idx, , drop = FALSE]),
+      error = function(e) NULL)
+    if (!is.null(nmk_f) && length(nmk_f) == length(score_idx)) {
+      pred_nmk[score_idx] <- as.numeric(nmk_f)
+    }
+  }
+  ok <- is.finite(obs) & is.finite(pred_rf) & is.finite(pred_nmk)
+  rf_oof_rmse <- if (any(ok)) sqrt(mean((pred_rf[ok] - obs[ok])^2)) else Inf
+  rows <- list()
+  best_lambda <- 0
+  best_rmse <- Inf
+  for (lam in nmk_rf_final_lambda_grid) {
+    blend <- lam * pred_nmk + (1 - lam) * pred_rf
+    okb <- is.finite(obs) & is.finite(blend)
+    rmse <- if (any(okb)) sqrt(mean((blend[okb] - obs[okb])^2)) else Inf
+    rows[[length(rows) + 1L]] <- data.frame(
+      lambda = lam, oof_rmse = rmse, stringsAsFactors = FALSE)
+    # Strictly-better rule: lambda only rises above the running best when it
+    # beats it. lambda = 0 (pure RF) is evaluated first, so ties keep RF.
+    if (is.finite(rmse) && rmse < best_rmse - 1e-12) {
+      best_rmse <- rmse
+      best_lambda <- lam
+    }
+  }
+  # Require the chosen lambda to beat pure-RF OOF by the rf_noharm margin;
+  # otherwise fall back to lambda = 0 (literal RF) — guaranteed do-no-harm.
+  rf_scale <- if (is.finite(rf_oof_rmse)) rf_oof_rmse else 0
+  required_margin <- nmk_rf_noharm_margin_abs +
+    nmk_rf_noharm_margin_rel * abs(rf_scale)
+  if (best_lambda > 0 &&
+      (!is.finite(rf_oof_rmse) ||
+       rf_oof_rmse - best_rmse < required_margin)) {
+    best_lambda <- 0
+    best_rmse <- rf_oof_rmse
+  }
+  list(
+    lambda = best_lambda,
+    nmk_oof_rmse = {
+      okn <- is.finite(obs) & is.finite(pred_nmk)
+      if (any(okn)) sqrt(mean((pred_nmk[okn] - obs[okn])^2)) else Inf
+    },
+    rf_oof_rmse = rf_oof_rmse,
+    blend_oof_rmse = best_rmse,
+    required_margin = required_margin,
+    grid = do.call(rbind, rows)
+  )
+}
+
+# -----------------------------------------------------------------------------
 # Protocol evaluators
 #
 # Each returns a data.frame with (iteration, scenario, protocol, model,
@@ -3159,6 +3274,60 @@ eval_designbased <- function(valuetable, iter, calibration_patch_cache) {
         NA_character_
       }
       out_500$diagnostics$refit_ensemble_status <- paste(member_status, collapse = "|")
+      # FINAL do-no-harm gate vs the LITERAL Wadoux RF. The scored RF_500 above
+      # is fit_rf_default_wadoux(calibration_full); we reuse the SAME literal
+      # RF prediction here so the gate's RF leg is bit-identical to the scored
+      # RF. lambda is chosen on leakage-free OOF; lambda = 0 emits literal RF.
+      nmk_pred_test_pre_gate <- out_500$pred_test
+      rf_final_lambda <- 1
+      rf_final_gate_info <- NULL
+      if (isTRUE(nmk_rf_final_gate_enabled) && ("RF" %in% models) &&
+          !is.null(pred_map$RF_500) &&
+          length(pred_map$RF_500) == length(out_500$pred_test)) {
+        # OOF NMK surrogate: a single-seed NMK fit (fast) trained leakage-free
+        # on each OOF fold of the full calibration set, scored on the held-out
+        # fold. This estimates how the emitted NMK generalises relative to the
+        # literal RF on the same folds.
+        nmk_oof_fn <- function(tr_df, sc_df) {
+          p_in <- selected_params
+          p_in$n_seeds <- 1L
+          inner_split <- make_inner_val_split_nmk(
+            tr_df, val_frac = val_frac, seed = train_seed + 74000L + iter)
+          o <- run_nmk_on_split(
+            train_core = inner_split$train, val_df = inner_split$val,
+            test_df = sc_df,
+            calibration_patch_cache = calibration_patch_cache,
+            params = p_in)
+          nmk_apply_postprocess_values(
+            o$pred_test, o$pred_test_base, selected_policy)
+        }
+        rf_final_gate_info <- tryCatch(
+          nmk_select_rf_shrinkage_lambda(calibration_full, nmk_oof_fn),
+          error = function(e) NULL)
+        if (!is.null(rf_final_gate_info) &&
+            is.finite(rf_final_gate_info$lambda)) {
+          rf_final_lambda <- rf_final_gate_info$lambda
+        } else {
+          # If the gate could not run, be conservative: emit literal RF.
+          rf_final_lambda <- 0
+        }
+        out_500$pred_test <- rf_final_lambda * nmk_pred_test_pre_gate +
+          (1 - rf_final_lambda) * as.numeric(pred_map$RF_500)
+        out_500$diagnostics$rf_final_gate_enabled <- TRUE
+        out_500$diagnostics$rf_final_lambda <- rf_final_lambda
+        out_500$diagnostics$rf_final_reverted_to_literal_rf <-
+          isTRUE(abs(rf_final_lambda) < 1e-9)
+        if (!is.null(rf_final_gate_info)) {
+          out_500$diagnostics$rf_final_nmk_oof_RMSE <- rf_final_gate_info$nmk_oof_rmse
+          out_500$diagnostics$rf_final_rf_oof_RMSE <- rf_final_gate_info$rf_oof_rmse
+          out_500$diagnostics$rf_final_blend_oof_RMSE <- rf_final_gate_info$blend_oof_rmse
+          out_500$diagnostics$rf_final_required_margin <- rf_final_gate_info$required_margin
+        }
+      } else {
+        out_500$diagnostics$rf_final_gate_enabled <- FALSE
+        out_500$diagnostics$rf_final_lambda <- NA_real_
+        out_500$diagnostics$rf_final_reverted_to_literal_rf <- FALSE
+      }
       pred_map$NeuroMaternKrige_500 <- out_500$pred_test
       diag_rows[[length(diag_rows) + 1L]] <- scalar_diag_row_nmk(
         out_500$diagnostics, iter, "DesignBased", "NeuroMaternKrige_500",

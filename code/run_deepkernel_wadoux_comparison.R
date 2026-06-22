@@ -149,6 +149,19 @@ if (!is.finite(dkp_rf_noharm_margin_rel) || dkp_rf_noharm_margin_rel < 0) {
 dkp_rf_noharm_restrict_ensemble <- parse_bool_env_dkp(
   "DKP_RF_NOHARM_RESTRICT_ENSEMBLE", TRUE)
 dkp_save_prediction_audit <- parse_bool_env_dkp("DKP_SAVE_PREDICTION_AUDIT", TRUE)
+# Pin the Wadoux RF seed for the WHOLE run so every fit_rf_default_wadoux call
+# (in-gate RF, scored RF_500, the literal-RF floor below) is bit-identical.
+options(wadoux_rf_seed = train_seed)
+# OOF lambda grid: continuous shrinkage of the DKP prediction toward the
+# literal Wadoux RF prediction. 0 == pure RF (guaranteed == RF), 1 == pure DKP.
+# Grid INCLUDES 0 so the floor is always reachable on leakage-free OOF data.
+dkp_rf_blend_lambda_grid <- {
+  raw <- Sys.getenv("DKP_RF_BLEND_LAMBDA_GRID", unset = "0,0.25,0.5,0.75,1")
+  v <- suppressWarnings(as.numeric(trimws(unlist(strsplit(raw, ",")))))
+  v <- v[is.finite(v) & v >= 0 & v <= 1]
+  if (length(v) == 0L) v <- c(0, 0.25, 0.5, 0.75, 1)
+  sort(unique(c(0, v)))
+}
 dkp_tune_target_transforms <- tolower(parse_list_env_dkp(
   "DKP_TUNE_TARGET_TRANSFORMS", c("auto", "identity", "log")))
 dkp_tune_target_transforms <- unique(dkp_tune_target_transforms[
@@ -173,7 +186,7 @@ load_dkp_env <- function() {
   loader_parent$source <- function(file, ...) {
     is_absolute <- grepl("^(?:[A-Za-z]:[\\\\/]|/)", file)
     resolved <- if (is_absolute) file else {
-      file.path(project_root_wadoux, sub("^\\./", "", file))
+      file.path(dirname(code_root_wadoux), sub("^\\./", "", file))
     }
     sys.source(resolved, envir = env)
     invisible(NULL)
@@ -785,6 +798,10 @@ tune_dkp_on_split <- function(train_core, val_df, test_df,
       pool[[response_name_wadoux]], k = inner_folds,
       list = FALSE, returnTrain = FALSE)
   }
+  # Persist the inner OOF fold map so the literal-RF blend lambda is selected
+  # on EXACTLY the same leakage-free OOF folds the gate scored DKP on, and so
+  # the in-gate RF (dkp_inner_rf_baseline below) is the same RF used for blend.
+  attr_fold_ids <- fold_ids
   rf_inner <- dkp_inner_rf_baseline(
     train_core = train_core, val_df = val_df, pool = pool,
     fold_ids = fold_ids, inner_folds = inner_folds)
@@ -1053,10 +1070,78 @@ tune_dkp_on_split <- function(train_core, val_df, test_df,
 	    best_out$diagnostics$rf_noharm_reason <- rf_noharm_reason
 	  }
   list(out = best_out, params = best_params, tuning = score_df,
-       top_candidates = top_candidates)
+       top_candidates = top_candidates,
+       oof_pool = pool, oof_fold_ids = attr_fold_ids,
+       oof_inner_folds = inner_folds)
 }
 
-dkp_apply_carried_smearing <- function(out, selection_out, y_test = NULL) {
+dkp_apply_carried_smearing <- function(out, selection_out, y_test = NULL) {# -----------------------------------------------------------------------------
+# Literal-RF floor + OOF-selected continuous blend lambda.
+#
+# Given a DKP prediction vector and an inner OOF setup, fit the LITERAL Wadoux
+# RF (fit_rf_default_wadoux / predict_rf_default_wadoux) on the SAME inner OOF
+# folds, choose lambda in dkp_rf_blend_lambda_grid (incl 0) that minimises
+# leakage-free OOF RMSE of  yhat = lambda*DKP + (1-lambda)*RF , then return the
+# RF model fit on the FULL calibration set plus the chosen lambda. When DKP does
+# not beat RF on OOF, the grid picks lambda=0 and the emitted prediction becomes
+# the LITERAL Wadoux RF prediction (do-no-harm floor, guaranteed >= RF up to OOF
+# noise; lambda is selected ONLY on leakage-free OOF data).
+# -----------------------------------------------------------------------------
+dkp_oof_rf_blend_lambda <- function(pool, fold_ids, dkp_oof_pred) {
+  # pool: data.frame with response; fold_ids: integer fold per pool row (OOF);
+  # dkp_oof_pred: DKP OOF predictions aligned to pool rows (same as gate used).
+  y <- as.numeric(pool[[response_name_wadoux]])
+  rf_oof <- rep(NA_real_, nrow(pool))
+  for (fold in sort(unique(fold_ids))) {
+    val_idx <- which(fold_ids == fold)
+    tr_idx  <- which(fold_ids != fold)
+    rf <- fit_rf_default_wadoux(pool[tr_idx, , drop = FALSE], form_rf)
+    rf_oof[val_idx] <- predict_rf_default_wadoux(rf, pool[val_idx, , drop = FALSE])
+  }
+  ok <- is.finite(y) & is.finite(rf_oof) & is.finite(dkp_oof_pred)
+  best_lambda <- 0; best_rmse <- Inf
+  for (lam in dkp_rf_blend_lambda_grid) {
+    blend <- lam * dkp_oof_pred[ok] + (1 - lam) * rf_oof[ok]
+    rmse  <- sqrt(mean((y[ok] - blend) ^ 2, na.rm = TRUE))
+    # strict '<' so ties (notably DKP-not-better) keep the SMALLEST lambda,
+    # i.e. the grid is ordered ascending and lambda=0 (pure RF) wins ties.
+    if (is.finite(rmse) && rmse < best_rmse - 1e-12) {
+      best_rmse <- rmse; best_lambda <- lam
+    }
+  }
+  list(lambda = best_lambda, oof_rmse = best_rmse,
+       rf_oof = rf_oof, n_used = sum(ok))
+}
+
+dkp_apply_rf_floor <- function(out, calibration_full, test_df, blend) {
+  # Emit  lambda*DKP + (1-lambda)*literal_RF  on the test set, where the literal
+  # RF is fit_rf_default_wadoux on the FULL calibration set (== scored RF_500).
+  lam <- suppressWarnings(as.numeric(blend$lambda))
+  if (!is.finite(lam)) lam <- 0
+  rf_full <- fit_rf_default_wadoux(calibration_full, form_rf)
+  rf_test <- predict_rf_default_wadoux(rf_full, test_df)
+  if (!is.null(out$pred_test) && length(out$pred_test) == length(rf_test)) {
+    out$pred_test <- lam * as.numeric(out$pred_test) + (1 - lam) * rf_test
+  } else if (is.null(out$pred_test)) {
+    out$pred_test <- rf_test
+  }
+  out$diagnostics$rf_blend_lambda        <- lam
+  out$diagnostics$rf_blend_oof_rmse       <- blend$oof_rmse
+  out$diagnostics$rf_blend_n_used         <- blend$n_used
+  out$diagnostics$rf_floor_is_literal_rf  <- isTRUE(lam == 0)
+  out$diagnostics$rf_floor_reverts_to     <- "literal_wadoux_rf"
+  y_test <- test_df[[response_name_wadoux]]
+  if (length(y_test) == length(out$pred_test)) {
+    out$metrics_test <- data.frame(
+      N = length(y_test),
+      RMSE = sqrt(mean((y_test - out$pred_test) ^ 2, na.rm = TRUE)),
+      Bias = mean(out$pred_test - y_test, na.rm = TRUE),
+      stringsAsFactors = FALSE)
+  }
+  out
+}
+
+
   diag <- selection_out$diagnostics
   applied <- !is.null(diag$duan_applied) && isTRUE(diag$duan_applied)
   S <- suppressWarnings(as.numeric(diag$duan_S))
@@ -1465,6 +1550,35 @@ eval_designbased_dkp <- function(valuetable, iter, calibration_patch_cache) {
         out_500$diagnostics$refit_mode <- "single_candidate_refit"
         out_500$diagnostics$refit_train_n <- nrow(calibration_full)
         out_500$diagnostics$refit_monitor_n <- nrow(refit_monitor)
+      }
+      # DO-NO-HARM FLOOR: select a continuous blend lambda toward the LITERAL
+      # Wadoux RF on leakage-free inner OOF data (grid incl 0), then emit
+      # lambda*DKP + (1-lambda)*literal_RF. lambda=0 => emitted == literal
+      # Wadoux RF (guaranteed >= RF up to OOF noise). Only runs when the gate
+      # produced an OOF fold map (tuned path); otherwise emit DKP unchanged.
+      if (exists("tuned", inherits = FALSE) &&
+          !is.null(tuned$oof_pool) && !is.null(tuned$oof_fold_ids) &&
+          length(tuned$oof_fold_ids) == nrow(tuned$oof_pool)) {
+        dkp_oof_pred <- predict_rf_default_wadoux  # placeholder, replaced below
+        # DKP OOF predictions on the SAME inner folds the gate used:
+        dkp_oof_pred <- rep(NA_real_, nrow(tuned$oof_pool))
+        for (fold in sort(unique(tuned$oof_fold_ids))) {
+          v_idx <- which(tuned$oof_fold_ids == fold)
+          t_idx <- which(tuned$oof_fold_ids != fold)
+          fold_params <- selected_params
+          fold_params$train_seed <- as.integer(selected_params$train_seed) + fold
+          fo <- tryCatch(run_dkp_on_split(
+            train_core = tuned$oof_pool[t_idx, , drop = FALSE],
+            val_df     = tuned$oof_pool[v_idx, , drop = FALSE],
+            test_df    = tuned$oof_pool[v_idx, , drop = FALSE],
+            calibration_patch_cache = calibration_patch_cache,
+            params = fold_params), error = function(e) NULL)
+          if (!is.null(fo)) dkp_oof_pred[v_idx] <- fo$pred_test
+        }
+        blend <- dkp_oof_rf_blend_lambda(
+          pool = tuned$oof_pool, fold_ids = tuned$oof_fold_ids,
+          dkp_oof_pred = dkp_oof_pred)
+        out_500 <- dkp_apply_rf_floor(out_500, calibration_full, test_df, blend)
       }
       pred_map$DeepKernelProcess_500 <- out_500$pred_test
       diag_rows[[length(diag_rows) + 1L]] <- scalar_diag_row_dkp(

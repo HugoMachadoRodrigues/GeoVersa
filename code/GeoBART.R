@@ -731,6 +731,23 @@ train_geobart_one_fold <- function(
   if (!requireNamespace("BART", quietly = TRUE)) {
     stop("GeoBART requires the BART package. install.packages('BART').")
   }
+  # --- RNG hygiene: do not leak our set.seed() into the caller's RNG stream ---
+  # The Wadoux runner draws all sampling (calibration draws, k-fold, BLOOCV)
+  # from the GLOBAL RNG. Because this function calls set.seed(train_seed) below,
+  # without save/restore each GeoBART fit would silently reset the global seed
+  # and destroy cross-protocol / cross-iteration independence. Save and restore.
+  if (exists(".Random.seed", envir = globalenv(), inherits = FALSE)) {
+    .gb_saved_seed <- get(".Random.seed", envir = globalenv(), inherits = FALSE)
+    on.exit({
+      assign(".Random.seed", .gb_saved_seed, envir = globalenv())
+    }, add = TRUE)
+  } else {
+    on.exit({
+      if (exists(".Random.seed", envir = globalenv(), inherits = FALSE)) {
+        rm(".Random.seed", envir = globalenv())
+      }
+    }, add = TRUE)
+  }
 
   # ---- Extract fold data --------------------------------------------------
   Xtr <- as.matrix(fd$X$train)
@@ -1074,6 +1091,38 @@ geobart_format_num_vec <- function(x, digits = 6L) {
 }
 
 geobart_rf_predict_internal <- function(X_train, y_train, X_pred, seed = 1L) {
+  # --- do-no-harm: make the in-gate RF BIT-IDENTICAL to the scored Wadoux RF ---
+  # When the Wadoux helpers are in scope (they always are: the runner sources
+  # wadoux2021_rf_reproduction_helpers.R before GeoBART.R), delegate to the
+  # EXACT fit_rf_default_wadoux / predict_rf_default_wadoux so the paired RF the
+  # gate compares against is the same object the benchmark scores. We keep the
+  # original predictor column names (predList) and the Wadoux RF seed so the
+  # ranger fit is reproducible-identical to the scored baseline.
+  if (exists("fit_rf_default_wadoux", mode = "function") &&
+      exists("predict_rf_default_wadoux", mode = "function") &&
+      exists("response_name_wadoux")) {
+    Xtr_df <- as.data.frame(X_train)
+    Xpr_df <- as.data.frame(X_pred)
+    pred_names <- colnames(Xtr_df)
+    if (is.null(pred_names) || any(!nzchar(pred_names))) {
+      pred_names <- paste0("x", seq_len(ncol(Xtr_df)))
+      names(Xtr_df) <- pred_names
+      names(Xpr_df) <- pred_names
+    }
+    rf_seed <- as.integer(getOption("wadoux_rf_seed", 123L))
+    if (!is.finite(rf_seed)) rf_seed <- 123L
+    train_df <- cbind(Xtr_df, setNames(list(as.numeric(y_train)),
+                                       response_name_wadoux))
+    form_rf_internal <- stats::as.formula(
+      paste(response_name_wadoux, "~",
+            paste(sprintf("`%s`", pred_names), collapse = "+")))
+    rf_fit <- tryCatch(
+      fit_rf_default_wadoux(train_df, form_rf_internal, seed = rf_seed),
+      error = function(e) NULL)
+    if (!is.null(rf_fit)) {
+      return(as.numeric(predict_rf_default_wadoux(rf_fit, Xpr_df)))
+    }
+  }
   X_train <- as.data.frame(X_train)
   X_pred <- as.data.frame(X_pred)
   names(X_train) <- paste0("x", seq_len(ncol(X_train)))
@@ -2751,6 +2800,75 @@ tune_geobart_one_fold <- function(fd,
 		        c(list(anchor_entry), geobart_conservative_entries(successful)))
 		    }
 		  }
+		  # --- LITERAL-RF fallback entry (do-no-harm hard floor) -------------------
+		  # Construct a synthetic selection entry whose held-out prediction IS the
+		  # literal Wadoux RF (predict_rf_default_wadoux), so that when no GeoBART
+		  # candidate beats RF on OOF the gate can revert to RF itself rather than to
+		  # a same-family GeoBART anchor. The RF is fit on fd$X$train (the exact
+		  # predList columns) with the Wadoux seed and predicts val+test.
+		  geobart_literal_rf_entry <- function() {
+		    if (!(exists("fit_rf_default_wadoux", mode = "function") &&
+		          exists("predict_rf_default_wadoux", mode = "function") &&
+		          exists("response_name_wadoux"))) {
+		      return(NULL)
+		    }
+		    tryCatch({
+		      Xtr <- as.data.frame(fd$X$train)
+		      Xva <- as.data.frame(fd$X$val)
+		      Xte <- as.data.frame(fd$X$test)
+		      pred_names <- colnames(Xtr)
+		      rf_seed <- as.integer(getOption("wadoux_rf_seed", 123L))
+		      if (!is.finite(rf_seed)) rf_seed <- 123L
+		      tr_df <- cbind(Xtr, setNames(list(as.numeric(fd$y$train)),
+		                                   response_name_wadoux))
+		      form_lit <- stats::as.formula(
+		        paste(response_name_wadoux, "~",
+		              paste(sprintf("`%s`", pred_names), collapse = "+")))
+		      rf_fit <- fit_rf_default_wadoux(tr_df, form_lit, seed = rf_seed)
+		      pred_val <- as.numeric(predict_rf_default_wadoux(rf_fit, Xva))
+		      pred_test <- as.numeric(predict_rf_default_wadoux(rf_fit, Xte))
+		      lit_out <- list(
+		        pred_test = pred_test, pred_val = pred_val,
+		        pred_test_base = pred_test, pred_val_base = pred_val,
+		        pred_test_lo = pred_test, pred_test_hi = pred_test,
+		        pred_val_lo = pred_val, pred_val_hi = pred_val,
+		        metrics_test = data.frame(
+		          N = length(fd$y$test),
+		          R2 = if (length(fd$y$test) >= 2L)
+		            suppressWarnings(stats::cor(fd$y$test, pred_test)^2) else NA_real_,
+		          RMSE = sqrt(mean((fd$y$test - pred_test)^2, na.rm = TRUE)),
+		          MAE = mean(abs(fd$y$test - pred_test), na.rm = TRUE),
+		          Bias = mean(pred_test - fd$y$test, na.rm = TRUE)),
+		        diagnostics = list(model = "literal_wadoux_rf",
+		                           target_transform = "identity",
+		                           spatial_policy = "tabular_only"))
+		      rf_val_rmse <- sqrt(mean((fd$y$val - pred_val)^2, na.rm = TRUE))
+		      list(best = list(
+		        out = lit_out,
+		        candidate = data.frame(candidate_id = -1L,
+		                               candidate_label = "literal_wadoux_rf",
+		                               spatial_policy = "tabular_only",
+		                               ntree = NA_integer_, n_basis = 0L,
+		                               bandwidth = NA_real_, anisotropy_ratio = NA_real_,
+		                               k = NA_real_, power = NA_real_, base = NA_real_,
+		                               sigdf = NA_real_, sigquant = NA_real_,
+		                               is_auto_base = FALSE,
+		                               stringsAsFactors = FALSE),
+		        params = list(),
+		        tune_stage = "literal_rf",
+		        effective_transform = "identity",
+		        score = rf_val_rmse,
+		        complexity = 0,
+		        raw_score = rf_val_rmse,
+		        raw_metrics = data.frame(RMSE = rf_val_rmse, ME = NA_real_),
+		        rf_inner_RMSE = rf_tune_rmse,
+		        rf_inner_fold_RMSE = rf_tune_fold_rmse,
+		        delta_RMSE_vs_RF = 0,
+		        post_calibration = NULL))
+		    }, error = function(e) NULL)
+		  }
+		  literal_rf_entry <- geobart_literal_rf_entry()
+
 		  pre_rf_noharm_best <- best
 		  rf_noharm_preselected_delta <- as.numeric(
 		    pre_rf_noharm_best$delta_RMSE_vs_RF)
@@ -2782,16 +2900,20 @@ tune_geobart_one_fold <- function(fd,
 		          rf_noharm_preselected_delta, rf_noharm_required_delta)
 		      } else {
 		        rf_noharm_failed <- TRUE
-		        if (!is.null(anchor_entry)) {
+		        # Prefer reverting to the LITERAL Wadoux RF (guaranteed >= RF tie);
+		        # fall back to the family anchor only if the literal RF is unavailable.
+		        revert_entry <- if (!is.null(literal_rf_entry)) literal_rf_entry else anchor_entry
+		        if (!is.null(revert_entry)) {
 		          selected_key <- paste(best$tune_stage,
 		                                as.integer(best$candidate$candidate_id),
 		                                sep = "|")
-		          anchor_key <- geobart_entry_key(anchor_entry)
+		          anchor_key <- geobart_entry_key(revert_entry)
 		          if (!identical(selected_key, anchor_key)) {
-		            best <- anchor_entry$best
+		            best <- revert_entry$best
 		            rf_noharm_applied <- TRUE
 		            rf_noharm_reason <- sprintf(
-		              "fallback_to_anchor:delta=%.6f>required=%.6f",
+		              "fallback_to_%s:delta=%.6f>required=%.6f",
+		              if (!is.null(literal_rf_entry)) "literal_rf" else "anchor",
 		              rf_noharm_preselected_delta, rf_noharm_required_delta)
 		          } else {
 		            rf_noharm_reason <- sprintf(
@@ -2800,11 +2922,21 @@ tune_geobart_one_fold <- function(fd,
 		          }
 		          if (isTRUE(rf_noharm_restrict_ensemble)) {
 		            selection_pool <- geobart_unique_entries(
-		              c(list(anchor_entry), geobart_conservative_entries(successful)))
+		              c(list(revert_entry), geobart_conservative_entries(successful)))
 		          } else {
 		            selection_pool <- geobart_unique_entries(
-		              c(list(anchor_entry), selection_pool))
+		              c(list(revert_entry), selection_pool))
 		          }
+		        } else if (!is.null(literal_rf_entry)) {
+		          # No family anchor, but literal RF is available: still revert to RF
+		          # so we are GUARANTEED >= RF even when every candidate failed.
+		          best <- literal_rf_entry$best
+		          rf_noharm_applied <- TRUE
+		          rf_noharm_reason <- sprintf(
+		            "fallback_to_literal_rf_no_anchor:delta=%.6f>required=%.6f",
+		            rf_noharm_preselected_delta, rf_noharm_required_delta)
+		          selection_pool <- geobart_unique_entries(
+		            c(list(literal_rf_entry), selection_pool))
 		        } else {
 		          rf_noharm_reason <- sprintf(
 		            "rf_inner_failed_no_anchor:delta=%.6f>required=%.6f",
@@ -2910,6 +3042,47 @@ tune_geobart_one_fold <- function(fd,
 	  selected_params$sigquant <- as.numeric(best$candidate$sigquant)
 	  selected_params$duan_apply <- FALSE
 
+  # --- OOF-selected continuous shrinkage/blend toward RF (lambda) --------------
+  # Even when the gate keeps a GeoBART candidate, blend its OOF prediction with
+  # the paired Wadoux-RF OOF prediction by a convex weight lambda in [0,1],
+  # where final = (1-lambda)*GeoBART + lambda*RF. lambda is chosen on the SAME
+  # cross-fitted OOF validation targets the gate uses, over a grid that INCLUDES
+  # 0 (pure GeoBART) and 1 (pure RF), so the blend can never increase OOF RMSE
+  # vs the selected candidate and can only move it toward RF. Controlled by
+  # GEOBART_RF_BLEND_LAMBDA_GRID (default "0,0.1,...,1"); set to "0" to disable.
+  geobart_oof_rf_lambda <- function() {
+    if (!(exists("fit_rf_default_wadoux", mode = "function") &&
+          exists("predict_rf_default_wadoux", mode = "function") &&
+          exists("response_name_wadoux"))) return(0)
+    grid <- .gb_env_num_vec("GEOBART_RF_BLEND_LAMBDA_GRID",
+                            seq(0, 1, by = 0.1))
+    grid <- sort(unique(pmin(pmax(grid[is.finite(grid)], 0), 1)))
+    if (length(grid) == 0L) return(0)
+    if (length(grid) == 1L && grid[1L] == 0) return(0)
+    gb_val <- best$out$pred_val
+    obs_val <- fd$y$val
+    if (is.null(gb_val) || length(gb_val) != length(obs_val)) return(0)
+    rf_val <- tryCatch({
+      Xtr <- as.data.frame(fd$X$train); Xva <- as.data.frame(fd$X$val)
+      pn <- colnames(Xtr)
+      rseed <- as.integer(getOption("wadoux_rf_seed", 123L))
+      if (!is.finite(rseed)) rseed <- 123L
+      tdf <- cbind(Xtr, setNames(list(as.numeric(fd$y$train)),
+                                 response_name_wadoux))
+      frm <- stats::as.formula(paste(response_name_wadoux, "~",
+               paste(sprintf("`%s`", pn), collapse = "+")))
+      as.numeric(predict_rf_default_wadoux(
+        fit_rf_default_wadoux(tdf, frm, seed = rseed), Xva))
+    }, error = function(e) NULL)
+    if (is.null(rf_val) || length(rf_val) != length(obs_val)) return(0)
+    rmse_at <- vapply(grid, function(lam) {
+      p <- (1 - lam) * gb_val + lam * rf_val
+      sqrt(mean((obs_val - p)^2, na.rm = TRUE))
+    }, numeric(1))
+    grid[which.min(rmse_at)]
+  }
+  rf_blend_lambda <- tryCatch(geobart_oof_rf_lambda(), error = function(e) 0)
+
   selected_out <- best$out
   if (inner_folds > 1L || is.null(selected_out)) {
     final_params <- selected_params[
@@ -2940,6 +3113,40 @@ tune_geobart_one_fold <- function(fd,
       selected_out, best$post_calibration,
       y_val = fd$y$val, y_test = fd$y$test
     )
+  }
+
+  # Apply the OOF-selected RF shrinkage/blend (lambda in [0,1]) to the final
+  # held-out predictions. lambda=0 is a no-op; lambda=1 emits the literal RF.
+  if (is.finite(rf_blend_lambda) && rf_blend_lambda > 0) {
+    rf_blend_pred <- function(Xnew_block) {
+      tryCatch({
+        Xtr <- as.data.frame(fd$X$train); Xnew <- as.data.frame(Xnew_block)
+        pn <- colnames(Xtr)
+        rseed <- as.integer(getOption("wadoux_rf_seed", 123L))
+        if (!is.finite(rseed)) rseed <- 123L
+        tdf <- cbind(Xtr, setNames(list(as.numeric(fd$y$train)),
+                                   response_name_wadoux))
+        frm <- stats::as.formula(paste(response_name_wadoux, "~",
+                 paste(sprintf("`%s`", pn), collapse = "+")))
+        as.numeric(predict_rf_default_wadoux(
+          fit_rf_default_wadoux(tdf, frm, seed = rseed), Xnew))
+      }, error = function(e) NULL)
+    }
+    rf_test <- rf_blend_pred(fd$X$test)
+    rf_val2 <- rf_blend_pred(fd$X$val)
+    if (!is.null(rf_test) && !is.null(selected_out$pred_test) &&
+        length(rf_test) == length(selected_out$pred_test)) {
+      selected_out$pred_test <-
+        (1 - rf_blend_lambda) * selected_out$pred_test + rf_blend_lambda * rf_test
+    }
+    if (!is.null(rf_val2) && !is.null(selected_out$pred_val) &&
+        length(rf_val2) == length(selected_out$pred_val)) {
+      selected_out$pred_val <-
+        (1 - rf_blend_lambda) * selected_out$pred_val + rf_blend_lambda * rf_val2
+    }
+    selected_out$diagnostics$rf_blend_lambda <- rf_blend_lambda
+  } else {
+    selected_out$diagnostics$rf_blend_lambda <- 0
   }
 	  selected_out$diagnostics$tuning_autotune_v3 <- autotune_v3
 	  selected_out$diagnostics$tuning_autotune_v4 <- autotune_v4
