@@ -29,14 +29,32 @@ as \code{train_df}.}
 \code{"auto"} (default) to detect them.}
 
 \item{...}{Further arguments passed to the internal training routine (e.g.
-\code{n_folds}, \code{lambda_grid}, \code{rf_tune}, \code{train_seed});
-see \code{dbtarf_default_params}.}
+\code{n_folds}, \code{lambda_grid}, \code{rf_tune}, \code{train_seed}), and
+the top-k profile-ensemble controls \code{ensemble_top_k} (integer
+\eqn{\ge 1}, default \code{1}: the single best profile, i.e. no blending),
+\code{ensemble_weighting} (\code{"softmax"}, \code{"inverse"} or
+\code{"uniform"}) and \code{ensemble_temperature} (positive, default
+\code{0.75}); see \code{dbtarf_default_params}. The ensemble blends the
+top-k RF profiles (ranked by out-of-fold RMSE) and only activates when
+\code{fair_profile_search} is \code{TRUE}, (\code{rf_tune} or
+\code{resid_rf_tune}) is \code{TRUE} and \code{ensemble_top_k > 1}.}
 }
 \value{
 A list with the test predictions (\code{pred_test}), the base-RF
   predictions (\code{pred_test_base}), conformal prediction-interval
   half-widths (\code{pi_q90}, \code{pi_q95}), per-run \code{diagnostics} and
-  the \code{candidate_table}.
+  the \code{candidate_table}. When \code{ensemble_top_k > 1} the
+  \code{diagnostics} additionally record \code{ensemble_applied},
+  \code{ensemble_size}, \code{ensemble_weighting}, \code{ensemble_temperature},
+  \code{ensemble_profiles}, \code{ensemble_profile_oof_rmse} and
+  \code{ensemble_weights}, and \code{candidate_table} gains
+  \code{ensemble_member}, \code{ensemble_rank} and \code{ensemble_weight}
+  columns. Note that when the ensemble is applied the conformal half-widths
+  (\code{pi_q90}, \code{pi_q95} and the \code{_w}/\code{_sp} variants) are
+  inherited from the single best (top-ranked OOF) profile and are \emph{not}
+  recalibrated against the blended \code{pred_test}; the conformal coverage
+  guarantee therefore pertains to the best single profile, not to the blended
+  point estimate (\code{diagnostics$ensemble_pi_from_best} flags this).
 }
 \description{
 DB-TARF (Design-Based Targeted Adaptive Residual Forest) fits a random-forest

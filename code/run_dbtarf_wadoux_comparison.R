@@ -34,6 +34,9 @@
 #   DBT_RESID_RF_SAMPLE_FRACTION optional comma list
 #   DBT_FAIR_PROFILE_SEARCH      TRUE/FALSE, default TRUE
 #   DBT_FAIR_PROFILE_MAX         default 6
+#   DBT_ENSEMBLE_TOP_K           top-k profile ensemble, default 3 (1 = off)
+#   DBT_ENSEMBLE_WEIGHTING       softmax | inverse | uniform, default softmax
+#   DBT_ENSEMBLE_TEMPERATURE     default 0.75
 #   DBT_TRAIN_SEED          default 123
 #   DBT_RESULTS_DIR         default results/dbtarf_run
 #   DBT_CHECKPOINT_EVERY    default 1
@@ -115,6 +118,12 @@ options(wadoux_corr_method = "pearson")
 # Only override the cross-fitting fold count when DBT_N_FOLDS is explicitly set;
 # otherwise leave it NULL so DBTARF's data-driven auto-folds choice applies.
 n_folds_env <- Sys.getenv("DBT_N_FOLDS", unset = "")
+# Top-k profile-ensemble weighting scheme (validated up front).
+dbt_ensemble_weighting <- tolower(trimws(Sys.getenv(
+  "DBT_ENSEMBLE_WEIGHTING", unset = "softmax")))
+if (!(dbt_ensemble_weighting %in% c("softmax", "inverse", "uniform"))) {
+  stop("Unsupported DBT_ENSEMBLE_WEIGHTING: ", dbt_ensemble_weighting)
+}
 dbtarf_params <- modifyList(
   dbtarf_default_params,
   list(
@@ -138,15 +147,27 @@ dbtarf_params <- modifyList(
     resid_rf_min_node_size = parse_num_list_dbt("DBT_RESID_RF_MIN_NODE_SIZE", NULL),
     resid_rf_sample_fraction = parse_num_list_dbt("DBT_RESID_RF_SAMPLE_FRACTION", NULL),
     fair_profile_search = parse_bool_dbt("DBT_FAIR_PROFILE_SEARCH", TRUE),
-    fair_profile_max = as.integer(parse_num_dbt("DBT_FAIR_PROFILE_MAX", 6L))
+    fair_profile_max = as.integer(parse_num_dbt("DBT_FAIR_PROFILE_MAX", 6L)),
+    ensemble_top_k = as.integer(parse_num_dbt("DBT_ENSEMBLE_TOP_K", 3L)),
+    ensemble_weighting = dbt_ensemble_weighting,
+    ensemble_temperature = parse_num_dbt("DBT_ENSEMBLE_TEMPERATURE", 0.75)
   )
 )
+if (!is.finite(dbtarf_params$ensemble_top_k) ||
+    dbtarf_params$ensemble_top_k < 1L) {
+  dbtarf_params$ensemble_top_k <- 1L
+}
+if (!is.finite(dbtarf_params$ensemble_temperature) ||
+    dbtarf_params$ensemble_temperature <= 0) {
+  dbtarf_params$ensemble_temperature <- 0.75
+}
 n_folds_report <- if (is.null(dbtarf_params$n_folds)) "auto" else as.character(dbtarf_params$n_folds)
 
 cat(sprintf(
-  "[DBTARF runner] scenario=%s  protocols=%s  models=%s  n_iter=%d  n=%d\n",
+  "[DBTARF runner] scenario=%s  protocols=%s  models=%s  n_iter=%d  n=%d  ensemble_top_k=%d weighting=%s\n",
   scenario, paste(protocols, collapse = ","),
-  paste(models, collapse = ","), n_iter, sample_size))
+  paste(models, collapse = ","), n_iter, sample_size,
+  dbtarf_params$ensemble_top_k, dbtarf_params$ensemble_weighting))
 
 # ---- Data -------------------------------------------------------------------
 

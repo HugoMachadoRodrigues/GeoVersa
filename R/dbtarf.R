@@ -1665,6 +1665,9 @@ train_dbtarf_one_fold <- function(train_df,
                                   resid_rf_sample_fraction = NULL,
                                   fair_profile_search = TRUE,
                                   fair_profile_max = 6L,
+                                  ensemble_top_k = 1L,
+                                  ensemble_weighting = "softmax",
+                                  ensemble_temperature = 0.75,
                                   ...) {
   tag_profile <- function(out, label) {
     out$diagnostics$selected_profile <- label
@@ -1672,6 +1675,35 @@ train_dbtarf_one_fold <- function(train_df,
     out$fold_diagnostics <- cbind(profile = label, out$fold_diagnostics)
     out$rf_tuning_table <- cbind(profile = label, out$rf_tuning_table)
     out
+  }
+
+  # Pure deterministic map from per-profile OOF-RMSE scores (lower = better)
+  # to normalized blend weights. No RNG; weights depend only on `scores`.
+  dbt_candidate_weights <- function(scores, weighting, temperature) {
+    n <- length(scores)
+    if (n == 0L) return(numeric())
+    if (n == 1L) return(1)
+    scores <- as.numeric(scores)
+    finite <- is.finite(scores)
+    if (!any(finite)) return(rep(1 / n, n))
+    worst <- max(scores[finite], na.rm = TRUE)
+    scores[!finite] <- worst + abs(worst) + 1
+    weighting <- tolower(trimws(as.character(weighting)[1L]))
+    temperature <- suppressWarnings(as.numeric(temperature)[1L])
+    if (!is.finite(temperature) || temperature <= 0) temperature <- 1
+    if (identical(weighting, "uniform")) {
+      w <- rep(1, n)
+    } else if (identical(weighting, "inverse")) {
+      w <- 1 / pmax(scores - min(scores, na.rm = TRUE) + temperature, 1e-8)
+    } else {
+      z <- -(scores - min(scores, na.rm = TRUE)) / temperature
+      z <- pmax(z, -700)
+      w <- exp(z)
+    }
+    if (!any(is.finite(w)) || sum(w, na.rm = TRUE) <= 0) {
+      return(rep(1 / n, n))
+    }
+    w / sum(w, na.rm = TRUE)
   }
 
   run_fixed_profile <- function(spec) {
@@ -1735,6 +1767,67 @@ train_dbtarf_one_fold <- function(train_df,
     }, numeric(1))
     best_i <- if (any(is.finite(oof))) which.min(oof) else 1L
     selected <- profile_out[[best_i]]
+
+    # ---- top-k profile ensemble (no-op when ensemble_top_k <= 1) ----
+    ens_top_k <- suppressWarnings(as.integer(ensemble_top_k))
+    if (length(ens_top_k) != 1L || is.na(ens_top_k) ||
+        !is.finite(ens_top_k) || ens_top_k < 1L) ens_top_k <- 1L
+    rank_i <- order(oof, na.last = TRUE)
+    rank_i <- rank_i[is.finite(oof[rank_i])]
+    if (length(rank_i) == 0L) rank_i <- best_i
+    top_i <- rank_i[seq_len(min(ens_top_k, length(rank_i)))]
+    top_weights <- dbt_candidate_weights(
+      oof[top_i], ensemble_weighting, ensemble_temperature)
+    if (length(top_i) > 1L) {
+      weighted_vec <- function(name) {
+        mat <- do.call(cbind, lapply(profile_out[top_i], function(x) {
+          as.numeric(x[[name]])
+        }))
+        as.numeric(mat %*% top_weights)
+      }
+      selected$pred_test <- weighted_vec("pred_test")
+      if (!is.null(selected$pred_test_base)) {
+        selected$pred_test_base <- weighted_vec("pred_test_base")
+      }
+      if (!is.null(selected$pred_test_cubist)) {
+        selected$pred_test_cubist <- weighted_vec("pred_test_cubist")
+      }
+      if (!is.null(selected$correction_test)) {
+        selected$correction_test <- weighted_vec("correction_test")
+      }
+      test_obs <- if (response_name %in% names(test_df)) {
+        suppressWarnings(as.numeric(test_df[[response_name]]))
+      } else {
+        rep(NA_real_, nrow(test_df))
+      }
+      if (any(is.finite(test_obs))) {
+        selected$metrics_test$RMSE <- .dbt_rmse(test_obs, selected$pred_test)
+        selected$metrics_test$RMSE_base <- .dbt_rmse(
+          test_obs, selected$pred_test_base)
+      }
+    }
+    # Effective (post-normalization) weighting/temperature actually used by
+    # dbt_candidate_weights, so the recorded provenance matches the weights.
+    eff_weighting <- tolower(trimws(as.character(ensemble_weighting)[1L]))
+    if (!(eff_weighting %in% c("uniform", "inverse"))) eff_weighting <- "softmax"
+    eff_temperature <- suppressWarnings(as.numeric(ensemble_temperature)[1L])
+    if (!is.finite(eff_temperature) || eff_temperature <= 0) eff_temperature <- 1
+    selected$diagnostics$ensemble_top_k_requested <- ens_top_k
+    selected$diagnostics$ensemble_applied <- length(top_i) > 1L
+    selected$diagnostics$ensemble_size <- length(top_i)
+    # When blending, pi_* conformal half-widths are inherited from the single
+    # best profile and are NOT recalibrated against the blended pred_test
+    # (see ?dbtarf_train_predict).
+    selected$diagnostics$ensemble_pi_from_best <- length(top_i) > 1L
+    selected$diagnostics$ensemble_weighting <- eff_weighting
+    selected$diagnostics$ensemble_temperature <- eff_temperature
+    selected$diagnostics$ensemble_profiles <- paste(
+      profile_labels[top_i], collapse = "|")
+    selected$diagnostics$ensemble_profile_oof_rmse <- paste(
+      sprintf("%.8f", oof[top_i]), collapse = "|")
+    selected$diagnostics$ensemble_weights <- paste(
+      sprintf("%.8f", top_weights), collapse = "|")
+
     selected$diagnostics$fair_profile_search <- TRUE
     selected$diagnostics$fair_profile_max <- as.integer(fair_profile_max)
     selected$diagnostics$profile_search_n <- length(profile_out)
@@ -1744,6 +1837,13 @@ train_dbtarf_one_fold <- function(train_df,
       if (is.na(di)) NA_real_ else oof[di]
     }
     selected$candidate_table <- do.call(rbind, lapply(profile_out, `[[`, "candidate_table"))
+    selected$candidate_table$ensemble_member <-
+      selected$candidate_table$profile %in% profile_labels[top_i]
+    selected$candidate_table$ensemble_rank <- match(
+      selected$candidate_table$profile, profile_labels[top_i])
+    weight_map <- stats::setNames(top_weights, profile_labels[top_i])
+    selected$candidate_table$ensemble_weight <- as.numeric(
+      weight_map[selected$candidate_table$profile])
     selected$rf_tuning_table <- do.call(rbind, lapply(profile_out, `[[`, "rf_tuning_table"))
     return(selected)
   }
@@ -1791,6 +1891,28 @@ train_dbtarf_one_fold <- function(train_df,
     if (identical(requested_label, "default_rf")) {
       requested$diagnostics$selected_oof_rmse
     } else NA_real_
+
+  # Mirror the ensemble diagnostics schema of the search path so both no-op
+  # return paths expose the same fields (the single-profile path never blends).
+  ens_eff_weighting <- tolower(trimws(as.character(ensemble_weighting)[1L]))
+  if (!(ens_eff_weighting %in% c("uniform", "inverse")))
+    ens_eff_weighting <- "softmax"
+  ens_eff_temperature <- suppressWarnings(as.numeric(ensemble_temperature)[1L])
+  if (!is.finite(ens_eff_temperature) || ens_eff_temperature <= 0)
+    ens_eff_temperature <- 1
+  ens_k_req <- suppressWarnings(as.integer(ensemble_top_k)[1L])
+  if (length(ens_k_req) != 1L || is.na(ens_k_req) ||
+      !is.finite(ens_k_req) || ens_k_req < 1L) ens_k_req <- 1L
+  requested$diagnostics$ensemble_top_k_requested <- ens_k_req
+  requested$diagnostics$ensemble_applied <- FALSE
+  requested$diagnostics$ensemble_size <- 1L
+  requested$diagnostics$ensemble_pi_from_best <- FALSE
+  requested$diagnostics$ensemble_weighting <- ens_eff_weighting
+  requested$diagnostics$ensemble_temperature <- ens_eff_temperature
+  requested$diagnostics$ensemble_profiles <- requested_label
+  requested$diagnostics$ensemble_profile_oof_rmse <- sprintf(
+    "%.8f", suppressWarnings(as.numeric(requested$diagnostics$selected_oof_rmse)))
+  requested$diagnostics$ensemble_weights <- "1.00000000"
   requested
 }
 
@@ -1816,7 +1938,10 @@ dbtarf_default_params <- list(
   resid_rf_min_node_size = NULL,
   resid_rf_sample_fraction = NULL,
   fair_profile_search = TRUE,
-  fair_profile_max = 6L
+  fair_profile_max = 6L,
+  ensemble_top_k = 1L,
+  ensemble_weighting = "softmax",
+  ensemble_temperature = 0.75
 )
 
 #' Fit DB-TARF and predict a test set
@@ -1836,12 +1961,30 @@ dbtarf_default_params <- list(
 #' @param coord_names Length-2 character vector of coordinate column names, or
 #'   \code{"auto"} (default) to detect them.
 #' @param ... Further arguments passed to the internal training routine (e.g.
-#'   \code{n_folds}, \code{lambda_grid}, \code{rf_tune}, \code{train_seed});
-#'   see \code{dbtarf_default_params}.
+#'   \code{n_folds}, \code{lambda_grid}, \code{rf_tune}, \code{train_seed}), and
+#'   the top-k profile-ensemble controls \code{ensemble_top_k} (integer
+#'   \eqn{\ge 1}, default \code{1}: the single best profile, i.e. no blending),
+#'   \code{ensemble_weighting} (\code{"softmax"}, \code{"inverse"} or
+#'   \code{"uniform"}) and \code{ensemble_temperature} (positive, default
+#'   \code{0.75}); see \code{dbtarf_default_params}. The ensemble blends the
+#'   top-k RF profiles (ranked by out-of-fold RMSE) and only activates when
+#'   \code{fair_profile_search} is \code{TRUE}, (\code{rf_tune} or
+#'   \code{resid_rf_tune}) is \code{TRUE} and \code{ensemble_top_k > 1}.
 #' @return A list with the test predictions (\code{pred_test}), the base-RF
 #'   predictions (\code{pred_test_base}), conformal prediction-interval
 #'   half-widths (\code{pi_q90}, \code{pi_q95}), per-run \code{diagnostics} and
-#'   the \code{candidate_table}.
+#'   the \code{candidate_table}. When \code{ensemble_top_k > 1} the
+#'   \code{diagnostics} additionally record \code{ensemble_applied},
+#'   \code{ensemble_size}, \code{ensemble_weighting}, \code{ensemble_temperature},
+#'   \code{ensemble_profiles}, \code{ensemble_profile_oof_rmse} and
+#'   \code{ensemble_weights}, and \code{candidate_table} gains
+#'   \code{ensemble_member}, \code{ensemble_rank} and \code{ensemble_weight}
+#'   columns. Note that when the ensemble is applied the conformal half-widths
+#'   (\code{pi_q90}, \code{pi_q95} and the \code{_w}/\code{_sp} variants) are
+#'   inherited from the single best (top-ranked OOF) profile and are \emph{not}
+#'   recalibrated against the blended \code{pred_test}; the conformal coverage
+#'   guarantee therefore pertains to the best single profile, not to the blended
+#'   point estimate (\code{diagnostics$ensemble_pi_from_best} flags this).
 #' @examples
 #' set.seed(1)
 #' n <- 120
