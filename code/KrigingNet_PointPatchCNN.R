@@ -1,5 +1,6 @@
 rm(list = ls())
 set.seed(123)
+source("./code/geospatial_env_setup.R", local = TRUE)
 
 source("./code/KrigingNet_DualFramework.R")
 
@@ -82,6 +83,127 @@ get_pointpatch_raster_array_cache <- function(r_stack) {
     )
   }
   get(key, envir = .pointpatch_raster_array_cache, inherits = FALSE)
+}
+
+infer_pointpatch_resolution <- function(r_stack) {
+  res_xy <- tryCatch(terra::res(r_stack[[1]]), error = function(e) c(NA_real_, NA_real_))
+  res_xy <- as.numeric(res_xy)
+  res_x <- if (length(res_xy) >= 1L && is.finite(res_xy[1])) abs(res_xy[1]) else NA_real_
+  res_y <- if (length(res_xy) >= 2L && is.finite(res_xy[2])) abs(res_xy[2]) else NA_real_
+  res_mean <- mean(c(res_x, res_y), na.rm = TRUE)
+  if (!is.finite(res_mean)) res_mean <- NA_real_
+  list(
+    resolution_x = res_x,
+    resolution_y = res_y,
+    resolution_mean = res_mean
+  )
+}
+
+sample_pointpatch_ssl_coords <- function(context,
+                                         n_samples = 4096L,
+                                         patch_size = 15L,
+                                         seed = 123L,
+                                         oversample_factor = 3L,
+                                         max_attempts = 8L) {
+  n_samples <- as.integer(max(128L, round(n_samples)))
+  patch_size <- as.integer(max(3L, round(patch_size)))
+  oversample_factor <- as.integer(max(2L, round(oversample_factor)))
+  max_attempts <- as.integer(max(1L, round(max_attempts)))
+
+  patch_layers <- context$stack[[context$predictors]]
+  cache <- get_pointpatch_raster_array_cache(patch_layers)
+  half_lo <- floor((patch_size - 1L) / 2L)
+  half_hi <- patch_size - 1L - half_lo
+  row_lo <- max(1L + half_lo, 1L)
+  row_hi <- min(cache$nrow - half_hi, cache$nrow)
+  col_lo <- max(1L + half_lo, 1L)
+  col_hi <- min(cache$ncol - half_hi, cache$ncol)
+  if (row_lo > row_hi || col_lo > col_hi) {
+    stop("Patch SSL sampling failed: patch_size exceeds raster support.")
+  }
+
+  coords <- matrix(numeric(0), ncol = 2L)
+  seen_keys <- character(0)
+  sampled <- 0L
+
+  for (attempt in seq_len(max_attempts)) {
+    need <- n_samples - sampled
+    if (need <= 0L) break
+    size_now <- max(512L, need * oversample_factor)
+    set.seed(as.integer(seed) + attempt - 1L)
+    rows <- sample.int(row_hi - row_lo + 1L, size_now, replace = TRUE) + row_lo - 1L
+    cols <- sample.int(col_hi - col_lo + 1L, size_now, replace = TRUE) + col_lo - 1L
+
+    keep <- vapply(seq_along(rows), function(i) {
+      center_vals <- cache$array[rows[i], cols[i], ]
+      all(is.finite(center_vals))
+    }, logical(1))
+    if (!any(keep)) next
+
+    rows_keep <- rows[keep]
+    cols_keep <- cols[keep]
+    keys <- paste(rows_keep, cols_keep, sep = ":")
+    novel <- !(keys %in% seen_keys)
+    if (!any(novel)) next
+
+    rows_keep <- rows_keep[novel]
+    cols_keep <- cols_keep[novel]
+    seen_keys <- c(seen_keys, keys[novel])
+    cells <- terra::cellFromRowCol(patch_layers[[1]], rows_keep, cols_keep)
+    xy <- terra::xyFromCell(patch_layers[[1]], cells)
+    coords <- rbind(coords, xy)
+    sampled <- nrow(coords)
+  }
+
+  if (nrow(coords) < n_samples) {
+    warning(sprintf(
+      "Patch SSL sampling reached %d/%d valid centers after %d attempts.",
+      nrow(coords), n_samples, max_attempts
+    ))
+  }
+
+  coords <- coords[seq_len(min(nrow(coords), n_samples)), , drop = FALSE]
+  colnames(coords) <- c("x", "y")
+  coords
+}
+
+build_pointpatch_ssl_cache <- function(context,
+                                       patch_size = 15L,
+                                       n_samples = 4096L,
+                                       seed = 123L,
+                                       label = "ssl patches") {
+  patch_layers <- context$stack[[context$predictors]]
+  coords <- sample_pointpatch_ssl_coords(
+    context = context,
+    n_samples = n_samples,
+    patch_size = patch_size,
+    seed = seed
+  )
+  if (nrow(coords) < 64L) {
+    stop("Patch SSL cache failed: not enough valid unlabeled patch centers.")
+  }
+  patch_res <- infer_pointpatch_resolution(patch_layers)
+  patches_raw <- extract_point_patches(
+    patch_layers,
+    coords = coords,
+    patch_size = patch_size,
+    fill_value = NA_real_,
+    label = label
+  )
+  patch_scaler <- normalize_patch_array(patches_raw)
+  center_idx <- floor((patch_size + 1L) / 2L)
+  center_target <- t(patch_scaler$patches[, center_idx, center_idx, , drop = TRUE])
+  list(
+    patches = patch_scaler$patches,
+    center_target = center_target,
+    coords = coords,
+    patch_scaler = patch_scaler,
+    patch_size = as.integer(patch_size),
+    n = nrow(coords),
+    resolution_x = patch_res$resolution_x,
+    resolution_y = patch_res$resolution_y,
+    resolution_mean = patch_res$resolution_mean
+  )
 }
 
 extract_point_patches <- function(r_stack,
@@ -172,6 +294,7 @@ build_pointpatch_patch_cache <- function(context,
                                          label = "calibration patches") {
   coords <- as.matrix(calibration_df[, c("x", "y"), drop = FALSE])
   patch_layers <- context$stack[[context$predictors]]
+  patch_res <- infer_pointpatch_resolution(patch_layers)
   patches_raw <- extract_point_patches(
     patch_layers,
     coords,
@@ -183,7 +306,10 @@ build_pointpatch_patch_cache <- function(context,
   list(
     patches_raw = patches_raw,
     patch_size = patch_size,
-    n = nrow(calibration_df)
+    n = nrow(calibration_df),
+    resolution_x = patch_res$resolution_x,
+    resolution_y = patch_res$resolution_y,
+    resolution_mean = patch_res$resolution_mean
   )
 }
 
@@ -238,6 +364,23 @@ prepare_pointpatch_fold <- function(context,
     p_test  <- extract_point_patches(patch_layers, coords_test, patch_size = patch_size, label = "test patches")
   }
 
+  patch_meta <- if (!is.null(patch_cache)) {
+    list(
+      patch_size = as.integer(patch_cache$patch_size),
+      resolution_x = if (!is.null(patch_cache$resolution_x)) as.numeric(patch_cache$resolution_x) else NA_real_,
+      resolution_y = if (!is.null(patch_cache$resolution_y)) as.numeric(patch_cache$resolution_y) else NA_real_,
+      resolution_mean = if (!is.null(patch_cache$resolution_mean)) as.numeric(patch_cache$resolution_mean) else NA_real_
+    )
+  } else {
+    patch_res <- infer_pointpatch_resolution(context$stack[[context$predictors]])
+    list(
+      patch_size = as.integer(patch_size),
+      resolution_x = patch_res$resolution_x,
+      resolution_y = patch_res$resolution_y,
+      resolution_mean = patch_res$resolution_mean
+    )
+  }
+
   cat("Normalizing patch channels...\n")
 
   patch_scaler <- normalize_patch_array(p_train)
@@ -251,6 +394,7 @@ prepare_pointpatch_fold <- function(context,
       val = apply_patch_scaler(p_val, patch_scaler),
       test = apply_patch_scaler(p_test, patch_scaler)
     ),
+    patch_meta = patch_meta,
     x_scaler = x_scaler,
     patch_scaler = patch_scaler,
     neighbor_idx_train = compute_neighbor_idx_train_only(coords_train, K)

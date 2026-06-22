@@ -1,3 +1,5 @@
+source("./code/geospatial_env_setup.R", local = TRUE)
+
 project_root_wadoux <- if (
   file.exists("C:/Users/rodrigues.h/OneDrive/Deep Kriging")
 ) {
@@ -42,6 +44,7 @@ load_wadoux_common_data <- function(include_polygon = FALSE) {
   s[[1]][s[[1]] == 0] <- NA
   s_df <- as.data.frame(s, xy = TRUE, na.rm = TRUE)
   s_df <- na.omit(as.data.frame(s_df))
+  s_df$..wadoux_row_id <- seq_len(nrow(s_df))
 
   out <- list(
     stack = s,
@@ -68,16 +71,546 @@ wadoux_eval <- function(obs, pred, corr_method = getOption("wadoux_corr_method",
   data.frame(ME = me, RMSE = rmse, r2 = r2, MEC = mec)
 }
 
-fit_rf_default_wadoux <- function(train_df, form_rf, num.threads = NULL,
-                                  seed = NULL) {
-  # num.threads/seed default to NULL (unchanged ranger behaviour for existing
-  # callers); pass num.threads = 1L and a seed for fully reproducible runs.
-  ranger::ranger(formula = form_rf, data = train_df,
-                 num.threads = num.threads, seed = seed)
+wadoux_eval_gaussian_uq <- function(obs,
+                                    pred,
+                                    logvar,
+                                    levels = c(0.90, 0.95),
+                                    reliability_levels = seq(0.10, 0.95, by = 0.05)) {
+  obs <- as.numeric(obs)
+  pred <- as.numeric(pred)
+  logvar <- suppressWarnings(as.numeric(logvar))
+  keep <- is.finite(obs) & is.finite(pred) & is.finite(logvar)
+  if (!any(keep)) {
+    return(data.frame(
+      uq_available = FALSE,
+      gaussian_nll = NA_real_,
+      sigma_mean = NA_real_,
+      sigma_median = NA_real_,
+      reliability_ece = NA_real_,
+      picp_90 = NA_real_,
+      mpiw_90 = NA_real_,
+      ace_90 = NA_real_,
+      picp_95 = NA_real_,
+      mpiw_95 = NA_real_,
+      ace_95 = NA_real_,
+      stringsAsFactors = FALSE
+    ))
+  }
+
+  obs <- obs[keep]
+  pred <- pred[keep]
+  logvar <- pmin(pmax(logvar[keep], -6), 4)
+  sigma <- sqrt(pmax(exp(logvar), 1e-8))
+  z_abs <- abs(obs - pred)
+  gaussian_nll <- mean(0.5 * (log(2 * pi) + logvar + ((obs - pred)^2) / pmax(exp(logvar), 1e-8)), na.rm = TRUE)
+
+  rel_cov <- vapply(reliability_levels, function(level) {
+    zq <- stats::qnorm((1 + level) / 2)
+    mean(z_abs <= zq * sigma, na.rm = TRUE)
+  }, numeric(1))
+  reliability_ece <- mean(abs(rel_cov - reliability_levels), na.rm = TRUE)
+
+  out <- data.frame(
+    uq_available = TRUE,
+    gaussian_nll = gaussian_nll,
+    sigma_mean = mean(sigma, na.rm = TRUE),
+    sigma_median = stats::median(sigma, na.rm = TRUE),
+    reliability_ece = reliability_ece,
+    stringsAsFactors = FALSE
+  )
+
+  for (level in levels) {
+    zq <- stats::qnorm((1 + level) / 2)
+    half_width <- zq * sigma
+    picp <- mean(z_abs <= half_width, na.rm = TRUE)
+    mpiw <- mean(2 * half_width, na.rm = TRUE)
+    suffix <- sprintf("%02d", round(level * 100))
+    out[[sprintf("picp_%s", suffix)]] <- picp
+    out[[sprintf("mpiw_%s", suffix)]] <- mpiw
+    out[[sprintf("ace_%s", suffix)]] <- abs(picp - level)
+  }
+
+  out
+}
+
+.wadoux_empty_transformed_uq_row <- function(levels = c(0.90, 0.95)) {
+  out <- data.frame(
+    uq_available = FALSE,
+    uq_nll = NA_real_,
+    reliability_ece = NA_real_,
+    stringsAsFactors = FALSE
+  )
+  for (level in levels) {
+    suffix <- sprintf("%02d", round(level * 100))
+    out[[sprintf("picp_%s", suffix)]] <- NA_real_
+    out[[sprintf("mpiw_%s", suffix)]] <- NA_real_
+    out[[sprintf("ace_%s", suffix)]] <- NA_real_
+  }
+  out
+}
+
+wadoux_gaussian_reliability_curve <- function(obs,
+                                              pred,
+                                              logvar,
+                                              levels = seq(0.10, 0.95, by = 0.05)) {
+  obs <- as.numeric(obs)
+  pred <- as.numeric(pred)
+  logvar <- suppressWarnings(as.numeric(logvar))
+  keep <- is.finite(obs) & is.finite(pred) & is.finite(logvar)
+  if (!any(keep)) {
+    return(data.frame())
+  }
+
+  obs <- obs[keep]
+  pred <- pred[keep]
+  logvar <- pmin(pmax(logvar[keep], -6), 4)
+  sigma <- sqrt(pmax(exp(logvar), 1e-8))
+  z_abs <- abs(obs - pred)
+
+  bind_rows(lapply(levels, function(level) {
+    zq <- stats::qnorm((1 + level) / 2)
+    half_width <- zq * sigma
+    empirical <- mean(z_abs <= half_width, na.rm = TRUE)
+    data.frame(
+      nominal_coverage = level,
+      empirical_coverage = empirical,
+      abs_calibration_error = abs(empirical - level),
+      mean_interval_width = mean(2 * half_width, na.rm = TRUE),
+      stringsAsFactors = FALSE
+    )
+  }))
+}
+
+.wadoux_inverse_target_scaler <- function(pred_scaled, target_scaler) {
+  as.numeric(pred_scaled) * as.numeric(target_scaler$scale) + as.numeric(target_scaler$center)
+}
+
+# Split-conformal calibration scores (Angelopoulos & Bates 2023).
+# Computes standardised absolute residuals on the calibration (val) set:
+#   s_i = |y_i_t - μ_i| / σ_i  (in transformed space)
+# These scores replace the Gaussian quantile z_α as follows:
+#   q̂_α = quantile(scores, ceil((n+1)·α / n))      # α-th quantile, not (1-α)
+# E.g. for α=0.90, n=100: ceil(90.9)/100 = 0.91 → 91st percentile.
+# Resulting interval: μ ± q̂_α·σ  →  guaranteed P(Y ∈ interval) ≥ α.
+compute_conformal_scores <- function(obs_raw_val,
+                                     pred_val_scaled,
+                                     pred_val_logvar_scaled,
+                                     target_scaler,
+                                     target_transform = "identity") {
+  obs_raw_val <- as.numeric(obs_raw_val)
+  pred_val_scaled <- as.numeric(pred_val_scaled)
+  pred_val_logvar_scaled <- suppressWarnings(as.numeric(pred_val_logvar_scaled))
+  keep <- is.finite(obs_raw_val) & is.finite(pred_val_scaled) & is.finite(pred_val_logvar_scaled)
+  if (sum(keep) < 5L) return(NULL)
+  obs_raw_val <- obs_raw_val[keep]
+  pred_val_scaled <- pred_val_scaled[keep]
+  pred_val_logvar_scaled <- pmin(pmax(pred_val_logvar_scaled[keep], -6), 4)
+  mean_t <- .wadoux_inverse_target_scaler(pred_val_scaled, target_scaler)
+  sd_t <- abs(as.numeric(target_scaler$scale)) *
+    sqrt(pmax(exp(pred_val_logvar_scaled), 1e-8))
+  target_transform <- tolower(trimws(as.character(target_transform[1])))
+  if (!target_transform %in% c("identity", "log")) target_transform <- "identity"
+  if (identical(target_transform, "log")) {
+    keep_pos <- obs_raw_val > 0 & is.finite(mean_t) & is.finite(sd_t) & sd_t > 0
+    if (sum(keep_pos) < 5L) return(NULL)
+    scores <- abs(log(obs_raw_val[keep_pos]) - mean_t[keep_pos]) / sd_t[keep_pos]
+  } else {
+    keep_fin <- is.finite(mean_t) & is.finite(sd_t) & sd_t > 0
+    if (sum(keep_fin) < 5L) return(NULL)
+    scores <- abs(obs_raw_val[keep_fin] - mean_t[keep_fin]) / sd_t[keep_fin]
+  }
+  n <- length(scores)
+  q90 <- as.numeric(quantile(scores, min(1, ceiling((n + 1L) * 0.90) / n),
+                             type = 1L, na.rm = TRUE))
+  cat(sprintf(
+    "[Conformal] n_cal=%d  median_s=%.3f  q̂_0.90=%.3f  (z_0.90=%.3f)  ratio=%.3f\n",
+    n, median(scores, na.rm = TRUE), q90, qnorm(0.95), q90 / qnorm(0.95)
+  ))
+  scores
+}
+
+wadoux_eval_transformed_gaussian_uq <- function(obs_raw,
+                                                pred_scaled,
+                                                logvar_scaled,
+                                                target_scaler,
+                                                target_transform = "identity",
+                                                levels = c(0.90, 0.95),
+                                                reliability_levels = seq(0.10, 0.95, by = 0.05),
+                                                conformal_scores = NULL) {
+  obs_raw <- as.numeric(obs_raw)
+  pred_scaled <- as.numeric(pred_scaled)
+  logvar_scaled <- suppressWarnings(as.numeric(logvar_scaled))
+  keep <- is.finite(obs_raw) & is.finite(pred_scaled) & is.finite(logvar_scaled)
+  if (!any(keep)) {
+    return(.wadoux_empty_transformed_uq_row(levels = levels))
+  }
+
+  obs_raw <- obs_raw[keep]
+  pred_scaled <- pred_scaled[keep]
+  logvar_scaled <- pmin(pmax(logvar_scaled[keep], -6), 4)
+  mean_t <- .wadoux_inverse_target_scaler(pred_scaled, target_scaler)
+  sd_t <- abs(as.numeric(target_scaler$scale)) * sqrt(pmax(exp(logvar_scaled), 1e-8))
+  var_t <- pmax(sd_t^2, 1e-8)
+
+  target_transform <- tolower(trimws(as.character(target_transform[1])))
+  if (!target_transform %in% c("identity", "log")) target_transform <- "identity"
+
+  if (identical(target_transform, "log")) {
+    keep_pos <- obs_raw > 0 & is.finite(mean_t) & is.finite(sd_t)
+    if (!any(keep_pos)) {
+      return(.wadoux_empty_transformed_uq_row(levels = levels))
+    }
+    obs_raw <- obs_raw[keep_pos]
+    mean_t <- mean_t[keep_pos]
+    sd_t <- sd_t[keep_pos]
+    var_t <- var_t[keep_pos]
+    obs_t <- log(obs_raw)
+    uq_nll <- mean(
+      0.5 * (log(2 * pi) + log(var_t) + ((obs_t - mean_t)^2) / var_t) + log(obs_raw),
+      na.rm = TRUE
+    )
+    reliability_curve <- bind_rows(lapply(reliability_levels, function(level) {
+      zq <- if (!is.null(conformal_scores) && length(conformal_scores) >= 5L) {
+        n_cal <- length(conformal_scores)
+        conf_level <- min(1.0, ceiling((n_cal + 1L) * level) / n_cal)
+        as.numeric(quantile(conformal_scores, probs = conf_level,
+                            type = 1L, na.rm = TRUE))
+      } else {
+        stats::qnorm((1 + level) / 2)
+      }
+      lower <- exp(mean_t - zq * sd_t)
+      upper <- exp(mean_t + zq * sd_t)
+      empirical <- mean(obs_raw >= lower & obs_raw <= upper, na.rm = TRUE)
+      data.frame(
+        nominal_coverage = level,
+        empirical_coverage = empirical,
+        abs_calibration_error = abs(empirical - level),
+        mean_interval_width = mean(upper - lower, na.rm = TRUE),
+        stringsAsFactors = FALSE
+      )
+    }))
+  } else {
+    obs_t <- obs_raw
+    uq_nll <- mean(0.5 * (log(2 * pi) + log(var_t) + ((obs_t - mean_t)^2) / var_t), na.rm = TRUE)
+    reliability_curve <- bind_rows(lapply(reliability_levels, function(level) {
+      zq <- if (!is.null(conformal_scores) && length(conformal_scores) >= 5L) {
+        n_cal <- length(conformal_scores)
+        conf_level <- min(1.0, ceiling((n_cal + 1L) * level) / n_cal)
+        as.numeric(quantile(conformal_scores, probs = conf_level,
+                            type = 1L, na.rm = TRUE))
+      } else {
+        stats::qnorm((1 + level) / 2)
+      }
+      lower <- mean_t - zq * sd_t
+      upper <- mean_t + zq * sd_t
+      empirical <- mean(obs_raw >= lower & obs_raw <= upper, na.rm = TRUE)
+      data.frame(
+        nominal_coverage = level,
+        empirical_coverage = empirical,
+        abs_calibration_error = abs(empirical - level),
+        mean_interval_width = mean(upper - lower, na.rm = TRUE),
+        stringsAsFactors = FALSE
+      )
+    }))
+  }
+
+  out <- data.frame(
+    uq_available = TRUE,
+    uq_nll = uq_nll,
+    reliability_ece = mean(reliability_curve$abs_calibration_error, na.rm = TRUE),
+    stringsAsFactors = FALSE
+  )
+
+  for (level in levels) {
+    suffix <- sprintf("%02d", round(level * 100))
+    row_i <- reliability_curve[abs(reliability_curve$nominal_coverage - level) < 1e-8, , drop = FALSE]
+    out[[sprintf("picp_%s", suffix)]] <- if (nrow(row_i) > 0) row_i$empirical_coverage[1] else NA_real_
+    out[[sprintf("mpiw_%s", suffix)]] <- if (nrow(row_i) > 0) row_i$mean_interval_width[1] else NA_real_
+    out[[sprintf("ace_%s", suffix)]] <- if (nrow(row_i) > 0) row_i$abs_calibration_error[1] else NA_real_
+  }
+
+  out
+}
+
+wadoux_transformed_gaussian_reliability_curve <- function(obs_raw,
+                                                          pred_scaled,
+                                                          logvar_scaled,
+                                                          target_scaler,
+                                                          target_transform = "identity",
+                                                          levels = seq(0.10, 0.95, by = 0.05),
+                                                          conformal_scores = NULL) {
+  obs_raw <- as.numeric(obs_raw)
+  pred_scaled <- as.numeric(pred_scaled)
+  logvar_scaled <- suppressWarnings(as.numeric(logvar_scaled))
+  keep <- is.finite(obs_raw) & is.finite(pred_scaled) & is.finite(logvar_scaled)
+  if (!any(keep)) {
+    return(data.frame())
+  }
+  obs_raw <- obs_raw[keep]
+  pred_scaled <- pred_scaled[keep]
+  logvar_scaled <- pmin(pmax(logvar_scaled[keep], -6), 4)
+  mean_t <- .wadoux_inverse_target_scaler(pred_scaled, target_scaler)
+  sd_t <- abs(as.numeric(target_scaler$scale)) * sqrt(pmax(exp(logvar_scaled), 1e-8))
+  target_transform <- tolower(trimws(as.character(target_transform[1])))
+  if (!target_transform %in% c("identity", "log")) target_transform <- "identity"
+
+  bind_rows(lapply(levels, function(level) {
+    zq <- if (!is.null(conformal_scores) && length(conformal_scores) >= 5L) {
+      n_cal <- length(conformal_scores)
+      conf_level <- min(1.0, ceiling((n_cal + 1L) * level) / n_cal)
+      as.numeric(quantile(conformal_scores, probs = conf_level,
+                          type = 1L, na.rm = TRUE))
+    } else {
+      stats::qnorm((1 + level) / 2)
+    }
+    if (identical(target_transform, "log")) {
+      keep_pos <- obs_raw > 0 & is.finite(mean_t) & is.finite(sd_t)
+      lower <- exp(mean_t[keep_pos] - zq * sd_t[keep_pos])
+      upper <- exp(mean_t[keep_pos] + zq * sd_t[keep_pos])
+      empirical <- mean(obs_raw[keep_pos] >= lower & obs_raw[keep_pos] <= upper, na.rm = TRUE)
+      width <- mean(upper - lower, na.rm = TRUE)
+    } else {
+      lower <- mean_t - zq * sd_t
+      upper <- mean_t + zq * sd_t
+      empirical <- mean(obs_raw >= lower & obs_raw <= upper, na.rm = TRUE)
+      width <- mean(upper - lower, na.rm = TRUE)
+    }
+    data.frame(
+      nominal_coverage = level,
+      empirical_coverage = empirical,
+      abs_calibration_error = abs(empirical - level),
+      mean_interval_width = width,
+      stringsAsFactors = FALSE
+    )
+  }))
+}
+
+default_rf_qrf_quantile_levels <- function(levels = c(0.90, 0.95),
+                                           reliability_levels = seq(0.10, 0.95, by = 0.05)) {
+  sort(unique(round(c(
+    0.16, 0.50, 0.84,
+    (1 - levels) / 2, (1 + levels) / 2,
+    (1 - reliability_levels) / 2, (1 + reliability_levels) / 2
+  ), 6)))
+}
+
+.rf_qrf_pick_quantile <- function(q_matrix, q_levels, level) {
+  idx <- which(abs(as.numeric(q_levels) - as.numeric(level)) < 1e-8)
+  if (length(idx) < 1L) {
+    stop(sprintf("Requested RF quantile %.6f is not available in q_levels.", level))
+  }
+  as.numeric(q_matrix[, idx[1]])
+}
+
+.rf_qrf_interval_bounds <- function(pred_mean,
+                                    pred_sd,
+                                    q_matrix = NULL,
+                                    q_levels = NULL,
+                                    level,
+                                    conformal_scores = NULL) {
+  pred_mean <- as.numeric(pred_mean)
+  pred_sd <- pmax(as.numeric(pred_sd), 1e-6)
+
+  if (!is.null(conformal_scores) && length(conformal_scores) >= 5L) {
+    n_cal <- length(conformal_scores)
+    conf_level <- min(1.0, ceiling((n_cal + 1L) * level) / n_cal)
+    qhat <- as.numeric(quantile(conformal_scores, probs = conf_level, type = 1L, na.rm = TRUE))
+    return(list(
+      lower = pred_mean - qhat * pred_sd,
+      upper = pred_mean + qhat * pred_sd
+    ))
+  }
+
+  if (!is.null(q_matrix) && !is.null(q_levels)) {
+    lower_prob <- (1 - level) / 2
+    upper_prob <- (1 + level) / 2
+    return(list(
+      lower = .rf_qrf_pick_quantile(q_matrix, q_levels, lower_prob),
+      upper = .rf_qrf_pick_quantile(q_matrix, q_levels, upper_prob)
+    ))
+  }
+
+  zq <- stats::qnorm((1 + level) / 2)
+  list(
+    lower = pred_mean - zq * pred_sd,
+    upper = pred_mean + zq * pred_sd
+  )
+}
+
+compute_rf_conformal_scores <- function(obs_cal, pred_cal_mean, pred_cal_sd) {
+  obs_cal <- as.numeric(obs_cal)
+  pred_cal_mean <- as.numeric(pred_cal_mean)
+  pred_cal_sd <- pmax(as.numeric(pred_cal_sd), 1e-6)
+  keep <- is.finite(obs_cal) & is.finite(pred_cal_mean) & is.finite(pred_cal_sd) & pred_cal_sd > 0
+  if (sum(keep) < 5L) return(NULL)
+  scores <- abs(obs_cal[keep] - pred_cal_mean[keep]) / pred_cal_sd[keep]
+  n <- length(scores)
+  q90 <- as.numeric(quantile(scores, min(1, ceiling((n + 1L) * 0.90) / n),
+                             type = 1L, na.rm = TRUE))
+  cat(sprintf(
+    "[RF conformal] n_cal=%d  median_s=%.3f  q̂_0.90=%.3f  (z_0.90=%.3f)  ratio=%.3f\n",
+    n, median(scores, na.rm = TRUE), q90, qnorm(0.95), q90 / qnorm(0.95)
+  ))
+  scores
+}
+
+wadoux_eval_rf_qrf_uq <- function(obs_raw,
+                                  pred_mean,
+                                  pred_sd,
+                                  q_matrix = NULL,
+                                  q_levels = NULL,
+                                  levels = c(0.90, 0.95),
+                                  reliability_levels = seq(0.10, 0.95, by = 0.05),
+                                  conformal_scores = NULL) {
+  obs_raw <- as.numeric(obs_raw)
+  pred_mean <- as.numeric(pred_mean)
+  pred_sd <- pmax(as.numeric(pred_sd), 1e-6)
+  keep <- is.finite(obs_raw) & is.finite(pred_mean) & is.finite(pred_sd)
+  if (!any(keep)) {
+    return(.wadoux_empty_transformed_uq_row(levels = levels))
+  }
+
+  obs_raw <- obs_raw[keep]
+  pred_mean <- pred_mean[keep]
+  pred_sd <- pred_sd[keep]
+  if (!is.null(q_matrix)) {
+    q_matrix <- as.matrix(q_matrix)[keep, , drop = FALSE]
+  }
+  q_levels <- if (!is.null(q_levels)) as.numeric(q_levels) else NULL
+
+  var_rf <- pmax(pred_sd^2, 1e-8)
+  uq_nll <- mean(
+    0.5 * (log(2 * pi) + log(var_rf) + ((obs_raw - pred_mean)^2) / var_rf),
+    na.rm = TRUE
+  )
+
+  reliability_curve <- wadoux_rf_qrf_reliability_curve(
+    obs_raw = obs_raw,
+    pred_mean = pred_mean,
+    pred_sd = pred_sd,
+    q_matrix = q_matrix,
+    q_levels = q_levels,
+    levels = reliability_levels,
+    conformal_scores = conformal_scores
+  )
+
+  out <- data.frame(
+    uq_available = TRUE,
+    uq_nll = uq_nll,
+    reliability_ece = mean(reliability_curve$abs_calibration_error, na.rm = TRUE),
+    stringsAsFactors = FALSE
+  )
+
+  for (level in levels) {
+    suffix <- sprintf("%02d", round(level * 100))
+    row_i <- reliability_curve[abs(reliability_curve$nominal_coverage - level) < 1e-8, , drop = FALSE]
+    out[[sprintf("picp_%s", suffix)]] <- if (nrow(row_i) > 0) row_i$empirical_coverage[1] else NA_real_
+    out[[sprintf("mpiw_%s", suffix)]] <- if (nrow(row_i) > 0) row_i$mean_interval_width[1] else NA_real_
+    out[[sprintf("ace_%s", suffix)]] <- if (nrow(row_i) > 0) row_i$abs_calibration_error[1] else NA_real_
+  }
+
+  out
+}
+
+wadoux_rf_qrf_reliability_curve <- function(obs_raw,
+                                            pred_mean,
+                                            pred_sd,
+                                            q_matrix = NULL,
+                                            q_levels = NULL,
+                                            levels = seq(0.10, 0.95, by = 0.05),
+                                            conformal_scores = NULL) {
+  obs_raw <- as.numeric(obs_raw)
+  pred_mean <- as.numeric(pred_mean)
+  pred_sd <- pmax(as.numeric(pred_sd), 1e-6)
+  keep <- is.finite(obs_raw) & is.finite(pred_mean) & is.finite(pred_sd)
+  if (!any(keep)) {
+    return(data.frame())
+  }
+
+  obs_raw <- obs_raw[keep]
+  pred_mean <- pred_mean[keep]
+  pred_sd <- pred_sd[keep]
+  if (!is.null(q_matrix)) {
+    q_matrix <- as.matrix(q_matrix)[keep, , drop = FALSE]
+  }
+  q_levels <- if (!is.null(q_levels)) as.numeric(q_levels) else NULL
+
+  bind_rows(lapply(levels, function(level) {
+    interval <- .rf_qrf_interval_bounds(
+      pred_mean = pred_mean,
+      pred_sd = pred_sd,
+      q_matrix = q_matrix,
+      q_levels = q_levels,
+      level = level,
+      conformal_scores = conformal_scores
+    )
+    empirical <- mean(obs_raw >= interval$lower & obs_raw <= interval$upper, na.rm = TRUE)
+    data.frame(
+      nominal_coverage = level,
+      empirical_coverage = empirical,
+      abs_calibration_error = abs(empirical - level),
+      mean_interval_width = mean(interval$upper - interval$lower, na.rm = TRUE),
+      stringsAsFactors = FALSE
+    )
+  }))
+}
+
+fit_rf_default_wadoux <- function(train_df, form_rf,
+                                  seed = getOption("wadoux_rf_seed", 123L)) {
+  seed <- suppressWarnings(as.integer(seed))
+  if (!is.finite(seed)) seed <- 123L
+  ranger::ranger(formula = form_rf, data = train_df, seed = seed)
 }
 
 predict_rf_default_wadoux <- function(model, new_df) {
   as.numeric(predict(model, data = new_df, type = "response")$predictions)
+}
+
+fit_rf_qrf_wadoux <- function(train_df, form_rf, seed = 123L) {
+  ranger::ranger(
+    formula = form_rf,
+    data = train_df,
+    quantreg = TRUE,
+    keep.inbag = TRUE,
+    seed = as.integer(seed)
+  )
+}
+
+predict_rf_qrf_uq <- function(model, new_df,
+                              levels = default_rf_qrf_quantile_levels()) {
+  levels <- sort(unique(as.numeric(levels)))
+  pred_obj <- predict(model, data = new_df, type = "quantiles", quantiles = levels)
+  q_mat <- pred_obj$predictions
+  if (is.null(dim(q_mat))) {
+    q_mat <- matrix(q_mat, nrow = nrow(new_df), byrow = TRUE)
+  } else {
+    q_mat <- as.matrix(q_mat)
+  }
+  if (nrow(q_mat) != nrow(new_df) && ncol(q_mat) == nrow(new_df) && nrow(q_mat) == length(levels)) {
+    q_mat <- t(q_mat)
+  }
+  if (nrow(q_mat) != nrow(new_df) || ncol(q_mat) != length(levels)) {
+    stop(sprintf(
+      "Unexpected QRF prediction shape: got %dx%d for %d rows and %d quantiles.",
+      nrow(q_mat), ncol(q_mat), nrow(new_df), length(levels)
+    ))
+  }
+  colnames(q_mat) <- sprintf("%.6f", levels)
+
+  q16 <- .rf_qrf_pick_quantile(q_mat, levels, 0.16)
+  q50 <- .rf_qrf_pick_quantile(q_mat, levels, 0.50)
+  q84 <- .rf_qrf_pick_quantile(q_mat, levels, 0.84)
+
+  list(
+    mean = q50,
+    sd = pmax((q84 - q16) / 2, 1e-6),
+    q_low_90 = .rf_qrf_pick_quantile(q_mat, levels, 0.05),
+    q_high_90 = .rf_qrf_pick_quantile(q_mat, levels, 0.95),
+    q_low_95 = .rf_qrf_pick_quantile(q_mat, levels, 0.025),
+    q_high_95 = .rf_qrf_pick_quantile(q_mat, levels, 0.975),
+    q_matrix = q_mat,
+    q_levels = levels
+  )
 }
 
 sample_simple_random_rows_wadoux <- function(df, size) {

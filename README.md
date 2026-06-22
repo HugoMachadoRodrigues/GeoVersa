@@ -622,6 +622,33 @@ DB-TARF wins **27 / 30** paired runs against the untuned Wadoux default RF, with
 
 The result holds across all three Wadoux sampling designs — `random`, `regular_grid` (systematic), and `clustered_random` (two-stage): DB-TARF wins 27–28/30 in each (Wilcoxon $p < 10^{-7}$), with the largest gain under the hardest clustered design ($\Delta\mathrm{RMSE}=-1.16$). Full method, honest caveats, per-scenario table, reproduction commands, and paired statistics: see [`docs/dbtarf_wadoux_validation.md`](docs/dbtarf_wadoux_validation.md).
 
+### Experimental DAD-RK Path
+
+`DAD-RK` means **Design-Aware Density-Reweighted Kriging**. It keeps the active GeoVersa Auto v5 network but changes the training objective so the loss approximates a design-based map-accuracy target more closely:
+
+```math
+\mathcal{L}_{\mathrm{DAD}}
+=
+\frac{\sum_i w_i\,\ell(y_i,\hat y_i)}{\sum_i w_i},
+\qquad
+w_i \propto
+\left(d_i^{\mathrm{spatial}}\right)^{1-\rho}
+\left(d_i^{\mathrm{environmental}}\right)^\rho
+```
+
+where the two distances are local k-nearest-neighbour spacing proxies in coordinate space and covariate space. Dense clusters get lower weight; isolated spatial/environmental support gets higher weight. The implementation is opt-in through:
+
+```r
+Sys.setenv(
+  GEOVERSA_AUTO_DESIGN_WEIGHTS = "1",
+  GEOVERSA_AUTO_DESIGN_WEIGHT_MODE = "hybrid"
+)
+```
+
+The ready-to-run entrypoint is `code/Benchmark_DADRK.R`.
+
+Auto v5 also includes an internal module meta-controller (`GEOVERSA_AUTO_META_CONTROLLER=1` by default). It decides whether to activate optional branches such as quantile basis, cross tab-patch fusion, DAM, VRM/CVRM, PedoMoE, NKO, local gates, local linear kriging, multiscale kriging, and DAD-RK from fold-level signals: sample size, nugget ratio, anisotropy, density imbalance, covariate redundancy, patch/tabular capacity ratio, and baseline residual variance. Explicit environment flags still act as manual overrides. The pure meta-controller benchmark entrypoint is `code/Benchmark_GeoVersaMeta.R`.
+
 ---
 
 ## How To Run

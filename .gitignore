@@ -46,4 +46,6 @@ wadoux_extract.txt
 
 # R package build artifacts
 *.Rcheck/
+cran_submission/
+.positai
 *.tar.gz
