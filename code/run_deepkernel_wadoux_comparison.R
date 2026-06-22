@@ -1610,6 +1610,45 @@ eval_designbased_dkp <- function(valuetable, iter, calibration_patch_cache) {
     }
   }
   metrics <- emit_metric_rows_dkp(obs, pred_map, "DesignBased", iter, scenario)
+  # #6: design-based conformal interval coverage, DKP vs RF, calibrated on the
+  # SAME (#5 spatial-block when clustered) OOF folds -> a fair interval
+  # comparison (PICP/MPIW) on the SRS test draw. Fully guarded: never breaks the
+  # benchmark. Writes results_dir/dkp_uq_coverage.csv.
+  invisible(tryCatch({
+    if (exists("dkp_oof_pred", inherits = FALSE) &&
+        !is.null(tuned$oof_pool) && !is.null(tuned$oof_fold_ids) &&
+        length(tuned$oof_fold_ids) == nrow(tuned$oof_pool) &&
+        !is.null(pred_map$DeepKernelProcess_500)) {
+      oofy <- as.numeric(tuned$oof_pool[[response_name_wadoux]])
+      dkp_resid <- abs(oofy - as.numeric(dkp_oof_pred))
+      rf_oof <- rep(NA_real_, length(oofy))
+      for (fid in sort(unique(tuned$oof_fold_ids))) {
+        vi <- which(tuned$oof_fold_ids == fid)
+        ti <- setdiff(seq_along(oofy), vi)
+        if (length(ti) < 5L || length(vi) < 1L) next
+        rfo <- fit_rf_default_wadoux(tuned$oof_pool[ti, , drop = FALSE], form_rf)
+        rf_oof[vi] <- predict_rf_default_wadoux(
+          rfo, tuned$oof_pool[vi, , drop = FALSE])
+      }
+      rf_resid <- abs(oofy - rf_oof)
+      obs_t <- as.numeric(obs)
+      cov_dkp <- wadoux_conformal_coverage(
+        obs_t, as.numeric(pred_map$DeepKernelProcess_500), dkp_resid)
+      uq_row <- data.frame(iteration = iter, scenario = scenario,
+        protocol = "DesignBased", model = "DeepKernelProcess_500", cov_dkp,
+        stringsAsFactors = FALSE)
+      if (!is.null(pred_map$RF_500)) {
+        cov_rf <- wadoux_conformal_coverage(
+          obs_t, as.numeric(pred_map$RF_500), rf_resid)
+        uq_row <- rbind(uq_row, data.frame(iteration = iter, scenario = scenario,
+          protocol = "DesignBased", model = "RF_500", cov_rf,
+          stringsAsFactors = FALSE))
+      }
+      uqf <- file.path(results_dir, "dkp_uq_coverage.csv")
+      write.table(uq_row, uqf, sep = ",", row.names = FALSE,
+        col.names = !file.exists(uqf), append = file.exists(uqf))
+    }
+  }, error = function(e) NULL))
   diag_400 <- if (exists("out_400", inherits = FALSE)) out_400$diagnostics else NULL
   diag_500 <- if (exists("out_500", inherits = FALSE)) out_500$diagnostics else NULL
   audit_rows <- prediction_audit_designbased_dkp(
