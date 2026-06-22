@@ -1392,7 +1392,26 @@ make_inner_val_split_wadoux <- function(train_df, val_frac = 0.2, seed = NULL) {
   n_train <- nrow(train_df)
   if (n_train < 10) stop("Outer training set too small for fair comparison.")
   val_size <- max(1L, floor(n_train * val_frac))
-  val_idx <- sample.int(n_train, size = val_size, replace = FALSE)
+  val_idx <- NULL
+  # #5: spatial-block holdout when the calibration is clustered (Clark-Evans),
+  # so the inner-selection val estimate reflects spatial extrapolation (matching
+  # the design-based SRS test); random holdout otherwise. Auto, default ON.
+  if (isTRUE(getOption("wadoux_spatial_inner_split", TRUE)) &&
+      exists("wadoux_is_clustered") && all(c("x", "y") %in% names(train_df))) {
+    coords_inner <- as.matrix(train_df[, c("x", "y"), drop = FALSE])
+    if (wadoux_is_clustered(coords_inner)) {
+      kb <- max(2L, round(1 / max(val_frac, 1e-6)))
+      sf <- wadoux_spatial_block_fold_ids(coords_inner, kb, seed = seed)
+      if (!is.null(sf)) {
+        sizes <- table(sf)
+        pick <- as.integer(names(sizes))[which.min(abs(as.integer(sizes) - val_size))]
+        val_idx <- which(sf == pick)
+      }
+    }
+  }
+  if (is.null(val_idx) || length(val_idx) < 1L || length(val_idx) >= n_train) {
+    val_idx <- sample.int(n_train, size = val_size, replace = FALSE)
+  }
   train_idx <- setdiff(seq_len(n_train), val_idx)
   list(
     train = train_df[train_idx, , drop = FALSE],
