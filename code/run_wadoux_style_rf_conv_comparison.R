@@ -111,6 +111,30 @@ make_geoversa_policy <- function(label, env = character(), complexity = 0L,
 
 make_geoversa_policy_grid <- function(policy_set = "default",
                                       max_candidates = Inf) {
+  # #4: focused DAD-RK design-weight-strength sweep, OOF-selected by the existing
+  # policy-tune machinery (which, with #5, scores candidates on spatial-block
+  # splits under clustered calibration). Holds the Auto config fixed and varies
+  # ONLY the design-weight power, INCLUDING off (uniform loss) as the do-no-harm
+  # baseline -- so DAD-RK is used only when it beats "off" on the design-based OOF.
+  if (tolower(policy_set) %in% c("dad_rk_oof", "dadrk_oof", "dad_rk")) {
+    dad <- list(
+      make_geoversa_policy(
+        "dad_rk_off", c(GEOVERSA_AUTO_DESIGN_WEIGHTS = "0"), complexity = 0L,
+        description = "DAD-RK design weighting OFF (uniform loss); do-no-harm baseline."),
+      make_geoversa_policy(
+        "dad_rk_p075",
+        c(GEOVERSA_AUTO_DESIGN_WEIGHTS = "1", GEOVERSA_AUTO_DESIGN_WEIGHT_POWER = "0.75"),
+        complexity = 1L, description = "DAD-RK on, design-weight power 0.75."),
+      make_geoversa_policy(
+        "dad_rk_p150",
+        c(GEOVERSA_AUTO_DESIGN_WEIGHTS = "1", GEOVERSA_AUTO_DESIGN_WEIGHT_POWER = "1.5"),
+        complexity = 1L, description = "DAD-RK on, design-weight power 1.5 (strong reweighting).")
+    )
+    if (is.finite(max_candidates)) {
+      dad <- dad[seq_len(min(length(dad), max(1L, as.integer(max_candidates))))]
+    }
+    return(dad)
+  }
   policies <- list(
     make_geoversa_policy(
       "auto_current",
