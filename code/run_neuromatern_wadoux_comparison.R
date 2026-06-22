@@ -316,13 +316,13 @@ load_nmk_env <- function() {
   # which in turn sources KrigingNet_WadouxComparison.R. That defines make_mlp,
   # ScalarHead, huber_loss, transform_target, the tensor caches and the fold
   # preparation used by NMK.
-  sys.source(file.path(project_root_wadoux, "code", "ConvKrigingNet2D.R"),
+  sys.source(file.path(code_root_wadoux, "ConvKrigingNet2D.R"),
              envir = env)
   # ConvKrigingNet2D_Auto.R provides fit_variogram_auto().
-  sys.source(file.path(project_root_wadoux, "code", "ConvKrigingNet2D_Auto.R"),
+  sys.source(file.path(code_root_wadoux, "ConvKrigingNet2D_Auto.R"),
              envir = env)
   # Finally layer NMK. It depends on the helpers above.
-  sys.source(file.path(project_root_wadoux, "code", "NeuroMaternKrige.R"),
+  sys.source(file.path(code_root_wadoux, "NeuroMaternKrige.R"),
              envir = env)
 
   env

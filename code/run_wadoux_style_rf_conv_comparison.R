@@ -1373,13 +1373,17 @@ load_convkrigingnet2d_env <- function() {
     resolved <- if (is_absolute) {
       file
     } else {
-      file.path(project_root_wadoux, sub("^\\./", "", file))
+      # Relative source()s inside ConvKrigingNet2D.R (e.g. "./code/...") must
+      # resolve against the repo that actually contains the code, not the data
+      # root project_root_wadoux (these diverged when "Deep Kriging" was renamed
+      # to "GeoVersa"). dirname(code_root_wadoux) is that repo root.
+      file.path(dirname(code_root_wadoux), sub("^\\./", "", file))
     }
     sys.source(resolved, envir = env)
     invisible(NULL)
   }
 
-  sys.source(file.path(project_root_wadoux, "code", "ConvKrigingNet2D.R"), envir = env)
+  sys.source(file.path(code_root_wadoux, "ConvKrigingNet2D.R"), envir = env)
   env
 }
 
@@ -6561,8 +6565,8 @@ conv_params <- NULL
 if ("ConvKrigingNet2D" %in% models) {
   cat("Loading ConvKrigingNet2D environment...\n")
   conv_env <- load_convkrigingnet2d_env()
-  default_auto_v5_path <- file.path(project_root_wadoux, "code", "ConvKrigingNet2D_Auto_v5.R")
-  default_auto_path <- file.path(project_root_wadoux, "code", "ConvKrigingNet2D_Auto.R")
+  default_auto_v5_path <- file.path(code_root_wadoux, "ConvKrigingNet2D_Auto_v5.R")
+  default_auto_path <- file.path(code_root_wadoux, "ConvKrigingNet2D_Auto.R")
   override_path <- Sys.getenv("WADOUX_TWOSTAGE_SCRIPT", unset = "")
   if (nchar(override_path) > 0 && file.exists(override_path)) {
     sys.source(override_path, envir = conv_env)

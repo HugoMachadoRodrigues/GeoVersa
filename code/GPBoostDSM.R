@@ -89,15 +89,26 @@
   names(X_train) <- paste0("x", seq_len(ncol(X_train)))
   names(X_pred) <- names(X_train)
   df <- cbind(y = as.numeric(y_train), X_train)
+  # The in-gate RF baseline MUST be bit-identical to the scored Wadoux RF
+  # (fit_rf_default_wadoux), so the OOF do-no-harm gate compares GPBoost
+  # against exactly the model it will fall back to. fit_rf_default_wadoux is
+  # ranger(formula, data, seed=123) with pure ranger defaults. We mirror it
+  # here (formula interface, ranger defaults, fixed seed) instead of the
+  # previous hand-set num.trees/mtry/min.node.size/respect.unordered.factors,
+  # which produced a *different* RF and broke the >= RF guarantee.
+  if (exists("fit_rf_default_wadoux", mode = "function") &&
+      exists("predict_rf_default_wadoux", mode = "function")) {
+    form_internal <- stats::as.formula(
+      paste("y ~", paste(names(X_train), collapse = " + ")))
+    fit <- get("fit_rf_default_wadoux")(df, form_internal,
+                                        seed = as.integer(seed))
+    return(as.numeric(get("predict_rf_default_wadoux")(fit, X_pred)))
+  }
   if (requireNamespace("ranger", quietly = TRUE)) {
     fit <- ranger::ranger(
       y ~ .,
       data = df,
-      num.trees = 500,
-      mtry = max(1L, floor(sqrt(ncol(X_train)))),
-      min.node.size = 5,
-      seed = as.integer(seed),
-      respect.unordered.factors = "order"
+      seed = as.integer(seed)
     )
     return(as.numeric(stats::predict(fit, data = X_pred)$predictions))
   }
@@ -1489,7 +1500,9 @@ train_gpboost_dsm_one_fold <- function(
           X_train = Xcal[fdj$idx_train, , drop = FALSE],
           y_train = ycal[fdj$idx_train],
           X_pred = Xcal[fdj$idx_val, , drop = FALSE],
-          seed = if (is.null(train_seed)) 23000L + j else train_seed + 23000L + j
+          # Use the Wadoux default RF seed so the in-gate RF matches the
+          # scored RF bit-for-bit on each training subset.
+          seed = as.integer(getOption("wadoux_rf_seed", 123L))
         )
         rf_tune_pred[fdj$idx_val] <- pred_j
         rf_fold_rmse[j] <- .gpb_rmse(ycal[fdj$idx_val], pred_j)
@@ -1502,7 +1515,7 @@ train_gpboost_dsm_one_fold <- function(
         X_train = Xtr,
         y_train = ytr,
         X_pred = Xva,
-        seed = if (is.null(train_seed)) 23000L else train_seed + 23000L
+        seed = as.integer(getOption("wadoux_rf_seed", 123L))
       )
       rf_tune_fold_rmse <- sprintf("%.6f", .gpb_rmse(yva, rf_tune_pred))
     }
@@ -2279,6 +2292,28 @@ train_gpboost_dsm_one_fold <- function(
 		      rf_noharm_reason <- "no_valid_delta_RMSE_vs_RF"
 		    }
 		  }
+		  # ---- HARD do-no-harm: literal Wadoux RF fallback -----------------
+		  # The existing rf_noharm_policy reverts to the best TREE-mode GPBoost
+		  # candidate (rf_noharm_anchor_candidate). A tree anchor that itself
+		  # loses to RF still emits a non-RF prediction, so >= RF is NOT
+		  # guaranteed. We add an unconditional final guard: if the FINALLY
+		  # selected candidate did not beat the (now bit-identical) Wadoux RF
+		  # on leakage-free OOF RMSE by the margin, emit the LITERAL Wadoux RF
+		  # prediction (fit_rf_default_wadoux / predict_rf_default_wadoux),
+		  # refit on the full calibration set. The OOF lambda blend below can
+		  # only shrink further toward this same RF, so the guarantee holds.
+		  rf_hard_noharm_applied <- FALSE
+		  rf_hard_noharm_reason <- "not_assessed"
+		  selected_final_delta_rmse_vs_rf <- suppressWarnings(as.numeric(
+		    selection_candidates[[selected_name]]$delta_rmse_vs_rf))
+		  rf_hard_required_delta <- if (is.finite(rf_noharm_margin)) {
+		    -rf_noharm_margin
+		  } else {
+		    -(rf_noharm_margin_abs)
+		  }
+		  emit_literal_rf <- isTRUE(rf_noharm_policy) &&
+		    (!is.finite(selected_final_delta_rmse_vs_rf) ||
+		     selected_final_delta_rmse_vs_rf > rf_hard_required_delta)
 		  selected <- candidates[[selected_name]]
 	  selected_spec <- selected$spec
 	  selected_fit_mode <- selected_spec$mode
@@ -2637,6 +2672,71 @@ train_gpboost_dsm_one_fold <- function(
     gpboost_invert_target_transform(test_preds_t, target_transform)
   }
 
+  # ---- Literal Wadoux RF prediction (full calibration) ------------------
+  # Always fit the literal Wadoux RF on the full calibration set so we can
+  # (a) hard-fall-back to it and (b) OOF-select a continuous shrinkage lambda
+  # that blends GPBoost toward it. Column names mirror .gpb_rf_predict_internal.
+  rf_lambda_to_rf <- 0
+  rf_lambda_grid_used <- NA_character_
+  rf_lambda_reason <- "not_assessed"
+  Xcal_rf <- as.data.frame(Xcal)
+  names(Xcal_rf) <- paste0("x", seq_len(ncol(Xcal_rf)))
+  Xte_rf <- as.data.frame(Xte)
+  names(Xte_rf) <- names(Xcal_rf)
+  rf_full_test_pred <- tryCatch(
+    .gpb_rf_predict_internal(
+      X_train = Xcal_rf, y_train = ycal, X_pred = Xte_rf,
+      seed = as.integer(getOption("wadoux_rf_seed", 123L))),
+    error = function(e) rep(NA_real_, nrow(Xte_rf)))
+
+  # OOF-selected lambda in [0,1]: final = (1-lambda)*GPBoost + lambda*RF,
+  # chosen on the leakage-free cross-fit OOF set (grid INCLUDES 0 and 1).
+  if (isTRUE(rf_noharm_policy) && use_cv_tuning &&
+      !is.na(selected_name) &&
+      !is.null(selection_candidates[[selected_name]]$oof_t) &&
+      any(is.finite(rf_tune_pred))) {
+    gpb_oof <- gpboost_invert_target_transform(
+      selection_candidates[[selected_name]]$oof_t, target_transform)
+    okl <- is.finite(gpb_oof) & is.finite(rf_tune_pred) & is.finite(ycal)
+    if (sum(okl) >= 5L) {
+      lam_grid <- sort(unique(c(0, 0.10, 0.25, 0.50, 0.75, 1)))
+      lam_rmse <- vapply(lam_grid, function(l) {
+        .gpb_rmse(ycal[okl],
+                  (1 - l) * gpb_oof[okl] + l * rf_tune_pred[okl])
+      }, numeric(1))
+      rf_lambda_to_rf <- lam_grid[which.min(lam_rmse)]
+      rf_lambda_grid_used <- paste(formatC(lam_grid, digits = 4L,
+                                           format = "fg"), collapse = "|")
+      rf_lambda_reason <- sprintf("oof_selected_lambda=%.2f", rf_lambda_to_rf)
+    } else {
+      rf_lambda_reason <- "too_few_oof_points"
+    }
+  } else {
+    rf_lambda_reason <- "lambda_disabled_or_no_oof"
+  }
+
+  # Apply hard fallback FIRST (forces lambda=1 toward literal RF), then the
+  # OOF lambda blend. Both can only move test_preds toward the literal RF.
+  if (isTRUE(emit_literal_rf) && all(is.finite(rf_full_test_pred))) {
+    rf_lambda_to_rf <- 1
+    rf_hard_noharm_applied <- TRUE
+    rf_hard_noharm_reason <- sprintf(
+      "selected_delta=%.6f>required=%.6f:emit_literal_wadoux_rf",
+      selected_final_delta_rmse_vs_rf, rf_hard_required_delta)
+    fit_mode <- "literal_wadoux_rf"
+  } else if (isTRUE(emit_literal_rf)) {
+    rf_hard_noharm_reason <- "would_fallback_but_rf_pred_non_finite"
+  } else {
+    rf_hard_noharm_reason <- sprintf(
+      "selected_delta=%.6f<=required=%.6f:kept_gpboost",
+      selected_final_delta_rmse_vs_rf, rf_hard_required_delta)
+  }
+  if (rf_lambda_to_rf > 0 && all(is.finite(rf_full_test_pred)) &&
+      length(rf_full_test_pred) == length(test_preds)) {
+    test_preds <- (1 - rf_lambda_to_rf) * test_preds +
+      rf_lambda_to_rf * rf_full_test_pred
+  }
+
   # ---- Duan smearing if log + n_val sufficient ---------------------------
   smearing_info <- list(S = 1.0, applied = FALSE, reason = "target != log")
   if (cfg$duan_apply && identical(target_transform, "log")) {
@@ -2784,6 +2884,13 @@ train_gpboost_dsm_one_fold <- function(
 		      rf_noharm_applied = rf_noharm_applied,
 		      rf_noharm_tree_only_ensemble = rf_noharm_tree_only_ensemble,
 		      rf_noharm_reason = rf_noharm_reason,
+		      rf_hard_noharm_applied = rf_hard_noharm_applied,
+		      rf_hard_noharm_reason = rf_hard_noharm_reason,
+		      rf_hard_required_delta_rmse_vs_rf = rf_hard_required_delta,
+		      selected_final_delta_rmse_vs_rf = selected_final_delta_rmse_vs_rf,
+		      rf_lambda_to_rf = rf_lambda_to_rf,
+		      rf_lambda_grid_used = rf_lambda_grid_used,
+		      rf_lambda_reason = rf_lambda_reason,
 		      spatial_filter = spatial_filter,
       spatial_filter_max_alpha_no_signal = spatial_filter_max_alpha_no_signal,
       spatial_filter_max_gamma_no_signal = spatial_filter_max_gamma_no_signal,

@@ -13,6 +13,17 @@ project_root_wadoux <- if (
 }
 external_root_wadoux <- file.path(project_root_wadoux, "external", "SpatialValidation")
 
+# Algorithm source code may live in the current working repo even when the DATA
+# lives under project_root_wadoux (e.g. after the project folder was renamed
+# from "Deep Kriging" to "GeoVersa"). Resolve the code root to wherever the
+# algorithm sources actually exist, preferring the current repo.
+code_root_wadoux <- local({
+  cands <- c(file.path(getwd(), "code"),
+             file.path(project_root_wadoux, "code"))
+  hit <- cands[file.exists(file.path(cands, "ConvKrigingNet2D.R"))]
+  if (length(hit) > 0L) hit[1L] else file.path(getwd(), "code")
+})
+
 pkgs_wadoux <- c("raster", "ranger", "caret", "dplyr", "sp")
 to_install_wadoux <- pkgs_wadoux[!sapply(pkgs_wadoux, requireNamespace, quietly = TRUE)]
 if (length(to_install_wadoux) > 0) {

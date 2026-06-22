@@ -178,13 +178,13 @@ load_dkp_env <- function() {
     sys.source(resolved, envir = env)
     invisible(NULL)
   }
-  sys.source(file.path(project_root_wadoux, "code", "ConvKrigingNet2D.R"),
+  sys.source(file.path(code_root_wadoux, "ConvKrigingNet2D.R"),
              envir = env)
-  sys.source(file.path(project_root_wadoux, "code", "ConvKrigingNet2D_Auto.R"),
+  sys.source(file.path(code_root_wadoux, "ConvKrigingNet2D_Auto.R"),
              envir = env)
-  sys.source(file.path(project_root_wadoux, "code", "NeuroMaternKrige.R"),
+  sys.source(file.path(code_root_wadoux, "NeuroMaternKrige.R"),
              envir = env)
-  sys.source(file.path(project_root_wadoux, "code", "DeepKernelProcess.R"),
+  sys.source(file.path(code_root_wadoux, "DeepKernelProcess.R"),
              envir = env)
   env
 }
