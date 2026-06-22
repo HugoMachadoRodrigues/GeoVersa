@@ -117,6 +117,44 @@ wadoux_support_gate_weight <- function(test_coords, cal_coords, k = 4,
   pmin(pmax(w, 0), 1)
 }
 
+# ---- #6: design-based conformal prediction intervals + coverage --------------
+# Split-conformal half-width from OUT-OF-FOLD absolute residuals. Feed the #5
+# spatial-block OOF residuals so the interval is calibrated for the clustered /
+# extrapolation regime -> coverage (PICP) holds design-based, not just in-sample.
+# q = (n+1)*level/n is the finite-sample conformal quantile (Angelopoulos &
+# Bates). Any model exposing OOF residuals can be compared to RF/QRF on coverage.
+wadoux_conformal_halfwidth <- function(oof_abs_resid, level = 0.90) {
+  r <- oof_abs_resid[is.finite(oof_abs_resid)]
+  n <- length(r)
+  if (n < 5L) return(NA_real_)
+  qlev <- min(1, ((n + 1) * level) / n)
+  as.numeric(stats::quantile(r, probs = qlev, type = 1L, names = FALSE))
+}
+
+# Symmetric conformal intervals around pred_test from OOF abs residuals; reports
+# PICP / MPIW / ACE (|PICP-level|) per level on the (design-based SRS) test draw.
+wadoux_conformal_coverage <- function(obs_test, pred_test, oof_abs_resid,
+                                      levels = c(0.90, 0.95)) {
+  obs_test <- as.numeric(obs_test); pred_test <- as.numeric(pred_test)
+  keep <- is.finite(obs_test) & is.finite(pred_test)
+  out <- list()
+  for (lv in levels) {
+    hw <- wadoux_conformal_halfwidth(oof_abs_resid, lv)
+    suf <- sprintf("%02d", round(lv * 100))
+    if (is.finite(hw) && any(keep)) {
+      cov <- mean(abs(obs_test[keep] - pred_test[keep]) <= hw)
+      out[[paste0("conf_picp_", suf)]] <- cov
+      out[[paste0("conf_mpiw_", suf)]] <- 2 * hw
+      out[[paste0("conf_ace_", suf)]] <- abs(cov - lv)
+    } else {
+      out[[paste0("conf_picp_", suf)]] <- NA_real_
+      out[[paste0("conf_mpiw_", suf)]] <- NA_real_
+      out[[paste0("conf_ace_", suf)]] <- NA_real_
+    }
+  }
+  as.data.frame(out, stringsAsFactors = FALSE)
+}
+
 pkgs_wadoux <- c("raster", "ranger", "caret", "dplyr", "sp")
 to_install_wadoux <- pkgs_wadoux[!sapply(pkgs_wadoux, requireNamespace, quietly = TRUE)]
 if (length(to_install_wadoux) > 0) {
