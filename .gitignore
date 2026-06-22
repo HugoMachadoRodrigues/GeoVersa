@@ -43,3 +43,6 @@ wadoux_extract.txt
 *.tmp
 *.bak
 *.log
+.positai
+cran_submission/
+*.tar.gz

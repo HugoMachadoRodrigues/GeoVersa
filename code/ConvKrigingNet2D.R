@@ -82,6 +82,27 @@ PatchEncoder2D <- nn_module(
   }
 )
 
+center_crop_patch_tensor <- function(x_patch, crop_size) {
+  if (is.null(crop_size) || !is.finite(crop_size)) {
+    return(x_patch)
+  }
+  crop_size <- as.integer(crop_size)
+  shp <- tryCatch(as.integer(x_patch$shape), error = function(e) integer(0))
+  if (length(shp) < 4L) {
+    return(x_patch)
+  }
+  h <- shp[3]
+  w <- shp[4]
+  if (!is.finite(h) || !is.finite(w) || crop_size <= 0L || crop_size >= min(h, w)) {
+    return(x_patch)
+  }
+  row_start <- floor((h - crop_size) / 2L) + 1L
+  col_start <- floor((w - crop_size) / 2L) + 1L
+  row_end <- row_start + crop_size - 1L
+  col_end <- col_start + crop_size - 1L
+  x_patch[, , row_start:row_end, col_start:col_end]
+}
+
 # =============================================================================
 # MultiScalePatchEncoder2D
 #
@@ -101,9 +122,10 @@ PatchEncoder2D <- nn_module(
 # =============================================================================
 MultiScalePatchEncoder2D <- nn_module(
   "MultiScalePatchEncoder2D",
-  initialize = function(in_channels, out_dim = 128, dropout = 0.10) {
+  initialize = function(in_channels, out_dim = 128, dropout = 0.10, local_size = NULL) {
     local_dim  <- as.integer(ceiling(out_dim * 0.60))   # 60% local
     global_dim <- as.integer(out_dim - local_dim)        # 40% global
+    self$local_size <- if (!is.null(local_size) && is.finite(local_size)) as.integer(local_size) else NULL
 
     # Local branch: fine-grained texture (same 3-block design as PatchEncoder2D)
     self$local_stem <- nn_sequential(
@@ -138,7 +160,8 @@ MultiScalePatchEncoder2D <- nn_module(
     )
   },
   forward = function(x_patch) {
-    z_local  <- self$local_head(self$local_stem(x_patch))
+    x_local <- center_crop_patch_tensor(x_patch, self$local_size)
+    z_local  <- self$local_head(self$local_stem(x_local))
     z_global <- self$global_head(self$global_stem(x_patch))
     torch_cat(list(z_local, z_global), dim = 2L)
   }
@@ -421,6 +444,7 @@ build_memory_bank_pointpatch_tensor <- function(model,
   Z_list <- list()
   R_list <- list()
   C_list <- list()
+  E_list <- list()
 
   with_no_grad({
     for (s in seq(1, n, by = batch_size)) {
@@ -439,13 +463,18 @@ build_memory_bank_pointpatch_tensor <- function(model,
       Z_list[[length(Z_list) + 1]] <- out$z$cpu()
       R_list[[length(R_list) + 1]] <- r$cpu()
       C_list[[length(C_list) + 1]] <- cb$cpu()
+      if (isTRUE(model$dam_active) && !is.null(out$z_env)) {
+        E_list[[length(E_list) + 1]] <- out$z_env$cpu()
+      }
     }
   })
 
   list(
     Z = torch_cat(Z_list, dim = 1),
     R = torch_cat(R_list, dim = 1),
-    C = torch_cat(C_list, dim = 1)
+    C = torch_cat(C_list, dim = 1),
+    E = if (length(E_list) > 0) torch_cat(E_list, dim = 1) else NULL,
+    Xraw = if (isTRUE(model$dam_active)) tensor_cache$X$cpu() else NULL
   )
 }
 
@@ -461,7 +490,10 @@ refresh_convkrigingnet2d_bank_tensor <- function(model,
   list(
     Zmem = bank$Z$to(device = tensor_cache$device),
     Rmem = bank$R$to(device = tensor_cache$device),
-    Cmem = bank$C$to(device = tensor_cache$device)
+    Cmem = bank$C$to(device = tensor_cache$device),
+    Xmem = if (isTRUE(model$dam_active) && !is.null(bank$E)) bank$E$to(device = tensor_cache$device) else NULL,
+    Xmem_raw = if (isTRUE(model$dam_active) && !is.null(bank$Xraw)) bank$Xraw$to(device = tensor_cache$device) else NULL,
+    Imem = if (isTRUE(model$dam_active)) torch_tensor(seq_len(tensor_cache$n), dtype = torch_long(), device = tensor_cache$device) else NULL
   )
 }
 
@@ -541,10 +573,15 @@ predict_with_memory_pointpatch_tensor <- function(model,
                                                   Zmem,
                                                   Rmem,
                                                   Cmem,
+                                                  Zmem_expert = NULL,
+                                                  Rmem_expert = NULL,
+                                                  Gmem = NULL,
                                                   K,
                                                   device = "cpu",
                                                   batch_size = 256,
-                                                  knn_idx_t = NULL) {
+                                                  knn_idx_t = NULL,
+                                                  Xmem_env = NULL,
+                                                  Xmem_env_raw = NULL) {
   preds <- numeric(tensor_cache$n)
 
   with_no_grad({
@@ -570,8 +607,46 @@ predict_with_memory_pointpatch_tensor <- function(model,
       zn <- reshape_safe(Zmem$index_select(1, nb_flat), c(B, K, -1))
       rn <- reshape_safe(Rmem$index_select(1, nb_flat), c(B, K))
       cn <- reshape_safe(Cmem$index_select(1, nb_flat), c(B, K, 2))
+      zne <- rne <- gne <- NULL
+      if (!is.null(Zmem_expert)) {
+        shp <- as.integer(Zmem_expert$shape)
+        zne <- reshape_safe(
+          Zmem_expert$index_select(1, nb_flat),
+          c(B, K, shp[2L], shp[3L])
+        )
+      }
+      if (!is.null(Rmem_expert)) {
+        shp <- as.integer(Rmem_expert$shape)
+        rne <- reshape_safe(
+          Rmem_expert$index_select(1, nb_flat),
+          c(B, K, shp[2L])
+        )
+      }
+      if (!is.null(Gmem)) {
+        shp <- as.integer(Gmem$shape)
+        gne <- reshape_safe(
+          Gmem$index_select(1, nb_flat),
+          c(B, K, shp[2L])
+        )
+      }
 
-      out <- model$forward_with_kriging(xb, pb, cb, zn, cn, rn)
+      fw_args <- list(
+        x_tab = xb,
+        x_patch = pb,
+        coords = cb,
+        z_n = zn,
+        coords_n = cn,
+        r_n = rn
+      )
+      fw_formals <- names(formals(model$forward_with_kriging))
+      if (!is.null(zne) && "z_n_expert" %in% fw_formals) fw_args$z_n_expert <- zne
+      if (!is.null(rne) && "r_n_expert" %in% fw_formals) fw_args$r_n_expert <- rne
+      if (!is.null(gne) && "gate_n" %in% fw_formals) fw_args$gate_n <- gne
+      if (!is.null(Xmem_env) && "x_mem_env" %in% fw_formals) fw_args$x_mem_env <- Xmem_env
+      if (!is.null(Xmem_env) && "r_mem_env" %in% fw_formals) fw_args$r_mem_env <- Rmem
+      if (!is.null(Xmem_env_raw) && "x_mem_env_raw" %in% fw_formals) fw_args$x_mem_env_raw <- Xmem_env_raw
+
+      out <- do.call(model$forward_with_kriging, fw_args)
       preds[idx] <- as.numeric(out$pred$cpu())
     }
   })

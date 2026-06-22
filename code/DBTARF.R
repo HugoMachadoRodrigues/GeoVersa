@@ -1217,7 +1217,37 @@ train_dbtarf_one_fold <- function(train_df,
                                   resid_rf_sample_fraction = NULL,
                                   fair_profile_search = TRUE,
                                   fair_profile_max = 6L,
+                                  ensemble_top_k = 1L,
+                                  ensemble_weighting = "softmax",
+                                  ensemble_temperature = 0.75,
                                   ...) {
+  dbt_candidate_weights <- function(scores, weighting, temperature) {
+    n <- length(scores)
+    if (n == 0L) return(numeric())
+    if (n == 1L) return(1)
+    scores <- as.numeric(scores)
+    finite <- is.finite(scores)
+    if (!any(finite)) return(rep(1 / n, n))
+    worst <- max(scores[finite], na.rm = TRUE)
+    scores[!finite] <- worst + abs(worst) + 1
+    weighting <- tolower(trimws(as.character(weighting)[1L]))
+    temperature <- suppressWarnings(as.numeric(temperature)[1L])
+    if (!is.finite(temperature) || temperature <= 0) temperature <- 1
+    if (identical(weighting, "uniform")) {
+      w <- rep(1, n)
+    } else if (identical(weighting, "inverse")) {
+      w <- 1 / pmax(scores - min(scores, na.rm = TRUE) + temperature, 1e-8)
+    } else {
+      z <- -(scores - min(scores, na.rm = TRUE)) / temperature
+      z <- pmax(z, -700)
+      w <- exp(z)
+    }
+    if (!any(is.finite(w)) || sum(w, na.rm = TRUE) <= 0) {
+      return(rep(1 / n, n))
+    }
+    w / sum(w, na.rm = TRUE)
+  }
+
   tag_profile <- function(out, label) {
     out$diagnostics$selected_profile <- label
     out$candidate_table <- cbind(profile = label, out$candidate_table)
@@ -1257,6 +1287,43 @@ train_dbtarf_one_fold <- function(train_df,
     tag_profile(out, spec$profile)
   }
 
+  run_requested_profile <- function(label) {
+    out <- .dbt_train_dbtarf_profile(
+      train_df = train_df,
+      test_df = test_df,
+      response_name = response_name,
+      predictor_names = predictor_names,
+      coord_names = coord_names,
+      n_folds = n_folds,
+      lambda_grid = lambda_grid,
+      n_basis = n_basis,
+      bandwidth = bandwidth,
+      min_oof_improvement = min_oof_improvement,
+      train_seed = train_seed,
+      rf_tune = rf_tune,
+      rf_tune_method = rf_tune_method,
+      rf_tune_inner_folds = rf_tune_inner_folds,
+      rf_tune_max_grid = rf_tune_max_grid,
+      rf_num_trees = rf_num_trees,
+      rf_mtry = rf_mtry,
+      rf_min_node_size = rf_min_node_size,
+      rf_sample_fraction = rf_sample_fraction,
+      resid_rf_tune = resid_rf_tune,
+      resid_rf_tune_max_grid = resid_rf_tune_max_grid,
+      resid_rf_num_trees = resid_rf_num_trees,
+      resid_rf_mtry = resid_rf_mtry,
+      resid_rf_min_node_size = resid_rf_min_node_size,
+      resid_rf_sample_fraction = resid_rf_sample_fraction,
+      ...)
+    tag_profile(out, label)
+  }
+
+  requested_label <- if (.dbt_as_bool(rf_tune) || .dbt_as_bool(resid_rf_tune)) {
+    "single_tuned"
+  } else {
+    "default_rf"
+  }
+
   if (.dbt_as_bool(fair_profile_search) &&
       (.dbt_as_bool(rf_tune) || .dbt_as_bool(resid_rf_tune))) {
     train_df_for_specs <- as.data.frame(train_df)
@@ -1267,60 +1334,88 @@ train_dbtarf_one_fold <- function(train_df,
       p = length(pred_for_specs),
       n = nrow(train_df_for_specs),
       max_profiles = fair_profile_max)
-    profile_out <- vector("list", nrow(profile_specs))
+    profile_out <- vector("list", nrow(profile_specs) + 1L)
     for (i in seq_len(nrow(profile_specs))) {
       profile_out[[i]] <- run_fixed_profile(profile_specs[i, , drop = FALSE])
     }
+    profile_out[[length(profile_out)]] <- run_requested_profile(requested_label)
+    profile_labels <- c(as.character(profile_specs$profile), requested_label)
     oof <- vapply(profile_out, function(x) {
       suppressWarnings(as.numeric(x$diagnostics$selected_oof_rmse))
     }, numeric(1))
     best_i <- if (any(is.finite(oof))) which.min(oof) else 1L
+    ensemble_top_k <- suppressWarnings(as.integer(ensemble_top_k))
+    if (!is.finite(ensemble_top_k) || ensemble_top_k < 1L) ensemble_top_k <- 1L
+    rank_i <- order(oof, na.last = TRUE)
+    rank_i <- rank_i[is.finite(oof[rank_i])]
+    if (length(rank_i) == 0L) rank_i <- best_i
+    top_i <- rank_i[seq_len(min(ensemble_top_k, length(rank_i)))]
+    top_weights <- dbt_candidate_weights(
+      oof[top_i], ensemble_weighting, ensemble_temperature)
     selected <- profile_out[[best_i]]
+    if (length(top_i) > 1L) {
+      weighted_vec <- function(name) {
+        mat <- do.call(cbind, lapply(profile_out[top_i], function(x) {
+          as.numeric(x[[name]])
+        }))
+        as.numeric(mat %*% top_weights)
+      }
+      selected$pred_test <- weighted_vec("pred_test")
+      if (!is.null(selected$pred_test_base)) {
+        selected$pred_test_base <- weighted_vec("pred_test_base")
+      }
+      if (!is.null(selected$pred_test_cubist)) {
+        selected$pred_test_cubist <- weighted_vec("pred_test_cubist")
+      }
+      if (!is.null(selected$correction_test)) {
+        selected$correction_test <- weighted_vec("correction_test")
+      }
+      test_obs <- if (response_name %in% names(test_df)) {
+        suppressWarnings(as.numeric(test_df[[response_name]]))
+      } else {
+        rep(NA_real_, nrow(test_df))
+      }
+      if (any(is.finite(test_obs))) {
+        selected$metrics_test$RMSE <- .dbt_rmse(test_obs, selected$pred_test)
+        selected$metrics_test$RMSE_base <- .dbt_rmse(
+          test_obs, selected$pred_test_base)
+      }
+    }
     selected$diagnostics$fair_profile_search <- TRUE
     selected$diagnostics$fair_profile_max <- as.integer(fair_profile_max)
-    selected$diagnostics$profile_search_n <- nrow(profile_specs)
+    selected$diagnostics$profile_search_n <- length(profile_out)
     selected$diagnostics$profile_search_best_oof_rmse <- oof[best_i]
     selected$diagnostics$default_profile_oof_rmse <- oof[
-      match("default_rf", profile_specs$profile)]
-    selected$candidate_table <- do.call(rbind, lapply(profile_out, `[[`, "candidate_table"))
+      match("default_rf", profile_labels)]
+    selected$diagnostics$single_tuned_profile_oof_rmse <- oof[
+      match("single_tuned", profile_labels)]
+    selected$diagnostics$ensemble_top_k_requested <- ensemble_top_k
+    selected$diagnostics$ensemble_applied <- length(top_i) > 1L
+    selected$diagnostics$ensemble_size <- length(top_i)
+    selected$diagnostics$ensemble_weighting <- tolower(
+      trimws(as.character(ensemble_weighting)[1L]))
+    selected$diagnostics$ensemble_temperature <- suppressWarnings(
+      as.numeric(ensemble_temperature)[1L])
+    selected$diagnostics$ensemble_profiles <- paste(
+      profile_labels[top_i], collapse = "|")
+    selected$diagnostics$ensemble_profile_oof_rmse <- paste(
+      sprintf("%.8f", oof[top_i]), collapse = "|")
+    selected$diagnostics$ensemble_weights <- paste(
+      sprintf("%.8f", top_weights), collapse = "|")
+    selected$candidate_table <- do.call(
+      rbind, lapply(profile_out, `[[`, "candidate_table"))
+    selected$candidate_table$ensemble_member <-
+      selected$candidate_table$profile %in% profile_labels[top_i]
+    selected$candidate_table$ensemble_rank <- match(
+      selected$candidate_table$profile, profile_labels[top_i])
+    weight_map <- stats::setNames(top_weights, profile_labels[top_i])
+    selected$candidate_table$ensemble_weight <- as.numeric(
+      weight_map[selected$candidate_table$profile])
     selected$rf_tuning_table <- do.call(rbind, lapply(profile_out, `[[`, "rf_tuning_table"))
     return(selected)
   }
 
-  requested_label <- if (.dbt_as_bool(rf_tune) || .dbt_as_bool(resid_rf_tune)) {
-    "single_tuned"
-  } else {
-    "default_rf"
-  }
-  requested <- .dbt_train_dbtarf_profile(
-    train_df = train_df,
-    test_df = test_df,
-    response_name = response_name,
-    predictor_names = predictor_names,
-    coord_names = coord_names,
-    n_folds = n_folds,
-    lambda_grid = lambda_grid,
-    n_basis = n_basis,
-    bandwidth = bandwidth,
-    min_oof_improvement = min_oof_improvement,
-    train_seed = train_seed,
-    rf_tune = rf_tune,
-    rf_tune_method = rf_tune_method,
-    rf_tune_inner_folds = rf_tune_inner_folds,
-    rf_tune_max_grid = rf_tune_max_grid,
-    rf_num_trees = rf_num_trees,
-    rf_mtry = rf_mtry,
-    rf_min_node_size = rf_min_node_size,
-    rf_sample_fraction = rf_sample_fraction,
-    resid_rf_tune = resid_rf_tune,
-    resid_rf_tune_max_grid = resid_rf_tune_max_grid,
-    resid_rf_num_trees = resid_rf_num_trees,
-    resid_rf_mtry = resid_rf_mtry,
-    resid_rf_min_node_size = resid_rf_min_node_size,
-    resid_rf_sample_fraction = resid_rf_sample_fraction,
-	    ...)
-
-  requested <- tag_profile(requested, requested_label)
+  requested <- run_requested_profile(requested_label)
   requested$diagnostics$fair_profile_search <- FALSE
   requested$diagnostics$fair_profile_max <- as.integer(fair_profile_max)
   requested$diagnostics$profile_search_n <- NA_integer_
@@ -1330,6 +1425,13 @@ train_dbtarf_one_fold <- function(train_df,
     if (identical(requested_label, "default_rf")) {
       requested$diagnostics$selected_oof_rmse
     } else NA_real_
+  requested$diagnostics$ensemble_top_k_requested <- as.integer(ensemble_top_k)
+  requested$diagnostics$ensemble_applied <- FALSE
+  requested$diagnostics$ensemble_size <- 1L
+  requested$diagnostics$ensemble_weighting <- tolower(
+    trimws(as.character(ensemble_weighting)[1L]))
+  requested$diagnostics$ensemble_temperature <- suppressWarnings(
+    as.numeric(ensemble_temperature)[1L])
   requested
 }
 
@@ -1355,7 +1457,10 @@ dbtarf_default_params <- list(
   resid_rf_min_node_size = NULL,
   resid_rf_sample_fraction = NULL,
   fair_profile_search = TRUE,
-  fair_profile_max = 6L
+  fair_profile_max = 6L,
+  ensemble_top_k = 1L,
+  ensemble_weighting = "softmax",
+  ensemble_temperature = 0.75
 )
 
 dbtarf_train_predict <- function(train_df,

@@ -1,5 +1,6 @@
 rm(list = ls())
 set.seed(123)
+source("./code/geospatial_env_setup.R", local = TRUE)
 
 source("./code/KrigingNet_DualFramework.R")
 

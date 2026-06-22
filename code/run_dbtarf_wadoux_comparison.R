@@ -32,6 +32,10 @@
 #   DBT_RESID_RF_SAMPLE_FRACTION optional comma list
 #   DBT_FAIR_PROFILE_SEARCH      TRUE/FALSE, default TRUE
 #   DBT_FAIR_PROFILE_MAX         default 6
+#   DBT_ENSEMBLE_TOP_K           top-k profile ensemble, default 3
+#   DBT_ENSEMBLE_WEIGHTING       softmax | inverse | uniform
+#   DBT_ENSEMBLE_TEMPERATURE     default 0.75
+#   DBT_SAVE_PREDICTION_AUDIT    TRUE writes split/prediction audit CSVs
 #   DBT_TRAIN_SEED          default 123
 #   DBT_RESULTS_DIR         default results/dbtarf_run
 #   DBT_CHECKPOINT_EVERY    default 1
@@ -93,6 +97,12 @@ sample_size <- as.integer(parse_num_dbt("DBT_SAMPLE_SIZE", 500L))
 train_seed <- as.integer(parse_num_dbt("DBT_TRAIN_SEED", 123L))
 results_dir <- Sys.getenv("DBT_RESULTS_DIR", unset = "results/dbtarf_run")
 checkpoint_every <- as.integer(parse_num_dbt("DBT_CHECKPOINT_EVERY", 1L))
+dbt_save_prediction_audit <- parse_bool_dbt("DBT_SAVE_PREDICTION_AUDIT", TRUE)
+dbt_ensemble_weighting <- tolower(trimws(Sys.getenv(
+  "DBT_ENSEMBLE_WEIGHTING", unset = "softmax")))
+if (!(dbt_ensemble_weighting %in% c("softmax", "inverse", "uniform"))) {
+  stop("Unsupported DBT_ENSEMBLE_WEIGHTING: ", dbt_ensemble_weighting)
+}
 
 dir.create(results_dir, recursive = TRUE, showWarnings = FALSE)
 options(wadoux_corr_method = "pearson")
@@ -119,14 +129,25 @@ dbtarf_params <- modifyList(
     resid_rf_min_node_size = parse_num_list_dbt("DBT_RESID_RF_MIN_NODE_SIZE", NULL),
     resid_rf_sample_fraction = parse_num_list_dbt("DBT_RESID_RF_SAMPLE_FRACTION", NULL),
     fair_profile_search = parse_bool_dbt("DBT_FAIR_PROFILE_SEARCH", TRUE),
-    fair_profile_max = as.integer(parse_num_dbt("DBT_FAIR_PROFILE_MAX", 6L))
+    fair_profile_max = as.integer(parse_num_dbt("DBT_FAIR_PROFILE_MAX", 6L)),
+    ensemble_top_k = as.integer(parse_num_dbt("DBT_ENSEMBLE_TOP_K", 3L)),
+    ensemble_weighting = dbt_ensemble_weighting,
+    ensemble_temperature = parse_num_dbt("DBT_ENSEMBLE_TEMPERATURE", 0.75)
   )
 )
+if (!is.finite(dbtarf_params$ensemble_top_k) || dbtarf_params$ensemble_top_k < 1L) {
+  dbtarf_params$ensemble_top_k <- 1L
+}
+if (!is.finite(dbtarf_params$ensemble_temperature) ||
+    dbtarf_params$ensemble_temperature <= 0) {
+  dbtarf_params$ensemble_temperature <- 0.75
+}
 
 cat(sprintf(
-  "[DBTARF runner] scenario=%s  protocols=%s  models=%s  n_iter=%d  n=%d\n",
+  "[DBTARF runner] scenario=%s  protocols=%s  models=%s  n_iter=%d  n=%d  ensemble_top_k=%d weighting=%s\n",
   scenario, paste(protocols, collapse = ","),
-  paste(models, collapse = ","), n_iter, sample_size))
+  paste(models, collapse = ","), n_iter, sample_size,
+  dbtarf_params$ensemble_top_k, dbtarf_params$ensemble_weighting))
 
 # ---- Data -------------------------------------------------------------------
 
@@ -154,6 +175,39 @@ sample_calibration_dbt <- function() {
   } else {
     stop("Unsupported DBT_SCENARIO: ", scenario)
   }
+}
+
+row_id_dbt <- function(df) {
+  if ("..wadoux_row_id" %in% names(df)) df$..wadoux_row_id else seq_len(nrow(df))
+}
+
+coord_key_dbt <- function(df) {
+  if (!all(c("x", "y") %in% names(df))) {
+    return(rep(NA_character_, nrow(df)))
+  }
+  paste0(round(as.numeric(df$x), 6), "|", round(as.numeric(df$y), 6))
+}
+
+sample_design_test_dbt <- function(calibration_full, size) {
+  pool <- common_data$s_df
+  keep <- rep(TRUE, nrow(pool))
+  if ("..wadoux_row_id" %in% names(pool) &&
+      "..wadoux_row_id" %in% names(calibration_full)) {
+    keep <- keep & !(pool$..wadoux_row_id %in% calibration_full$..wadoux_row_id)
+  }
+  pool_xy <- coord_key_dbt(pool)
+  cal_xy <- coord_key_dbt(calibration_full)
+  if (any(!is.na(pool_xy)) && any(!is.na(cal_xy))) {
+    keep <- keep & !(pool_xy %in% cal_xy)
+  }
+  eligible <- pool[keep, , drop = FALSE]
+  if (nrow(eligible) < size) {
+    stop(sprintf(
+      "DesignBased DBTARF test pool has only %d eligible rows after excluding calibration rows; need %d.",
+      nrow(eligible), size
+    ))
+  }
+  sample_simple_random_rows_wadoux(eligible, size)
 }
 
 fit_predict_cubist_dbt <- function(X_train, y_train, X_test,
@@ -184,8 +238,69 @@ emit_metric_rows_dbt <- function(obs, pred_map, protocol, iter, scenario) {
   do.call(rbind, rows)
 }
 
+prediction_audit_designbased_dbt <- function(test_df, pred_map, iter,
+                                             diag = NULL) {
+  if (!isTRUE(dbt_save_prediction_audit)) return(data.frame())
+  obs <- test_df[[response_name_wadoux]]
+  out <- data.frame(
+    iteration = iter,
+    scenario = scenario,
+    protocol = "DesignBased",
+    split_role = "design_test",
+    wadoux_row_id = row_id_dbt(test_df),
+    x = test_df$x,
+    y = test_df$y,
+    obs = obs,
+    stringsAsFactors = FALSE
+  )
+  for (nm in names(pred_map)) {
+    pred <- as.numeric(pred_map[[nm]])
+    out[[paste0("pred_", nm)]] <- pred
+    out[[paste0("resid_", nm)]] <- pred - obs
+  }
+  if (!is.null(diag)) {
+    fields <- c(
+      "selected_profile", "selected_mode", "selected_lambda",
+      "selected_oof_rmse", "selected_oof_delta", "oof_rf_rmse",
+      "fair_profile_search", "profile_search_n",
+      "ensemble_top_k_requested", "ensemble_applied", "ensemble_size",
+      "ensemble_weighting", "ensemble_temperature",
+      "ensemble_profiles", "ensemble_profile_oof_rmse",
+      "ensemble_weights", "rf_tune_method", "rf_tune_inner_folds",
+      "base_rf_num_trees", "base_rf_mtry", "base_rf_min_node_size",
+      "base_rf_sample_fraction", "resid_rf_num_trees", "resid_rf_mtry",
+      "resid_rf_min_node_size", "resid_rf_sample_fraction"
+    )
+    for (f in fields) {
+      val <- diag[[f]]
+      if (is.null(val) || length(val) != 1L) val <- NA
+      out[[paste("DBTARF", f, sep = "_")]] <- val
+    }
+  }
+  out
+}
+
+split_audit_designbased_dbt <- function(calibration_full, test_df, iter) {
+  if (!isTRUE(dbt_save_prediction_audit)) return(data.frame())
+  mk <- function(df, role) {
+    data.frame(
+      iteration = iter,
+      scenario = scenario,
+      protocol = "DesignBased",
+      split_role = role,
+      wadoux_row_id = row_id_dbt(df),
+      x = df$x,
+      y = df$y,
+      obs = df[[response_name_wadoux]],
+      stringsAsFactors = FALSE
+    )
+  }
+  rbind(mk(calibration_full, "calibration_full"),
+        mk(test_df, "design_test"))
+}
+
 eval_designbased_dbt <- function(valuetable, iter) {
-  val_srs <- sample_simple_random_rows_wadoux(common_data$s_df, sample_size)
+  val_srs <- sample_design_test_dbt(valuetable, sample_size)
   obs <- val_srs[[response_name_wadoux]]
   pred_map <- list()
   diag_rows <- list()
@@ -227,14 +342,20 @@ eval_designbased_dbt <- function(valuetable, iter) {
     diagnostics = if (length(diag_rows)) do.call(rbind, diag_rows) else data.frame(),
     candidates = if (length(candidate_rows)) do.call(rbind, candidate_rows) else data.frame(),
     fold_diagnostics = if (length(fold_rows)) do.call(rbind, fold_rows) else data.frame(),
-    rf_tuning = if (length(tuning_rows)) do.call(rbind, tuning_rows) else data.frame()
+    rf_tuning = if (length(tuning_rows)) do.call(rbind, tuning_rows) else data.frame(),
+    prediction_audit = prediction_audit_designbased_dbt(
+      val_srs, pred_map, iter,
+      diag = if (exists("out", inherits = FALSE)) out$diagnostics else NULL),
+    split_audit = split_audit_designbased_dbt(valuetable, val_srs, iter)
   )
 }
 
 # ---- Save helpers -----------------------------------------------------------
 
 save_dbt_checkpoint <- function(iter, metric_rows, diagnostic_rows,
-                                candidate_rows, fold_rows, tuning_rows) {
+                                candidate_rows, fold_rows, tuning_rows,
+                                prediction_audit_rows = list(),
+                                split_audit_rows = list()) {
   df <- do.call(rbind, metric_rows[!vapply(metric_rows, is.null, logical(1))])
   if (is.null(df) || nrow(df) == 0L) return(invisible(NULL))
   write.csv(df, file.path(results_dir, "dbtarf_all_results.csv"),
@@ -258,6 +379,18 @@ save_dbt_checkpoint <- function(iter, metric_rows, diagnostic_rows,
   tune_df <- do.call(rbind, tuning_rows[!vapply(tuning_rows, is.null, logical(1))])
   if (!is.null(tune_df) && nrow(tune_df) > 0L) {
     write.csv(tune_df, file.path(results_dir, "dbtarf_rf_tuning_scores.csv"),
+              row.names = FALSE)
+  }
+  audit_df <- do.call(rbind, prediction_audit_rows[
+    !vapply(prediction_audit_rows, is.null, logical(1))])
+  if (!is.null(audit_df) && nrow(audit_df) > 0L) {
+    write.csv(audit_df, file.path(results_dir, "dbtarf_prediction_audit.csv"),
+              row.names = FALSE)
+  }
+  split_df <- do.call(rbind, split_audit_rows[
+    !vapply(split_audit_rows, is.null, logical(1))])
+  if (!is.null(split_df) && nrow(split_df) > 0L) {
+    write.csv(split_df, file.path(results_dir, "dbtarf_split_audit.csv"),
               row.names = FALSE)
   }
 
@@ -331,9 +464,13 @@ write.csv(
              resid_rf_mtry = paste(dbtarf_params$resid_rf_mtry, collapse = ","),
              resid_rf_min_node_size = paste(dbtarf_params$resid_rf_min_node_size, collapse = ","),
              resid_rf_sample_fraction = paste(dbtarf_params$resid_rf_sample_fraction, collapse = ","),
-             fair_profile_search = dbtarf_params$fair_profile_search,
-             fair_profile_max = dbtarf_params$fair_profile_max,
-             train_seed = train_seed, stringsAsFactors = FALSE),
+	             fair_profile_search = dbtarf_params$fair_profile_search,
+	             fair_profile_max = dbtarf_params$fair_profile_max,
+	             ensemble_top_k = dbtarf_params$ensemble_top_k,
+	             ensemble_weighting = dbtarf_params$ensemble_weighting,
+	             ensemble_temperature = dbtarf_params$ensemble_temperature,
+	             save_prediction_audit = dbt_save_prediction_audit,
+	             train_seed = train_seed, stringsAsFactors = FALSE),
   file.path(results_dir, "dbtarf_config.csv"), row.names = FALSE)
 
 all_metric_rows <- list()
@@ -341,6 +478,8 @@ all_diagnostic_rows <- list()
 all_candidate_rows <- list()
 all_fold_rows <- list()
 all_tuning_rows <- list()
+all_prediction_audit_rows <- list()
+all_split_audit_rows <- list()
 
 for (iter in seq_len(n_iter)) {
   cat(sprintf("\n==================================================\n"))
@@ -367,10 +506,18 @@ for (iter in seq_len(n_iter)) {
   if (!is.null(iter_out$rf_tuning) && nrow(iter_out$rf_tuning) > 0L) {
     all_tuning_rows[[iter]] <- iter_out$rf_tuning
   }
+  if (!is.null(iter_out$prediction_audit) &&
+      nrow(iter_out$prediction_audit) > 0L) {
+    all_prediction_audit_rows[[iter]] <- iter_out$prediction_audit
+  }
+  if (!is.null(iter_out$split_audit) && nrow(iter_out$split_audit) > 0L) {
+    all_split_audit_rows[[iter]] <- iter_out$split_audit
+  }
 
   if (iter %% checkpoint_every == 0L || iter == n_iter) {
     save_dbt_checkpoint(iter, all_metric_rows, all_diagnostic_rows,
-                        all_candidate_rows, all_fold_rows, all_tuning_rows)
+                        all_candidate_rows, all_fold_rows, all_tuning_rows,
+                        all_prediction_audit_rows, all_split_audit_rows)
     summarise_and_save_dbt(all_metric_rows)
   }
 }

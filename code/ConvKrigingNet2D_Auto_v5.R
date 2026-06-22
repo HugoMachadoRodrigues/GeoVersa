@@ -21,7 +21,7 @@
 #
 #   (D) TRAINING DYNAMICS       — adapted from observed warmup trajectory
 #       Source: per-epoch validation losses during backbone warmup
-#       References: Polyak (1987); Smith (2018)
+#       References: Smith (2017); Smith (2018)
 #
 # Consequence: GeoVersa V5 configures itself identically correctly for
 # soil pH in Europe, forest carbon in the Amazon, or heavy metals in Asia —
@@ -33,6 +33,11 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 .auto_clamp <- function(x, lo, hi) pmax(lo, pmin(hi, x))
+
+.auto_make_odd <- function(x) {
+  x <- as.integer(round(x))
+  ifelse(x %% 2L == 0L, x + 1L, x)
+}
 
 .auto_env_num <- function(name, default) {
   raw <- Sys.getenv(name, unset = "")
@@ -112,26 +117,46 @@
 #   We clamp to [6, 30] to guarantee a meaningful neighbourhood but limit
 #   memory use.  Using range_major (longest correlation axis) ensures we are
 #   generous rather than too conservative.
-.auto_K_from_spatial_density <- function(n_train, vg, Ctr) {
-  area <- diff(range(Ctr[, 1])) * diff(range(Ctr[, 2]))
-  if (!is.finite(area) || area <= 0) {
-    cat("[Auto v5]   K: degenerate coordinate area → K = 10\n")
+# K_neighbors from spatial density inside the variogram range
+#
+# Cressie (1993, §2.4) motivates selecting neighbors by the amount of support
+# covered by the practical range.  The expected number of training points inside
+# a disc of radius `range_major` is n * π * range^2 / area.  We allow only a
+# mild nugget-based modulation around this density count.
+.auto_K_neighbors_from_density <- function(n_train,
+                                           range_major,
+                                           area_extent,
+                                           nugget_ratio) {
+  if (!is.finite(area_extent) || area_extent <= 0 ||
+      !is.finite(range_major) || range_major <= 0) {
+    cat("[Auto v5]   K: degenerate coordinate area/range → K = 10\n")
     return(10L)
   }
   k_mult <- .auto_env_num("GEOVERSA_AUTO_K_MULT", 1.0)
   k_nugget_slope <- .auto_env_num("GEOVERSA_AUTO_K_NUGGET_SLOPE", 0.0)
   k_nugget_ref <- .auto_env_num("GEOVERSA_AUTO_K_NUGGET_REF", 0.18)
-  k_theory_raw <- n_train * pi * vg$range_major^2 / area
+  k_theory_raw <- n_train * pi * range_major^2 / area_extent
   k_struct_mult <- .auto_clamp(
-    1 + k_nugget_slope * (vg$nugget_ratio - k_nugget_ref),
+    1 + k_nugget_slope * (nugget_ratio - k_nugget_ref),
     0.85, 1.15
   )
   k_theory <- k_mult * k_struct_mult * k_theory_raw
-  K        <- as.integer(.auto_clamp(round(k_theory), 6L, 30L))
+  K <- as.integer(.auto_clamp(round(k_theory), 6L, 30L))
   cat(sprintf(
     "[Auto v5]   K_neighbors = %d  [%.2f × %.3f × n·π·range²/area = %.2f × %.3f × %.1f·π·%.4g²/%.4g]\n",
-    K, k_mult, k_struct_mult, k_mult, k_struct_mult, n_train, vg$range_major, area))
+    K, k_mult, k_struct_mult, k_mult, k_struct_mult, n_train, range_major, area_extent
+  ))
   K
+}
+
+.auto_K_from_spatial_density <- function(n_train, vg, Ctr) {
+  area <- diff(range(Ctr[, 1])) * diff(range(Ctr[, 2]))
+  .auto_K_neighbors_from_density(
+    n_train = n_train,
+    range_major = vg$range_major,
+    area_extent = area,
+    nugget_ratio = vg$nugget_ratio
+  )
 }
 
 # beta_init (logit of initial kriging weight β) from nugget ratio r
@@ -260,6 +285,72 @@
   patch_dim
 }
 
+# Patch pyramid geometry from variogram range and raster support
+#
+# Physical derivation:
+#   The raster patch should span a physically meaningful neighborhood around the
+#   focal point. Let a be the practical variogram range (major/minor axis) and
+#   c the raster cell size. Then a / c is the support in cells over which the
+#   field remains materially correlated. We therefore derive:
+#     • global patch support from the major range
+#     • local patch support from the minor range and from a fixed fraction of
+#       the global field of view
+#   This keeps the patch pyramid anchored to the spatial process, not just to n.
+auto_patch_geometry_v5 <- function(vg,
+                                   n_train,
+                                   patch_resolution = NULL,
+                                   cached_patch_size = NULL) {
+  cached_patch_size <- suppressWarnings(as.integer(cached_patch_size)[1L])
+  fallback_global <- as.integer(.auto_make_odd(.auto_clamp(floor(sqrt(n_train)), 15L, 31L)))
+  if (!is.na(cached_patch_size) && is.finite(cached_patch_size) && cached_patch_size > 0) {
+    global_size <- as.integer(cached_patch_size)
+  } else if (is.finite(patch_resolution) && patch_resolution > 0 &&
+             is.finite(vg$range_major) && vg$range_major > 0) {
+    global_frac <- .auto_env_num("GEOVERSA_AUTO_PATCH_GLOBAL_RANGE_FRAC", 0.30)
+    local_minor_frac <- .auto_env_num("GEOVERSA_AUTO_PATCH_LOCAL_MINOR_FRAC", 0.20)
+    local_global_frac <- .auto_env_num("GEOVERSA_AUTO_PATCH_LOCAL_GLOBAL_FRAC", 0.45)
+    global_cap <- as.integer(.auto_make_odd(.auto_clamp(.auto_env_num("GEOVERSA_AUTO_PATCH_GLOBAL_MAX", 31), 21L, 41L)))
+    local_cap <- as.integer(.auto_make_odd(.auto_clamp(.auto_env_num("GEOVERSA_AUTO_PATCH_LOCAL_MAX", 17), 9L, min(21L, global_cap))))
+    major_cells <- max(vg$range_major / patch_resolution, 1.0)
+    minor_cells <- max(vg$range_minor / patch_resolution, 1.0)
+    global_size_vario <- .auto_make_odd(2L * round(global_frac * major_cells) + 1L)
+    global_size_vario <- as.integer(.auto_clamp(global_size_vario, 15L, global_cap))
+    global_size <- as.integer(.auto_make_odd(round(sqrt(fallback_global * global_size_vario))))
+    global_size <- as.integer(.auto_clamp(global_size, 15L, global_cap))
+    local_from_minor <- .auto_make_odd(2L * round(local_minor_frac * minor_cells) + 1L)
+    local_from_global <- .auto_make_odd(round(local_global_frac * global_size))
+    local_size <- as.integer(.auto_make_odd(round(sqrt(local_from_minor * local_from_global))))
+    local_size <- as.integer(.auto_clamp(local_size, 9L, min(local_cap, global_size)))
+    local_size <- min(local_size, global_size)
+    cat(sprintf(
+      "[Auto v5]   patch pyramid = global %d / local %d  [blend sqrt(%d×%d), range_major/cell=%.2f, range_minor/cell=%.2f]\n",
+      global_size, local_size, fallback_global, global_size_vario, major_cells, minor_cells
+    ))
+    return(list(
+      global_size = global_size,
+      local_size = local_size,
+      major_cells = major_cells,
+      minor_cells = minor_cells,
+      fallback_global = fallback_global
+    ))
+  } else {
+    global_size <- fallback_global
+  }
+
+  local_size <- as.integer(.auto_clamp(.auto_make_odd(round(0.55 * global_size)), 9L, min(21L, global_size)))
+  cat(sprintf(
+    "[Auto v5]   patch pyramid = global %d / local %d  [sqrt(n) fallback]\n",
+    global_size, local_size
+  ))
+  list(
+    global_size = global_size,
+    local_size = local_size,
+    major_cells = NA_real_,
+    minor_cells = NA_real_,
+    fallback_global = fallback_global
+  )
+}
+
 # Dropout rates from sample size
 # Reference: Srivastava et al. (2014); Gal & Ghahramani (2016)
 # Larger n → less regularisation needed.
@@ -294,14 +385,24 @@
     0.80, 1.20
   )
   patch_base <- .auto_clamp(0.75 * patch_base_raw * patch_struct_mult, 0.02, 0.20)
+  # The coordinate encoder is low-dimensional and only sees 2 inputs, so the
+  # regularisation should stay light and decay smoothly with sample size.
   coord_base <- .auto_clamp(0.10 - n_train / 20000, 0.02, 0.10)
+  # The neural kriging operator sees the noisiest residual channel; increase
+  # dropout when nugget is high and relax it when spatial signal is strong.
+  nko_base <- .auto_clamp(
+    0.08 - n_train / 15000 + 0.10 * ifelse(is.finite(nugget_ratio), nugget_ratio, 0.25),
+    0.02, 0.20
+  )
   tab_drop   <- round(.auto_clamp(tab_base * drop_mult * tab_mult,   0.03, 0.35), 3)
   patch_drop <- round(.auto_clamp(patch_base * drop_mult * patch_mult, 0.02, 0.25), 3)
   coord_drop <- round(.auto_clamp(coord_base * drop_mult * coord_mult, 0.01, 0.15), 3)
+  nko_drop <- round(.auto_clamp(nko_base * drop_mult, 0.02, 0.20), 3)
   list(
     tab = tab_drop,
     patch = patch_drop,
     coord = coord_drop,
+    nko = nko_drop,
     patch_base_raw = patch_base_raw,
     patch_struct_mult = patch_struct_mult,
     patch_nugget_slope = patch_nugget_slope,
@@ -311,87 +412,430 @@
   )
 }
 
+# Main-loop epoch budget from sample size and spatial signal
+#
+# 40 = lower bound empirical for MLP+CNN+kriging convergence under n >= 100;
+# below this the patch branch under-trains and the backbone never separates
+# from the kriging correction.
+# 2 * sqrt(n) is a Bartlett-style capacity scaling: the number of useful
+# passes grows sublinearly with sample size as the effective complexity of the
+# fitted function increases.
+# 20 * (1-r) is a signal bonus: low nugget means the residual field is
+# learnable, so the model can exploit extra passes without immediately
+# overfitting noise.
+.auto_main_epochs_from_nugget <- function(n_train, nugget_ratio) {
+  epoch_mult <- .auto_env_num("GEOVERSA_AUTO_EPOCH_MULT", 1.0)
+  base_epochs <- 40 + 2.0 * sqrt(max(1, n_train)) + 20 * (1 - nugget_ratio)
+  as.integer(.auto_clamp(round(base_epochs * epoch_mult), 50L, 140L))
+}
+
+# Variogram fitting controls from sample size
+#
+# 0.35 is the conservative minimum cutoff fraction that still leaves enough
+# pairs per lag under n ~ 100.  The +0.10 * log10(n/50) term widens the search
+# very slowly as pair counts stabilise.
+# 0.90 * sqrt(n) gives lag resolution that grows with sample size but avoids
+# the unstable many-empty-bins regime seen when lags scale linearly with n.
+.auto_variogram_fit_controls_from_n <- function(n_train) {
+  cutoff_mult <- .auto_env_num("GEOVERSA_AUTO_VG_CUTOFF_MULT", 1.0)
+  lag_mult <- .auto_env_num("GEOVERSA_AUTO_VG_LAG_MULT", 1.0)
+  cutoff_frac <- .auto_clamp((0.35 + 0.10 * log10(max(n_train, 50) / 50)) * cutoff_mult, 0.35, 0.65)
+  n_lags <- as.integer(.auto_clamp(round(0.90 * sqrt(max(1, n_train)) * lag_mult), 12L, 24L))
+  list(cutoff_frac = cutoff_frac, n_lags = n_lags)
+}
+
+# Gate defaults from variogram structure
+#
+# DESIGN CHOICE: these constants govern how aggressively the local kriging gate
+# can close.  They are now derived from signal strength and anisotropy rather
+# than kept fixed, and should be treated as part of the automation ablation.
+# 0.10 + 0.25*r keeps the linear blend center near 0.10 in strong signal and
+# relaxes it toward 0.35 as nugget rises.
+# 4 + 4*signal + 2*(1-aniso) sharpens the gate when spatial structure is
+# strong or directional.
+# 0.15 + 0.35*r and 0.02 + 0.20*r allow the gate floor and NKO floor to stay
+# low in well-structured fields and rise only when the variogram says noise
+# dominates.
+.auto_gate_controls_from_variogram <- function(vg, coord_dim) {
+  aniso_ratio <- .auto_clamp(vg$range_minor / max(vg$range_major, 1e-8), 0.10, 1.00)
+  signal <- .auto_clamp(1 - vg$nugget_ratio, 0.00, 1.00)
+  linear_blend_center <- .auto_clamp(0.10 + 0.25 * vg$nugget_ratio, 0.08, 0.40)
+  linear_blend_temp <- .auto_clamp(4 + 4 * signal + 2 * (1 - aniso_ratio), 3.0, 12.0)
+  gate_hidden <- as.integer(.auto_clamp(round(coord_dim / 4 + 4 * signal), 6L, 24L))
+  gate_floor <- .auto_clamp(0.15 + 0.35 * vg$nugget_ratio, 0.10, 0.70)
+  nko_gate_floor <- .auto_clamp(0.02 + 0.20 * vg$nugget_ratio, 0.02, 0.30)
+  list(
+    linear_blend_center = linear_blend_center,
+    linear_blend_temp = linear_blend_temp,
+    gate_hidden = gate_hidden,
+    gate_floor = gate_floor,
+    nko_gate_floor = nko_gate_floor
+  )
+}
+
+# Early stopping patience as a fraction of the total epoch budget.
+# 1/6 preserves the old Baccini setting (94 epochs -> patience 15) while
+# stretching naturally when the variogram says the task needs longer training.
+.auto_patience_from_main_epochs <- function(main_epochs) {
+  main_epochs <- as.integer(max(1L, round(main_epochs)))
+  max(5L, as.integer(floor(main_epochs / 6L)))
+}
+
+# LR reduction patience should fire before full early stopping.
+# 1/20 of the budget reproduces the old Baccini default near 4-5 epochs while
+# remaining strictly smaller than the early-stop patience above.
+.auto_lr_patience_from_main_epochs <- function(main_epochs) {
+  main_epochs <- as.integer(max(1L, round(main_epochs)))
+  max(3L, as.integer(floor(main_epochs / 20L)))
+}
+
+# Sample raster covariates without materialising the full stack in RAM.
+# 20k rows is a Monte Carlo design ceiling: correlation estimates stabilise well
+# before that for DSM covariate stacks, while memory stays bounded.
+.auto_sample_raster_matrix <- function(raster_stack, max_rows = 20000L, seed = 123L) {
+  max_rows <- as.integer(max(256L, round(max_rows)))
+  set.seed(as.integer(seed))
+  if (inherits(raster_stack, "SpatRaster")) {
+    vals <- tryCatch(
+      terra::spatSample(
+        raster_stack,
+        size = max_rows,
+        method = "random",
+        na.rm = TRUE,
+        values = TRUE,
+        as.df = TRUE
+      ),
+      error = function(e) NULL
+    )
+    if (is.null(vals) || ncol(vals) < 1L) return(NULL)
+    vals <- as.matrix(vals)
+  } else {
+    vals <- tryCatch(
+      raster::sampleRandom(
+        raster_stack,
+        size = max_rows,
+        na.rm = TRUE,
+        sp = FALSE
+      ),
+      error = function(e) NULL
+    )
+    if (is.null(vals) || ncol(vals) < 1L) return(NULL)
+    vals <- as.matrix(vals)
+  }
+  vals <- vals[stats::complete.cases(vals), , drop = FALSE]
+  if (nrow(vals) < 10L) return(NULL)
+  vals
+}
+
+.auto_valid_raster_cell_count <- function(raster_stack) {
+  if (inherits(raster_stack, "SpatRaster")) {
+    out <- tryCatch(
+      terra::global(!is.na(raster_stack[[1]]), "sum", na.rm = TRUE),
+      error = function(e) NULL
+    )
+    if (is.null(out) || nrow(out) < 1L || ncol(out) < 1L) return(NA_integer_)
+    return(as.integer(round(out[1, 1])))
+  }
+  out <- tryCatch(
+    raster::cellStats(!is.na(raster_stack[[1]]), stat = "sum"),
+    error = function(e) NA_real_
+  )
+  if (!is.finite(out)) return(NA_integer_)
+  as.integer(round(out))
+}
+
+# SSL mask ratio from covariate redundancy.
+# 0.30 is the safe lower bound when channels are weakly correlated; +0.60*mean_cor
+# pushes the masking rate toward MAE-style aggressive masking only when the
+# raster stack itself is redundant enough to support it.
+.auto_ssl_mask_ratio_from_raster <- function(raster_stack) {
+  vals <- .auto_sample_raster_matrix(raster_stack, max_rows = 20000L, seed = 123L)
+  if (is.null(vals) || ncol(vals) < 2L) return(0.50)
+  if (nrow(vals) < 100L) return(0.50)
+  cor_mat <- abs(stats::cor(vals, use = "pairwise.complete.obs"))
+  diag(cor_mat) <- NA_real_
+  mean_cor <- mean(cor_mat, na.rm = TRUE)
+  .auto_clamp(0.30 + 0.60 * mean_cor, 0.30, 0.75)
+}
+
+# SSL sample budget from raster support.
+# 3% of valid cells is enough to expose the encoder to broad raster diversity
+# without forcing full-raster pretraining; 10k-500k keeps runtime bounded.
+.auto_ssl_n_samples_from_raster <- function(raster_stack) {
+  n_cells_valid <- .auto_valid_raster_cell_count(raster_stack)
+  if (!is.finite(n_cells_valid) || n_cells_valid <= 0L) return(100000L)
+  as.integer(.auto_clamp(round(0.03 * n_cells_valid), 10000L, 500000L))
+}
+
+# SSL epochs from sample budget.
+# 20 + sqrt(n/1000) grows sublinearly with the number of sampled patches, then
+# early stopping handles the actual convergence point.
+.auto_ssl_epochs_from_samples <- function(n_samples) {
+  n_samples <- as.integer(max(1000L, round(n_samples)))
+  as.integer(.auto_clamp(round(20 + sqrt(n_samples / 1000)), 30L, 100L))
+}
+
+build_auto_config_v5 <- function(n_train,
+                                 vg,
+                                 coords,
+                                 covariates = NULL,
+                                 coord_scaler = NULL,
+                                 patch_channels = NULL,
+                                 patch_resolution = NULL,
+                                 patch_geometry = NULL,
+                                 cached_patch_size = NULL,
+                                 device = "cpu") {
+  if (is.null(coord_scaler)) {
+    coord_scaler <- fit_standard_scaler(coords)
+  }
+  cs <- mean(coord_scaler$scale)
+  r <- vg$nugget_ratio
+  ell_major_init <- vg$range_major / cs
+  ell_minor_init <- vg$range_minor / cs
+  theta_init <- vg$theta_rad
+  lw <- .auto_loss_weights_from_nugget(r)
+  K_neighbors <- .auto_K_from_spatial_density(n_train, vg, coords)
+  beta_init <- .auto_beta_init_from_nugget(r)
+  d <- .auto_d_from_n(n_train)
+  if (is.null(patch_geometry) ||
+      !is.list(patch_geometry) ||
+      !is.finite(patch_geometry$global_size) ||
+      !is.finite(patch_geometry$local_size)) {
+    patch_geometry <- auto_patch_geometry_v5(
+      vg = vg,
+      n_train = n_train,
+      patch_resolution = patch_resolution,
+      cached_patch_size = cached_patch_size
+    )
+  }
+  patch_size <- as.integer(patch_geometry$global_size)
+  patch_local_size <- as.integer(patch_geometry$local_size)
+  drops <- .auto_dropouts_from_n(n_train, nugget_ratio = r, k_neighbors = K_neighbors)
+  coord_dim <- .auto_coord_dim_from_variogram(vg)
+  gate_ctrl <- .auto_gate_controls_from_variogram(vg, coord_dim)
+  coord_hidden <- max(2L * coord_dim, 32L)
+  fusion_hidden <- d
+  main_epochs <- .auto_main_epochs_from_nugget(n_train, r)
+  if (!is.null(patch_channels)) {
+    patch_dim <- .auto_patch_dim_from_cnn(patch_channels, patch_size, d)
+  } else {
+    patch_dim <- as.integer(d / 2L)
+  }
+  X_dim <- if (!is.null(covariates)) {
+    if (inherits(covariates, "torch_tensor")) {
+      as.integer(covariates$size(2L))
+    } else {
+      ncol(covariates)
+    }
+  } else {
+    10L
+  }
+  pc <- if (!is.null(patch_channels) && is.finite(patch_channels)) patch_channels else 3L
+  batch_size <- auto_batch_size_v5(n_train, X_dim, pc, patch_size, device = device)
+  lr_patience <- .auto_lr_patience_from_main_epochs(main_epochs)
+  patience <- .auto_patience_from_main_epochs(main_epochs)
+  list(
+    ell_major_init = ell_major_init,
+    ell_minor_init = ell_minor_init,
+    theta_init = theta_init,
+    nugget_ratio = r,
+    K_neighbors = K_neighbors,
+    beta_init = beta_init,
+    base_loss_weight = lw$base_loss_weight,
+    alpha_me = lw$alpha_me,
+    lambda_cov = lw$lambda_cov,
+    lambda_spatial = lw$lambda_spatial,
+    max_warmup_epochs = lw$max_warmup_epochs,
+    d = d,
+    patch_size = patch_size,
+    patch_local_size = patch_local_size,
+    patch_dim = patch_dim,
+    fusion_hidden = fusion_hidden,
+    tab_dropout = drops$tab,
+    patch_dropout = drops$patch,
+    coord_dropout = drops$coord,
+    nko_dropout = drops$nko,
+    coord_dim = coord_dim,
+    coord_hidden = coord_hidden,
+    main_epochs = main_epochs,
+    linear_blend_center = gate_ctrl$linear_blend_center,
+    linear_blend_temp = gate_ctrl$linear_blend_temp,
+    gate_hidden = gate_ctrl$gate_hidden,
+    gate_floor = gate_ctrl$gate_floor,
+    nko_gate_floor = gate_ctrl$nko_gate_floor,
+    batch_size = batch_size,
+    lr_patience = lr_patience,
+    patience = patience,
+    bank_refresh_every = auto_bank_refresh_from_patience(lr_patience),
+    patch_struct_mult = drops$patch_struct_mult,
+    patch_nugget_slope = drops$patch_nugget_slope,
+    patch_nugget_ref = drops$patch_nugget_ref,
+    patch_k_slope = drops$patch_k_slope,
+    patch_k_ref = drops$patch_k_ref
+  )
+}
+
 
 # ─────────────────────────────────────────────────────────────────────────────
-# §3  PHASE 1  Learning rate  (class D — Polyak step on actual data)
+# §3  PHASE 1  Learning rate  (class D — LR range test on actual data)
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Estimate initial LR using the Polyak step principle
-#
-# Theoretical basis (Polyak 1987; Hazan et al. 2014):
-#   The Polyak optimal step for gradient descent is:
-#       α* = (f(x) − f*) / ‖∇f(x)‖²
-#   After target standardisation f* ≈ 0 (a perfect predictor has near-zero
-#   Huber loss on N(0,1) standardised targets in expectation).
-#   We use 1 % of the Polyak step to account for:
-#     (a) minibatch noise — gradient is stochastic
-#     (b) non-convexity   — Polyak step is exact only for convex f
-#     (c) multi-step goal — we want many updates, not one giant step
-#   This gives a principled, data-derived learning rate that adapts to
-#   the actual gradient scale of each dataset.
-#
-#   Implementation note: ‖∇f‖² is the sum of squared gradient elements
-#   over ALL parameters (not averaged per-tensor), so it has units
-#   consistent with the learning-rate formula.
-estimate_initial_lr_polyak <- function(model, train_cache, bs_init = 32L,
-                                        device = "cpu") {
-  cat("[Auto v5] ── Estimating LR (Polyak step, 1 % target) ──\n")
+# LR range test (Smith 2017).
+# Sweep 50 exponentially spaced learning rates from 1e-6 to 1e-1, detect the
+# argmin of the smoothed pre-divergence loss curve, then back off by 10x. This
+# follows Smith (2017) more closely than the earlier steepest-slope heuristic
+# and is more robust to Adam's moment-bootstrap artifact in the first few steps.
+.auto_set_optimizer_lr <- function(opt, lr) {
+  if (!is.null(opt$defaults)) {
+    opt$defaults$lr <- lr
+  }
+  if (!is.null(opt$param_groups)) {
+    for (i in seq_along(opt$param_groups)) {
+      opt$param_groups[[i]]$lr <- lr
+    }
+  }
+  invisible(opt)
+}
+
+.auto_clone_state_dict_cpu <- function(state_dict) {
+  if (is.null(state_dict)) return(NULL)
+  out <- vector("list", length(state_dict))
+  names(out) <- names(state_dict)
+  for (i in seq_along(state_dict)) {
+    out[[i]] <- state_dict[[i]]$detach()$to(device = "cpu")$clone()
+  }
+  out
+}
+
+estimate_initial_lr_range_test <- function(model, train_cache, bs_init = 32L,
+                                           device = "cpu",
+                                           lr_min = 1e-6,
+                                           lr_max = 1e-1,
+                                           n_steps = 50L,
+                                           smooth_beta = 0.98,
+                                           divergence_factor = 4.0) {
+  cat("[Auto v5] ── Estimating LR (range test, 50-step sweep) ──\n")
 
   tryCatch({
-    n_available <- train_cache$n
-    bs          <- min(as.integer(bs_init), n_available)
-    idx_t       <- torch_tensor(seq_len(bs), dtype = torch_long(), device = device)
-
-    xb <- train_cache$X$index_select(1L, idx_t)
-    pb <- train_cache$P$index_select(1L, idx_t)
-    cb <- train_cache$C$index_select(1L, idx_t)
-    yb <- train_cache$y$index_select(1L, idx_t)
-
-    # In torch for R, model$parameters is a property (no parens).
-    # nn_module does not have $zero_grad(); use a temporary optimizer instead.
-    tmp_opt <- optim_adam(model$parameters, lr = 0.01)
-    model$train()
-    tmp_opt$zero_grad()
-    out  <- model$forward_base(xb, pb, cb)
-    loss <- huber_loss(yb, out$pred)
-    loss$backward()
-
-    loss_val    <- loss$item()
-    grad_sq_sum <- 0.0
-    for (param in model$parameters) {           # no parens — property, not method
-      g <- param$grad
-      g_numel <- if (is.null(g)) 0L else tryCatch(g$numel(), error = function(e) 0L)
-      if (g_numel > 0L) {
-        # torch_sum(...)$item() works on any device (cpu/mps/cuda) without
-        # needing an explicit .cpu() call — avoids "tensor does not have a device"
-        # errors on MPS gradient tensors.
-        g_detached  <- g$detach()
-        grad_sq_sum <- grad_sq_sum + torch_sum(g_detached * g_detached)$item()
-      }
-    }
-    tmp_opt$zero_grad()   # clear gradients so they don't bleed into training
-
-    if (!is.finite(grad_sq_sum) || grad_sq_sum < 1e-30) {
-      cat("[Auto v5]   ⚠ degenerate gradients — fallback lr = 1e-4\n")
+    n_available <- as.integer(train_cache$n)
+    if (!is.finite(n_available) || n_available < 2L || is.null(train_cache$y)) {
+      cat("[Auto v5]   ⚠ insufficient train cache for LR range test — fallback lr = 1e-4\n")
       return(1e-4)
     }
 
-    lr_polyak <- loss_val / grad_sq_sum          # full Polyak step
-    lr_est    <- 0.01 * lr_polyak                # 1 % of Polyak step
-    lr_final  <- .auto_clamp(lr_est, 1e-5, 1e-3)
+    bs <- min(as.integer(bs_init), n_available)
+    n_steps <- max(10L, as.integer(n_steps))
+    saved_state <- .auto_clone_state_dict_cpu(model$state_dict())
+    on.exit({
+      if (!is.null(saved_state)) {
+        try(model$load_state_dict(saved_state), silent = TRUE)
+      }
+    }, add = TRUE)
 
-    cat(sprintf("[Auto v5]   loss = %.4f   ‖∇f‖² = %.4e\n",
-                loss_val, grad_sq_sum))
-    cat(sprintf("[Auto v5]   α_Polyak = %.2e   α_1pct = %.2e   α_final = %.2e\n",
-                lr_polyak, lr_est, lr_final))
+    total_needed <- n_steps * bs
+    idx_all <- sample.int(
+      n_available,
+      size = total_needed,
+      replace = (n_available < total_needed)
+    )
+    mult <- if (n_steps <= 1L) 1 else exp(log(lr_max / lr_min) / (n_steps - 1L))
+
+    lrs <- rep(NA_real_, n_steps)
+    smooth_losses <- rep(NA_real_, n_steps)
+    raw_losses <- rep(NA_real_, n_steps)
+    avg_loss <- 0.0
+    best_smooth <- Inf
+    steps_run <- 0L
+
+    tmp_opt <- optim_adam(model$parameters, lr = lr_min)
+    model$train()
+
+    for (step_idx in seq_len(n_steps)) {
+      lr_now <- lr_min * (mult ^ (step_idx - 1L))
+      .auto_set_optimizer_lr(tmp_opt, lr_now)
+
+      idx <- idx_all[((step_idx - 1L) * bs + 1L):(step_idx * bs)]
+      idx_t <- torch_tensor(as.integer(idx), dtype = torch_long(), device = device)
+      xb <- train_cache$X$index_select(1L, idx_t)
+      pb <- train_cache$P$index_select(1L, idx_t)
+      cb <- train_cache$C$index_select(1L, idx_t)
+      yb <- train_cache$y$index_select(1L, idx_t)
+
+      tmp_opt$zero_grad()
+      out <- model$forward_base(xb, pb, cb)
+      loss <- huber_loss(yb, out$pred)
+      loss$backward()
+      tmp_opt$step()
+
+      loss_val <- loss$item()
+      avg_loss <- smooth_beta * avg_loss + (1 - smooth_beta) * loss_val
+      smooth_loss <- avg_loss / (1 - smooth_beta ^ step_idx)
+
+      lrs[[step_idx]] <- lr_now
+      raw_losses[[step_idx]] <- loss_val
+      smooth_losses[[step_idx]] <- smooth_loss
+      steps_run <- step_idx
+
+      if (is.finite(smooth_loss) && smooth_loss < best_smooth) {
+        best_smooth <- smooth_loss
+      }
+      if (step_idx >= 10L &&
+          (!is.finite(smooth_loss) ||
+           (is.finite(best_smooth) && smooth_loss > divergence_factor * best_smooth))) {
+        break
+      }
+    }
+
+    tmp_opt$zero_grad()
+
+    valid_idx <- which(is.finite(smooth_losses) & is.finite(lrs))
+    if (length(valid_idx) < 5L) {
+      cat("[Auto v5]   ⚠ LR range test too short — fallback lr = 1e-4\n")
+      return(1e-4)
+    }
+
+    lrs_valid <- lrs[valid_idx]
+    losses_valid <- smooth_losses[valid_idx]
+    # Smith (2017) original heuristic: pick lr at argmin(smoothed_loss) and
+    # back off by 10x. Ignore the noisiest first 10 % and the last 2 points,
+    # where divergence effects dominate once the curve has already turned.
+    start_idx <- max(1L, ceiling(length(losses_valid) * 0.10))
+    end_idx <- max(start_idx, length(losses_valid) - 2L)
+    loss_window <- losses_valid[start_idx:end_idx]
+    if (!all(is.finite(loss_window))) {
+      cat("[Auto v5]   ⚠ invalid LR range losses — fallback lr = 1e-4\n")
+      return(1e-4)
+    }
+    loss_pick <- which.min(loss_window) + start_idx - 1L
+    lr_knee <- lrs_valid[loss_pick]
+    lr_ceil_raw <- suppressWarnings(
+      as.numeric(trimws(Sys.getenv("WADOUX_LR_CEIL", unset = "")))
+    )
+    # Default ceiling = 1e-4 (Adam default, Kingma & Ba 2014; validated empirically
+    # via 9-regime DSM ablation: ceiling=1e-4 minimises RMSE_sd=2.30 while achieving
+    # PICP=0.901 at nominal 0.90 — the best joint RMSE/coverage trade-off observed.
+    # WADOUX_LR_CEIL overrides this default for datasets with more responsive loss
+    # landscapes where the finder's argmin/10 naturally falls below 1e-4.
+    lr_ceil <- if (is.finite(lr_ceil_raw) && lr_ceil_raw > 0) lr_ceil_raw else 1e-4
+    lr_final <- .auto_clamp(lr_knee / 10, 5e-5, lr_ceil)
+
+    cat(sprintf("[Auto v5]   steps_run = %d   best_smooth = %.4f\n",
+                steps_run, best_smooth))
+    cat(sprintf("[Auto v5]   α_range = [%.2e, %.2e]   α_argmin = %.2e   α_ceil = %.2e   α_final = %.2e\n",
+                min(lrs_valid, na.rm = TRUE), max(lrs_valid, na.rm = TRUE),
+                lr_knee, lr_ceil, lr_final))
     lr_final
 
   }, error = function(e) {
-    cat(sprintf("[Auto v5]   ⚠ LR estimation failed (%s) — fallback lr = 1e-4\n",
+    cat(sprintf("[Auto v5]   ⚠ LR range test failed (%s) — fallback lr = 1e-4\n",
                 conditionMessage(e)))
     1e-4
   })
 }
+
+# Backward-compatible alias while the rest of the codebase migrates away from
+# the old Polyak-oriented helper name.
+estimate_initial_lr_polyak <- estimate_initial_lr_range_test
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -732,6 +1176,50 @@ auto_bank_refresh_from_patience <- function(lr_patience) {
   )
 }
 
+.auto_current_residual_correction_schedule <- function(vg, n_train, Ctr,
+                                                       K_reference = NULL,
+                                                       beta_reference = NULL) {
+  sched <- .auto_correction_schedule_from_residual_variogram(
+    vg = vg,
+    n_train = n_train,
+    Ctr = Ctr,
+    K_reference = K_reference,
+    beta_reference = beta_reference
+  )
+
+  k_min <- suppressWarnings(as.integer(round(.auto_env_num("GEOVERSA_AUTO_RESID_CORR_K_MIN", 16))))
+  k_max <- suppressWarnings(as.integer(round(.auto_env_num("GEOVERSA_AUTO_RESID_CORR_K_MAX", 28))))
+  if (!is.finite(k_min)) k_min <- 16L
+  if (!is.finite(k_max)) k_max <- 28L
+  k_min <- max(6L, k_min)
+  k_max <- max(k_min, min(30L, k_max))
+  k_uncapped <- sched$K_corr
+  sched$K_corr <- as.integer(.auto_clamp(sched$K_corr, k_min, k_max))
+
+  beta_min <- .auto_env_num("GEOVERSA_AUTO_RESID_CORR_BETA_MIN", 0.60)
+  beta_max <- .auto_env_num("GEOVERSA_AUTO_RESID_CORR_BETA_MAX", 0.75)
+  beta_min <- .auto_clamp(beta_min, 0.05, 0.95)
+  beta_max <- .auto_clamp(beta_max, beta_min, 0.95)
+  beta_uncapped <- plogis(sched$beta_init_corr)
+  beta_capped <- .auto_clamp(beta_uncapped, beta_min, beta_max)
+  sched$beta_init_corr <- qlogis(beta_capped)
+  sched$beta_corr_uncapped_prob <- beta_uncapped
+  sched$beta_corr_capped_prob <- beta_capped
+  sched$K_corr_uncapped <- k_uncapped
+  sched$K_corr_min <- k_min
+  sched$K_corr_max <- k_max
+  sched$beta_corr_min <- beta_min
+  sched$beta_corr_max <- beta_max
+
+  cat(sprintf(
+    "[Auto v5]   current-resid clamp | K_corr: %d -> %d  [clamp %d:%d] | beta_corr: %.3f -> %.3f  [clamp %.2f:%.2f]\n",
+    k_uncapped, sched$K_corr, k_min, k_max,
+    beta_uncapped, beta_capped, beta_min, beta_max
+  ))
+
+  sched
+}
+
 .auto_residual_bank_mix_from_trust <- function(trust, verbose = TRUE) {
   current_floor <- .auto_env_num("GEOVERSA_AUTO_BANK_CURRENT_FLOOR", 0.25)
   current_ceiling <- .auto_env_num("GEOVERSA_AUTO_BANK_CURRENT_CEILING", 0.85)
@@ -855,6 +1343,8 @@ auto_kriging_config_v5 <- function(vg, n_train, coord_scaler, Ctr,
                                     patch_channels = NULL,
                                     model_init     = NULL,
                                     train_cache    = NULL,
+                                    patch_resolution = NULL,
+                                    patch_geometry = NULL,
                                     device         = "cpu") {
 
   cat("\n[Auto v5] ════════════════════════════════════════════════════\n")
@@ -862,76 +1352,91 @@ auto_kriging_config_v5 <- function(vg, n_train, coord_scaler, Ctr,
   cat("[Auto v5] ════════════════════════════════════════════════════\n\n")
 
   r  <- vg$nugget_ratio
-  cs <- mean(coord_scaler$scale)
-
-  # ── Phase 0-A: Geostatistical theory ─────────────────────────────────────
-  cat("[Auto v5] ── Phase 0-A: Geostatistical derivation ──\n")
-
-  ell_major_init <- vg$range_major / cs
-  ell_minor_init <- vg$range_minor / cs
-  theta_init     <- vg$theta_rad
-
-  lw          <- .auto_loss_weights_from_nugget(r)
-  K_neighbors <- .auto_K_from_spatial_density(n_train, vg, Ctr)
-  beta_init   <- .auto_beta_init_from_nugget(r)
-
-  cat(sprintf("[Auto v5]   nugget_ratio = %.3f\n", r))
-  cat(sprintf("[Auto v5]   ell_major_init = %.4g   ell_minor_init = %.4g   θ = %.1f°\n",
-              ell_major_init, ell_minor_init, theta_init * 180 / pi))
-  cat(sprintf("[Auto v5]   BLW = %.4f   alpha_me = %.4f   lambda_cov = %.5f   lambda_spatial = %.5f\n",
-              lw$base_loss_weight, lw$alpha_me, lw$lambda_cov, lw$lambda_spatial))
-  cat(sprintf("[Auto v5]   max_warmup = %d\n", lw$max_warmup_epochs))
-
-  # ── Phase 0-B: Statistical capacity ──────────────────────────────────────
-  cat("\n[Auto v5] ── Phase 0-B: Statistical capacity (√n scaling) ──\n")
-
-  d <- .auto_d_from_n(n_train)
-  patch_size <- as.integer(.auto_clamp(floor(sqrt(n_train)), 8L, 31L))
+  cached_patch_size <- NA_integer_
   if (!is.null(train_cache) && !is.null(train_cache$P)) {
     patch_shape <- tryCatch(train_cache$P$shape, error = function(e) NULL)
     if (!is.null(patch_shape) && length(patch_shape) >= 4L &&
         is.finite(patch_shape[3]) && patch_shape[3] > 0) {
-      patch_size <- as.integer(patch_shape[3])
-      cat(sprintf("[Auto v5]   patch_size = %d  [inferred from cached patches]\n",
-                  patch_size))
+      cached_patch_size <- as.integer(patch_shape[3])
     }
   }
-  drops      <- .auto_dropouts_from_n(n_train, nugget_ratio = r, k_neighbors = K_neighbors)
-  coord_dim  <- .auto_coord_dim_from_variogram(vg)
-  # coord MLP: hidden = max(2×coord_dim, 32) — minimum expressivity for a
-  # 2-input → coord_dim-output smooth function approximator
-  coord_hidden  <- max(2L * coord_dim, 32L)
-  fusion_hidden <- d        # fusion bottleneck = backbone width (no expansion)
-
-  # patch_dim: CNN information-capacity formula; fall back to d/2 if patch
-  # channel count is not yet known (will be confirmed at model-rebuild time)
-  if (!is.null(patch_channels)) {
-    patch_dim <- .auto_patch_dim_from_cnn(patch_channels, patch_size, d)
+  cached_or_requested_patch <- if (is.finite(cached_patch_size)) {
+    cached_patch_size
+  } else if (is.list(patch_geometry) && is.finite(patch_geometry$global_size)) {
+    patch_geometry$global_size
   } else {
-    patch_dim <- as.integer(d / 2L)
-    cat(sprintf("[Auto v5]   patch_dim = %d  [d/2 fallback — patch_channels unknown]\n",
-                patch_dim))
+    NA_integer_
+  }
+  if (is.null(patch_geometry) ||
+      !is.list(patch_geometry) ||
+      !is.finite(patch_geometry$global_size) ||
+      !is.finite(patch_geometry$local_size)) {
+    patch_geometry <- auto_patch_geometry_v5(
+      vg = vg,
+      n_train = n_train,
+      patch_resolution = patch_resolution,
+      cached_patch_size = cached_or_requested_patch
+    )
+  }
+  cfg_base <- build_auto_config_v5(
+    n_train = n_train,
+    vg = vg,
+    coords = Ctr,
+    covariates = if (!is.null(train_cache)) train_cache$X else NULL,
+    coord_scaler = coord_scaler,
+    patch_channels = patch_channels,
+    patch_resolution = patch_resolution,
+    patch_geometry = patch_geometry,
+    cached_patch_size = cached_patch_size,
+    device = device
+  )
+
+  # ── Phase 0-A: Geostatistical theory ─────────────────────────────────────
+  cat("[Auto v5] ── Phase 0-A: Geostatistical derivation ──\n")
+  cat(sprintf("[Auto v5]   nugget_ratio = %.3f\n", r))
+  cat(sprintf("[Auto v5]   ell_major_init = %.4g   ell_minor_init = %.4g   θ = %.1f°\n",
+              cfg_base$ell_major_init, cfg_base$ell_minor_init, cfg_base$theta_init * 180 / pi))
+  cat(sprintf("[Auto v5]   BLW = %.4f   alpha_me = %.4f   lambda_cov = %.5f   lambda_spatial = %.5f\n",
+              cfg_base$base_loss_weight, cfg_base$alpha_me, cfg_base$lambda_cov, cfg_base$lambda_spatial))
+  cat(sprintf("[Auto v5]   max_warmup = %d\n", cfg_base$max_warmup_epochs))
+
+  # ── Phase 0-B: Statistical capacity ──────────────────────────────────────
+  cat("\n[Auto v5] ── Phase 0-B: Statistical capacity (√n scaling) ──\n")
+  d <- cfg_base$d
+  patch_size <- cfg_base$patch_size
+  patch_local_size <- cfg_base$patch_local_size
+  coord_dim <- cfg_base$coord_dim
+  coord_hidden <- cfg_base$coord_hidden
+  fusion_hidden <- cfg_base$fusion_hidden
+  main_epochs <- cfg_base$main_epochs
+  patch_dim <- cfg_base$patch_dim
+  if (is.null(patch_channels)) {
+    cat(sprintf("[Auto v5]   patch_dim = %d  [d/2 fallback — patch_channels unknown]\n", patch_dim))
   }
 
-  cat(sprintf("[Auto v5]   d = %d   patch_size = %d   patch_dim = %d\n",
-              d, patch_size, patch_dim))
+  cat(sprintf("[Auto v5]   d = %d   patch_size = %d   patch_local = %d   patch_dim = %d\n",
+              d, patch_size, patch_local_size, patch_dim))
   cat(sprintf("[Auto v5]   tab_drop = %.3f   patch_drop = %.3f   coord_drop = %.3f\n",
-              drops$tab, drops$patch, drops$coord))
+              cfg_base$tab_dropout, cfg_base$patch_dropout, cfg_base$coord_dropout))
+  cat(sprintf("[Auto v5]   main_epochs = %d   gate_hidden = %d   gate_floor = %.2f\n",
+              main_epochs, cfg_base$gate_hidden, cfg_base$gate_floor))
+  cat(sprintf("[Auto v5]   linear_blend_center = %.2f   linear_blend_temp = %.1f   nko_gate_floor = %.2f\n",
+              cfg_base$linear_blend_center, cfg_base$linear_blend_temp, cfg_base$nko_gate_floor))
   cat(sprintf(
     "[Auto v5]   patch_struct_mult = %.3f  [1 + %.2f·(r−%.2f) + %.2f·((K−%.0f)/%.0f)]\n",
-    drops$patch_struct_mult,
-    drops$patch_nugget_slope, drops$patch_nugget_ref,
-    drops$patch_k_slope, drops$patch_k_ref, drops$patch_k_ref
+    cfg_base$patch_struct_mult,
+    cfg_base$patch_nugget_slope, cfg_base$patch_nugget_ref,
+    cfg_base$patch_k_slope, cfg_base$patch_k_ref, cfg_base$patch_k_ref
   ))
   cat(sprintf("[Auto v5]   coord_dim = %d   coord_hidden = %d\n",
               coord_dim, coord_hidden))
 
-  # ── Phase 1: Learning rate (Polyak step) ──────────────────────────────────
-  cat("\n[Auto v5] ── Phase 1: Learning rate (Polyak step on preliminary model) ──\n")
+  # ── Phase 1: Learning rate (LR range test) ────────────────────────────────
+  cat("\n[Auto v5] ── Phase 1: Learning rate (range test on preliminary model) ──\n")
 
   if (!is.null(model_init) && !is.null(train_cache)) {
-    lr <- estimate_initial_lr_polyak(model_init, train_cache,
-                                      bs_init = 32L, device = device)
+    lr <- estimate_initial_lr_range_test(model_init, train_cache,
+                                         bs_init = 32L, device = device)
   } else {
     cat("[Auto v5]   ⚠ model_init / train_cache missing — lr = 1e-4\n")
     lr <- 1e-4
@@ -942,9 +1447,7 @@ auto_kriging_config_v5 <- function(vg, n_train, coord_scaler, Ctr,
   # ── Phase 1: Batch size (hardware-adaptive) ───────────────────────────────
   cat("\n[Auto v5] ── Phase 1: Batch size (hardware-adaptive) ──\n")
 
-  X_dim      <- if (!is.null(train_cache)) train_cache$X$size(2L) else 10L
-  pc         <- if (!is.null(patch_channels)) patch_channels else 3L
-  batch_size <- auto_batch_size_v5(n_train, X_dim, pc, patch_size, device = device)
+  batch_size <- cfg_base$batch_size
 
   # ── Phase 2 placeholder: weight decay (recomputed after final model build) ──
   wd     <- 1e-3
@@ -954,8 +1457,8 @@ auto_kriging_config_v5 <- function(vg, n_train, coord_scaler, Ctr,
   # Neutral defaults until auto_patience_from_warmup() / auto_lr_decay_from_trajectory()
   # are called with the actual observed trajectory.
   lr_decay           <- 0.5    # geometric midpoint of [0.3, 0.7]
-  lr_patience        <- 5L
-  patience           <- 15L
+  lr_patience        <- cfg_base$lr_patience
+  patience           <- cfg_base$patience
   bank_refresh_every <- auto_bank_refresh_from_patience(lr_patience)
 
   # ── Summary ───────────────────────────────────────────────────────────────
@@ -971,30 +1474,38 @@ auto_kriging_config_v5 <- function(vg, n_train, coord_scaler, Ctr,
   # ── Assemble cfg ──────────────────────────────────────────────────────────
   cfg <- list(
     # (A) Spatial — variogram-derived
-    ell_major_init     = ell_major_init,
-    ell_minor_init     = ell_minor_init,
-    theta_init         = theta_init,
+    ell_major_init     = cfg_base$ell_major_init,
+    ell_minor_init     = cfg_base$ell_minor_init,
+    theta_init         = cfg_base$theta_init,
     nugget_ratio       = r,
-    K_neighbors        = K_neighbors,
-    beta_init          = beta_init,
+    K_neighbors        = cfg_base$K_neighbors,
+    beta_init          = cfg_base$beta_init,
     # (A) Loss weights — nugget-derived
-    base_loss_weight   = lw$base_loss_weight,
-    alpha_me           = lw$alpha_me,
-    lambda_cov         = lw$lambda_cov,
-    lambda_spatial     = lw$lambda_spatial,
-    max_warmup_epochs  = lw$max_warmup_epochs,
+    base_loss_weight   = cfg_base$base_loss_weight,
+    alpha_me           = cfg_base$alpha_me,
+    lambda_cov         = cfg_base$lambda_cov,
+    lambda_spatial     = cfg_base$lambda_spatial,
+    max_warmup_epochs  = cfg_base$max_warmup_epochs,
     # (B) Architecture — √n scaling
     d                  = d,
     patch_size         = patch_size,
+    patch_local_size   = patch_local_size,
     patch_dim          = patch_dim,
     fusion_hidden      = fusion_hidden,
     # (B) Regularisation — n scaling
-    tab_dropout        = drops$tab,
-    patch_dropout      = drops$patch,
-    coord_dropout      = drops$coord,
+    tab_dropout        = cfg_base$tab_dropout,
+    patch_dropout      = cfg_base$patch_dropout,
+    coord_dropout      = cfg_base$coord_dropout,
+    nko_dropout        = cfg_base$nko_dropout,
     # (A+B) Coordinate architecture — variogram anisotropy + n
     coord_dim          = coord_dim,
     coord_hidden       = coord_hidden,
+    main_epochs        = main_epochs,
+    linear_blend_center = cfg_base$linear_blend_center,
+    linear_blend_temp   = cfg_base$linear_blend_temp,
+    gate_hidden         = cfg_base$gate_hidden,
+    gate_floor          = cfg_base$gate_floor,
+    nko_gate_floor      = cfg_base$nko_gate_floor,
     # (D) Optimisation — data / hardware derived
     lr                 = lr,
     batch_size         = batch_size,
