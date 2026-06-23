@@ -1094,7 +1094,34 @@ tune_dkp_on_split <- function(train_core, val_df, test_df,
        oof_inner_folds = inner_folds)
 }
 
-dkp_apply_carried_smearing <- function(out, selection_out, y_test = NULL) {# -----------------------------------------------------------------------------
+dkp_apply_carried_smearing <- function(out, selection_out, y_test = NULL) {
+  diag <- selection_out$diagnostics
+  applied <- !is.null(diag$duan_applied) && isTRUE(diag$duan_applied)
+  S <- suppressWarnings(as.numeric(diag$duan_S))
+  if (!isTRUE(applied) || !is.finite(S) || S <= 0) {
+    out$diagnostics$duan_carried_from_inner_val <- FALSE
+    return(out)
+  }
+  for (nm in c("pred_test", "pred_val")) {
+    if (!is.null(out[[nm]])) out[[nm]] <- out[[nm]] * S
+  }
+  out$diagnostics$duan_carried_from_inner_val <- TRUE
+  out$diagnostics$duan_applied <- TRUE
+  out$diagnostics$duan_S <- S
+  out$diagnostics$duan_reason <- paste(
+    "carried_inner_val:", diag$duan_reason)
+  if (!is.null(y_test) && length(y_test) == length(out$pred_test)) {
+    out$metrics_test <- data.frame(
+      N = length(y_test),
+      RMSE = sqrt(mean((y_test - out$pred_test) ^ 2, na.rm = TRUE)),
+      Bias = mean(out$pred_test - y_test, na.rm = TRUE),
+      stringsAsFactors = FALSE
+    )
+  }
+  out
+}
+
+# -----------------------------------------------------------------------------
 # Literal-RF floor + OOF-selected continuous blend lambda.
 #
 # Given a DKP prediction vector and an inner OOF setup, fit the LITERAL Wadoux
@@ -1156,33 +1183,6 @@ dkp_apply_rf_floor <- function(out, calibration_full, test_df, blend) {
       RMSE = sqrt(mean((y_test - out$pred_test) ^ 2, na.rm = TRUE)),
       Bias = mean(out$pred_test - y_test, na.rm = TRUE),
       stringsAsFactors = FALSE)
-  }
-  out
-}
-
-
-  diag <- selection_out$diagnostics
-  applied <- !is.null(diag$duan_applied) && isTRUE(diag$duan_applied)
-  S <- suppressWarnings(as.numeric(diag$duan_S))
-  if (!isTRUE(applied) || !is.finite(S) || S <= 0) {
-    out$diagnostics$duan_carried_from_inner_val <- FALSE
-    return(out)
-  }
-  for (nm in c("pred_test", "pred_val")) {
-    if (!is.null(out[[nm]])) out[[nm]] <- out[[nm]] * S
-  }
-  out$diagnostics$duan_carried_from_inner_val <- TRUE
-  out$diagnostics$duan_applied <- TRUE
-  out$diagnostics$duan_S <- S
-  out$diagnostics$duan_reason <- paste(
-    "carried_inner_val:", diag$duan_reason)
-  if (!is.null(y_test) && length(y_test) == length(out$pred_test)) {
-    out$metrics_test <- data.frame(
-      N = length(y_test),
-      RMSE = sqrt(mean((y_test - out$pred_test) ^ 2, na.rm = TRUE)),
-      Bias = mean(out$pred_test - y_test, na.rm = TRUE),
-      stringsAsFactors = FALSE
-    )
   }
   out
 }
