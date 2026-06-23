@@ -24,6 +24,11 @@ scenarios <- trimws(unlist(strsplit(
 scenarios <- scenarios[nzchar(scenarios)]
 seed0 <- as.integer(Sys.getenv("LIB_TRAIN_SEED", unset = "123"))
 do_run <- !identical(Sys.getenv("LIB_RUN", unset = "1"), "0")
+# Torch device for the deep models (cpu | mps | cuda) and a per-model wall-clock
+# timeout so a slow/stuck model is killed and marked, never blocking the campaign.
+lib_device <- Sys.getenv("LIB_DEVICE", unset = "cpu")
+timeout_sec <- as.integer(Sys.getenv("LIB_TIMEOUT_SEC", unset = "2400"))
+if (!is.finite(timeout_sec) || timeout_sec < 60L) timeout_sec <- 2400L
 dir.create("results", showWarnings = FALSE)
 
 # --- model registry: runner + env + the (model, RF) labels in all_results.csv -
@@ -48,12 +53,33 @@ models <- list(
   list(key = "DeepKernel", runner = "code/run_deepkernel_wadoux_comparison.R",
        prefix = "DKP", models_val = "RF,DeepKernelProcess",
        model_label = "DeepKernelProcess_500", rf_label = "RF_500",
-       extra = c(DKP_DEVICE = "cpu")),
+       # reduced tuning so the exact-GP stays tractable on CPU
+       extra = c(DKP_DEVICE = lib_device, DKP_TUNE_MAX_CANDIDATES = "4",
+                 DKP_TUNE_INNER_FOLDS = "1")),
   list(key = "NeuroMatern", runner = "code/run_neuromatern_wadoux_comparison.R",
        prefix = "NMK", models_val = "RF,NeuroMaternKrige",
        model_label = "NeuroMaternKrige_500", rf_label = "RF_500",
-       extra = c(NMK_DEVICE = "cpu"))
+       # NMK's default is the full autotune grid (V2/V3/V4) x inner folds, which
+       # is intractable on CPU; cut it to a small grid + single holdout.
+       extra = c(NMK_DEVICE = lib_device, NMK_TUNE_FULL_GRID = "FALSE",
+                 NMK_TUNE_MAX_CANDIDATES = "4", NMK_AUTOTUNE_V2 = "FALSE",
+                 NMK_AUTOTUNE_V3 = "FALSE", NMK_AUTOTUNE_V4 = "FALSE",
+                 NMK_TUNE_INNER_FOLDS = "1")),
+  list(key = "ConvKrigingNet", runner = "code/Benchmark_GeoVersaMeta.R",
+       prefix = "WADOUX", models_val = "RF,ConvKrigingNet2D",
+       model_label = "GeoVersa_500", rf_label = "RF_500",
+       # paired final benchmark; few selection splits to bound the deep-net cost.
+       extra = c(WADOUX_DEVICE = lib_device, WADOUX_INCLUDE_POPULATION = "FALSE",
+                 WADOUX_PAIRED_FINAL_BENCHMARK = "TRUE",
+                 WADOUX_REFIT_FULL_CALIBRATION = "TRUE",
+                 WADOUX_RF_REFIT_FULL_CALIBRATION = "TRUE",
+                 WADOUX_REFIT_SELECTION_SPLITS = "2"))
 )
+
+# Optional subset: LIB_MODELS=DeepKernel,NeuroMatern runs only those.
+lib_only <- trimws(unlist(strsplit(Sys.getenv("LIB_MODELS", unset = ""), ",")))
+lib_only <- lib_only[nzchar(lib_only)]
+if (length(lib_only) > 0L) models <- Filter(function(m) m$key %in% lib_only, models)
 
 read_all_results <- function(dir) {
   f <- list.files(dir, pattern = "all_results.*\\.csv$", full.names = TRUE)
@@ -105,11 +131,22 @@ for (mc in models) {
         mc$extra)
       cat(sprintf("[lib] running %-12s scenario=%-16s n_iter=%d ...\n",
                   mc$key, scen, n_iter))
-      rc <- tryCatch(
-        system2("Rscript", mc$runner, env = paste0(names(env), "=", env),
-                stdout = file.path(rdir, "run.log"), stderr = file.path(rdir, "run.log")),
-        error = function(e) 999L)
-      if (!identical(as.integer(rc), 0L)) status <- sprintf("run_failed(rc=%s)", rc)
+      do.call(Sys.setenv, as.list(stats::setNames(as.character(env), names(env))))
+      logp <- file.path(rdir, "run.log")
+      res <- tryCatch(
+        processx::run("Rscript", mc$runner, timeout = timeout_sec,
+                      error_on_status = FALSE, stdout = logp, stderr = "2>&1"),
+        error = function(e) {
+          if (inherits(e, "system_command_timeout_error") ||
+              grepl("timed?.?out|timeout", conditionMessage(e), ignore.case = TRUE))
+            list(timeout = TRUE)
+          else list(timeout = FALSE, status = 999L, msg = conditionMessage(e))
+        })
+      if (isTRUE(res$timeout)) {
+        status <- sprintf("timed_out(%ds)", timeout_sec)
+      } else if (!identical(as.integer(res$status), 0L)) {
+        status <- sprintf("run_failed(rc=%s)", res$status)
+      }
     }
     s <- summarise_model(read_all_results(rdir), mc$model_label, mc$rf_label, scen)
     if (is.null(s)) {
