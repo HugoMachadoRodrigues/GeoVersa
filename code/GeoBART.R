@@ -821,6 +821,18 @@ train_geobart_one_fold <- function(
   t0 <- Sys.time()
   fit <- NULL
   fit_call <- function() {
+    # Guard: BART's native cutpoint allocator can throw std::length_error
+    # (libc++abi terminating) on (near-)constant columns -- e.g. an RBF basis
+    # with a very large bandwidth collapses to ~1 everywhere. Drop zero-variance
+    # training columns and apply the SAME selection to the test matrix so the
+    # train/test designs stay aligned. Keep all columns only if dropping would
+    # leave none.
+    keep_cols <- which(apply(X_train_full, 2L, stats::sd, na.rm = TRUE) > 1e-8)
+    if (length(keep_cols) >= 1L && length(keep_cols) < ncol(X_train_full)) {
+      X_train_full <- X_train_full[, keep_cols, drop = FALSE]
+      X_val_full   <- X_val_full[, keep_cols, drop = FALSE]
+      X_test_full  <- X_test_full[, keep_cols, drop = FALSE]
+    }
     wbart_args <- list(
       x.train   = X_train_full,
       y.train   = as.numeric(ytr_t),
