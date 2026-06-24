@@ -3015,6 +3015,11 @@ eval_designbased <- function(valuetable, iter, calibration_patch_cache) {
   }
 
   if ("NeuroMaternKrige" %in% models) {
+   # do-no-harm: if NMK tuning/fit fails entirely (e.g. clustered coords ->
+   # singular neural-kriging fit -> "no candidate completed"), revert
+   # NeuroMaternKrige to the literal Wadoux RF instead of crashing the run.
+   nmk_failed_revert_rf <- FALSE
+   tryCatch({
     selected_params <- nmk_params
     selected_policy <- NULL
     selected_tune_stage <- NA_character_
@@ -3355,6 +3360,15 @@ eval_designbased <- function(valuetable, iter, calibration_patch_cache) {
         refit_monitor_overlap = TRUE
       )
     }
+   }, error = function(e) {
+     cat(sprintf("[NMK] do-no-harm: tuning/fit failed (%s); reverting NeuroMaternKrige to literal RF.\n",
+                 conditionMessage(e)))
+     nmk_failed_revert_rf <<- TRUE
+   })
+   if (isTRUE(nmk_failed_revert_rf)) {
+     pred_map$NeuroMaternKrige_400 <- pred_map$RF_400
+     pred_map$NeuroMaternKrige_500 <- pred_map$RF_500
+   }
   }
 
   metrics <- emit_metric_rows(obs, pred_map, "DesignBased", iter, scenario)
