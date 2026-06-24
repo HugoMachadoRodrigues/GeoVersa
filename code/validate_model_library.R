@@ -160,6 +160,13 @@ for (mc in models) {
       if (status != "ok") s$verdict <- status
       rows[[length(rows) + 1L]] <- s
     }
+    # incremental write: keep results/model_library_benchmark.csv current after
+    # every model x scenario, so an interrupted/overnight/crashing run never
+    # leaves a stale table and the completed cells are never lost.
+    utils::write.csv(do.call(rbind, rows),
+                     "results/model_library_benchmark.csv", row.names = FALSE)
+    cat(sprintf("[lib] done %-12s %-16s -> %s\n",
+                mc$key, scen, rows[[length(rows)]]$verdict[1]))
   }
 }
 
