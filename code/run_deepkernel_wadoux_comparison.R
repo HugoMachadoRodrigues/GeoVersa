@@ -1533,6 +1533,12 @@ eval_designbased_dkp <- function(valuetable, iter, calibration_patch_cache) {
     pred_map$RF_500 <- predict_rf_default_wadoux(rf_500, val_srs)
   }
   if ("DeepKernelProcess" %in% models) {
+   # do-no-harm: if DKP tuning/fit fails entirely (e.g. clustered coords ->
+   # singular GP kernel -> Cholesky fails at every jitter -> "no candidate
+   # completed"), revert DeepKernelProcess to the literal Wadoux RF instead of
+   # crashing the run (guarantees >= RF and keeps the campaign alive).
+   dkp_failed_revert_rf <- FALSE
+   tryCatch({
     selected_params <- dkp_params
     if (isTRUE(dkp_tune)) {
       tuned <- tune_dkp_on_split(
@@ -1608,6 +1614,15 @@ eval_designbased_dkp <- function(valuetable, iter, calibration_patch_cache) {
         refit_monitor_overlap = TRUE
       )
     }
+   }, error = function(e) {
+     cat(sprintf("[DKP] do-no-harm: tuning/fit failed (%s); reverting DeepKernelProcess to literal RF.\n",
+                 conditionMessage(e)))
+     dkp_failed_revert_rf <<- TRUE
+   })
+   if (isTRUE(dkp_failed_revert_rf)) {
+     pred_map$DeepKernelProcess_400 <- pred_map$RF_400
+     pred_map$DeepKernelProcess_500 <- pred_map$RF_500
+   }
   }
   metrics <- emit_metric_rows_dkp(obs, pred_map, "DesignBased", iter, scenario)
   # #6: design-based conformal interval coverage, DKP vs RF, calibrated on the
