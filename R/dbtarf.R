@@ -966,11 +966,7 @@
   feats <- c(predictor_names, coord_names)
   feats <- feats[feats %in% names(train_df) & feats %in% names(ref_df)]
   if (length(feats) < 2L) return(rep(1, n))
-  had <- exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)
-  old <- if (had) get(".Random.seed", envir = .GlobalEnv) else NULL
-  on.exit(if (had) assign(".Random.seed", old, envir = .GlobalEnv) else
-    if (exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE))
-      rm(".Random.seed", envir = .GlobalEnv), add = TRUE)
+  withr::local_preserve_seed()
   set.seed(as.integer(seed))
   m <- min(5L * n, nrow(ref_df))
   ref_idx <- sample.int(nrow(ref_df), m)
@@ -1035,18 +1031,6 @@
   v <- v[ok]; w <- w[ok]; o <- order(v); v <- v[o]; w <- w[o]
   cw <- cumsum(w) / sum(w)
   v[which(cw >= p)[1L]]
-}
-
-.dbt_preserve_global_rng <- function() {
-  had_seed <- exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)
-  old_seed <- if (had_seed) get(".Random.seed", envir = .GlobalEnv) else NULL
-  function() {
-    if (had_seed) {
-      assign(".Random.seed", old_seed, envir = .GlobalEnv)
-    } else if (exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)) {
-      rm(".Random.seed", envir = .GlobalEnv)
-    }
-  }
 }
 
 # Honest out-of-fold predictions for an lm-based recalibration candidate, using
@@ -1159,8 +1143,7 @@
   rf_tune_max_grid <- as.integer(max(1L, rf_tune_max_grid))
   resid_rf_tune_max_grid <- as.integer(max(1L, resid_rf_tune_max_grid))
 
-  restore_rng <- .dbt_preserve_global_rng()
-  on.exit(restore_rng(), add = TRUE)
+  withr::local_preserve_seed()
 
   set.seed(as.integer(train_seed))
   folds <- caret::createFolds(y, k = n_folds, list = TRUE,
@@ -1182,8 +1165,8 @@
   fold_rows <- list()
   rf_tune_rows <- list()
 
-  cat(sprintf("[DBTARF] cross-fitting residual candidates (n=%d, folds=%d)...\n",
-              n, n_folds))
+  message(sprintf("[DBTARF] cross-fitting residual candidates (n=%d, folds=%d)...",
+                  n, n_folds))
   for (j in seq_along(folds)) {
     id_val <- folds[[j]]
     id_tr <- setdiff(seq_len(n), id_val)
@@ -1364,10 +1347,10 @@
   gate_c <- Inf; gate_length <- Inf; gate_rho <- NA_real_
   best_mode_chr <- as.character(best$mode)
 
-  cat(sprintf("[DBTARF] OOF RF RMSE=%.3f | selected=%s lambda=%s OOF RMSE=%.3f\n",
-              baseline_rmse, best$mode,
-              ifelse(is.na(best$lambda), "NA", sprintf("%.2f", best$lambda)),
-              best$oof_rmse))
+  message(sprintf("[DBTARF] OOF RF RMSE=%.3f | selected=%s lambda=%s OOF RMSE=%.3f",
+                  baseline_rmse, best$mode,
+                  ifelse(is.na(best$lambda), "NA", sprintf("%.2f", best$lambda)),
+                  best$oof_rmse))
 
   rf_full_fit <- .dbt_tune_rf_model(
     train_df, response_name, predictor_names,

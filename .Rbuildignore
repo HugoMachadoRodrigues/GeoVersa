@@ -19,3 +19,10 @@
 ^.*\.tar\.gz$
 ^\.git$
 ^cran-comments\.md$
+^.*_extract\.txt$
+^projects_settings$
+^cran_submission$
+^\.positai$
+^_RENOMEAR-PASTAS\.md$
+^\.DS_Store$
+^\.Rhistory$

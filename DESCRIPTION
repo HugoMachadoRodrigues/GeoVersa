@@ -3,18 +3,20 @@ Title: Design-Based Residual-Correction Forests for Digital Soil Mapping
 Version: 0.3.0
 Authors@R: person("Hugo", "Rodrigues", role = c("aut", "cre"),
                   email = "rodrigues.machado.hugo@gmail.com")
-Description: Tools for large-scale digital soil and ecological mapping evaluated
+Description: Implements DB-TARF (Design-Based Targeted Adaptive Residual
+    Forest) for large-scale digital soil and ecological mapping evaluated
     under the design-based paradigm of Wadoux et al. (2021)
-    <doi:10.1016/j.ecolmodel.2021.109692>. Provides DB-TARF, a random forest
-    augmented by a cross-fitted, out-of-fold-selected residual correction
-    (residual forests, ordinary kriging, recalibration), with design-based
-    conformal prediction intervals.
+    <doi:10.1016/j.ecolmodel.2021.109692>. A random forest is augmented by a
+    cross-fitted, out-of-fold-selected residual correction (residual forests,
+    ordinary kriging, recalibration), together with design-based conformal
+    prediction intervals.
 License: MIT + file LICENSE
 Encoding: UTF-8
 Imports:
     ranger,
     caret,
-    stats
+    stats,
+    withr
 Suggests:
     Cubist,
     gstat,
