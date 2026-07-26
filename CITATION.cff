@@ -1,22 +1,24 @@
 cff-version: 1.2.0
-message: "If you use GeoVersa or ConvKrigingNet2D in your research, please cite it as below."
-title: "GeoVersa: Deep Learning + Geostatistics for Spatial Prediction"
-version: 0.1.0
-date-released: 2026-04-01
+message: "If you use GeoVersa (DB-TARF) or ConvKrigingNet2D in your research, please cite it as below."
+title: "GeoVersa: Design-Based Residual-Correction Forests for Digital Soil Mapping"
+version: 0.3.0
+date-released: 2026-07-06
 url: https://github.com/HugoMachadoRodrigues/GeoVersa
 repository-code: https://github.com/HugoMachadoRodrigues/GeoVersa
 doi: 10.5281/zenodo.15139517
 license: MIT
 type: software
 abstract: >-
-  GeoVersa implements ConvKrigingNet2D — a hybrid deep learning architecture
-  for Digital Soil Mapping that fuses a 2D CNN raster-patch encoder, a tabular
-  MLP, and a coordinate MLP through a differentiable anisotropic residual
-  kriging layer. The active benchmark path uses pure exponential anisotropic
-  residual weighting, a learned global kriging gate, complete automatic
-  configuration, and pure GeoVersa training with RF distillation disabled.
-  Benchmarked against a reproduced Random Forest reference using the Wadoux et
-  al. (2021) design-based validation framework.
+  GeoVersa ships DB-TARF (Design-Based Targeted Adaptive Residual Forest), a
+  random forest augmented by a cross-fitted, out-of-fold-selected residual
+  correction (residual forests, Cubist, ordinary kriging, MLP, and a
+  variogram-informed radial-basis smoother) together with design-based
+  conformal prediction intervals. It is evaluated under the design-based
+  paradigm of Wadoux et al. (2021) on their public Amazonian above-ground
+  woody biomass benchmark. The repository also preserves the ConvKrigingNet2D
+  research line — a hybrid deep architecture fusing a 2D CNN raster-patch
+  encoder, a tabular MLP, and a coordinate MLP through a differentiable
+  anisotropic residual kriging layer.
 keywords:
   - Digital Soil Mapping
   - Pedometrics

@@ -1,11 +1,11 @@
 {
-  "title": "GeoVersa: Spatial Intelligence Through Learned Anisotropic Kriging",
-  "description": "GeoVersa implements ConvKrigingNet2D — a hybrid deep learning architecture for Digital Soil Mapping that fuses a 2D CNN raster-patch encoder, a tabular MLP, and a coordinate MLP through a differentiable anisotropic residual kriging layer. The kriging layer jointly learns the variogram range, anisotropy axes, and rotation from data gradients, and applies a distance-aware gate to suppress extrapolation noise under spatial cross-validation. Benchmarked against Random Forest using the Wadoux et al. (2021) design-based validation framework (n=500, Australia-wide soil organic carbon).",
-  "version": "0.1.0",
+  "title": "GeoVersa: Design-Based Residual-Correction Forests for Digital Soil Mapping",
+  "description": "GeoVersa ships DB-TARF (Design-Based Targeted Adaptive Residual Forest), a random forest augmented by a cross-fitted, out-of-fold-selected residual correction (residual forests, Cubist, ordinary kriging, MLP, and a variogram-informed radial-basis smoother), together with design-based conformal prediction intervals. It extends the Wadoux et al. (2021) design-based paradigm from point accuracy (RMSE) to interval coverage (PICP). Benchmarked on the public materials of Wadoux et al. (2021): above-ground live woody biomass (Baccini et al. 2012) over a 928 km x 1642 km Amazonian rectangle at 1 km resolution, with calibration samples of n=500 under random, regular-grid and clustered designs. The repository also preserves the ConvKrigingNet2D research line — a hybrid deep architecture fusing a 2D CNN raster-patch encoder, a tabular MLP, and a coordinate MLP through a differentiable anisotropic residual kriging layer.",
+  "version": "0.3.0",
   "upload_type": "software",
   "access_right": "open",
   "license": "MIT",
-  "publication_date": "2026-04-01",
+  "publication_date": "2026-07-06",
   "creators": [
     {
       "name": "Rodrigues, Hugo",
@@ -39,5 +39,5 @@
     }
   ],
   "language": "eng",
-  "notes": "Research preview. ConvKrigingNet2D architecture for Digital Soil Mapping. Benchmark uses the Wadoux et al. (2021) design-based validation framework."
+  "notes": "The DB-TARF core is published on CRAN as the GeoVersa R package (v0.3.0, 2026-07-06). The ConvKrigingNet2D deep-kriging code is research code kept in the repository and is not part of the CRAN package. Benchmark uses the Wadoux et al. (2021) design-based validation framework."
 }

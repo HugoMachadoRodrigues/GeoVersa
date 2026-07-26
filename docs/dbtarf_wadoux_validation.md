@@ -1,7 +1,7 @@
 # DB-TARF Wadoux DesignBased Validation
 
 DB-TARF (Design-Based Targeted Adaptive Residual Forest) is implemented in
-`code/DBTARF.R` and benchmarked with `code/run_dbtarf_wadoux_comparison.R`.
+`R/dbtarf.R` and benchmarked with `code/run_dbtarf_wadoux_comparison.R`.
 
 "Design-Based" qualifies the **evaluation regime** the model targets — the
 Wadoux et al. (2021) design-based protocol, in which calibration and validation

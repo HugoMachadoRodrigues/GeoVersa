@@ -7,14 +7,14 @@
 ### *Deep Learning + Geostatistics for Spatial Prediction*
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.15139517.svg)](https://doi.org/10.5281/zenodo.15139517)
-[![CRAN](https://img.shields.io/badge/CRAN-not%20published-lightgrey?logo=r&logoColor=white)](https://cran.r-project.org/)
+[![CRAN status](https://www.r-pkg.org/badges/version/GeoVersa)](https://CRAN.R-project.org/package=GeoVersa)
 [![R >= 4.2](https://img.shields.io/badge/R-%E2%89%A54.2-276DC3?logo=r&logoColor=white)](https://cran.r-project.org/)
 [![torch](https://img.shields.io/badge/torch-lantern-EE4C2C?logo=pytorch&logoColor=white)](https://torch.mlverse.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Pedometrics](https://img.shields.io/badge/domain-Pedometrics%20%7C%20DSM-2e8b57)](https://www.pedometrics.org/)
 [![ORCID](https://img.shields.io/badge/ORCID-0000--0002--8070--8126-A6CE39?style=flat&logo=orcid&logoColor=white)](https://orcid.org/0000-0002-8070-8126)
 
-[Overview](#overview) · [DeepSCORPAN](#from-scorpan-to-deepscorpan) · [Architecture](#active-architecture) · [Mathematics](#mathematical-formulation) · [Auto-Configuration](#automatic-configuration) · [Research-Family](#geoversa-research-family) · [Benchmark](#wadoux-reference-and-current-results) · [Usage](#how-to-run)
+[Overview](#overview) · [Install](#the-r-package-db-tarf) · [DeepSCORPAN](#from-scorpan-to-deepscorpan) · [Architecture](#active-architecture) · [Mathematics](#mathematical-formulation) · [Auto-Configuration](#automatic-configuration) · [Research-Family](#geoversa-research-family) · [Benchmark](#wadoux-reference-and-current-results) · [Usage](#how-to-run)
 
 </div>
 
@@ -22,20 +22,55 @@
 
 ## Overview
 
-**GeoVersa** is the research line behind a family of spatial prediction networks that combine deep representation learning with geostatistical residual correction.
+**GeoVersa** is a research line on spatial prediction that combines machine learning with geostatistical residual correction, evaluated under the design-based paradigm of Wadoux et al. (2021).
 
-The active, benchmarked path in this repository is the pure **ConvKrigingNet2D / GeoVersa** configuration:
+It has two distinct faces, and this `README` documents both:
+
+| | What it is | Status |
+|---|---|---|
+| **DB-TARF** | Design-Based Targeted Adaptive Residual Forest — the shipped, CRAN-published estimator | on **CRAN** (v0.3.0) |
+| **ConvKrigingNet2D** | the deep-kriging research backbone (CNN + tabular + coordinate encoders with a differentiable anisotropic kriging layer) | research code, in-repo |
+
+**DB-TARF is the only model in this repository that beats the Wadoux reference RF** on the design-based protocol; the deep backbone does not (see [Benchmark](#wadoux-reference-and-current-results)). The deep-learning research family is preserved here in full, with its benchmark history.
+
+---
+
+## The R package (DB-TARF)
+
+The DB-TARF estimator plus its design-based conformal prediction intervals ship as the **GeoVersa** R package, [available on CRAN](https://CRAN.R-project.org/package=GeoVersa):
+
+```r
+install.packages("GeoVersa")
+```
+
+```r
+library(GeoVersa)
+
+fit <- dbtarf_train_predict(
+  train_df       = train,
+  test_df        = test,
+  response_name  = "y",
+  predictor_names = c("elev", "slope", "ndvi"),
+  coord_names    = c("x", "y")
+)
+
+fit$pred_test   # point predictions
+fit$pi_q90      # design-based conformal 90% half-widths
+```
+
+The package deliberately contains **only** the DB-TARF core (`R/dbtarf.R`). The deep-learning research code (ConvKrigingNet2D and the torch-based learners) stays in `code/` and is excluded from the package build — it is not CRAN-installable.
+
+---
+
+## The deep-kriging research backbone
+
+The **ConvKrigingNet2D / GeoVersa** configuration is the deep path documented throughout the architecture and mathematics sections below:
 
 - three encoders learn from tabular covariates, raster patches, and coordinates;
 - a residual memory bank stores the current backbone residual field;
 - a differentiable anisotropic kriging layer interpolates those residuals;
 - a learned global gate controls how strongly the correction enters the final prediction;
 - the training pipeline configures itself automatically from the fold, the variogram, and the available hardware.
-
-The repository also preserves a broader GeoVersa research family of experimental architectures and benchmark histories. This `README` now does both:
-
-- it documents the **current validated benchmark path exactly as the code executes it**;
-- it keeps the **DeepSCORPAN / GeoVersa research narrative** and the references to your network families.
 
 ---
 
