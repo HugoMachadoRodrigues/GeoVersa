@@ -27,6 +27,15 @@
 # headline stands at full budget; this script asks the narrower question of
 # whether the advantage TRANSFERS across estimands.
 #
+# RESUMABLE: after every iteration the runner rewrites both
+# dbtarf_protocols_all_results.csv and dbtarf_protocols_summary.csv. On start it
+# reads the results CSV back and skips iterations for which every requested
+# protocol already has a row. Because each iteration re-seeds itself
+# deterministically, replaying completed iterations from disk is equivalent to
+# recomputing them. To continue an interrupted run, simply re-invoke with the
+# SAME DBTP_RESULTS_DIR (and the same protocol list); to start clean, point
+# DBTP_RESULTS_DIR at a new directory.
+#
 # Environment overrides:
 #   DBTP_N_ITER              repetitions, default 5
 #   DBTP_SAMPLE_SIZE         calibration sample size, default 500
@@ -39,6 +48,8 @@
 #   DBTP_RF_TUNE_MAX_GRID    DB-TARF base RF grid, default 8
 #   DBTP_RESID_RF_TUNE_MAX_GRID  DB-TARF resid RF grid, default 6
 #   DBTP_FAIR_PROFILE_MAX    DB-TARF fair-profile count, default 3
+#   DBTP_ENSEMBLE_TOP_K      DB-TARF top-k profile ensemble, default 1 (off);
+#                            the canonical DesignBased campaign uses 3
 #   DBTP_N_FOLDS             DB-TARF internal cross-fit folds, default 4
 #   DBTP_MIN_SPATIAL_TRAIN   skip spatial folds whose training set < this, default 50
 # =============================================================================
@@ -75,11 +86,17 @@ protocols <- trimws(unlist(strsplit(
              unset = "Population,RandomKFold,SpatialKFold"), ",")))
 protocols <- protocols[protocols != ""]
 
+# Defaults below are a SCREENING budget. To reproduce the canonical v0.3.0
+# DesignBased campaign's DB-TARF configuration exactly (so that a "does the
+# advantage transfer across estimands?" claim compares like with like), set:
+#   DBTP_N_FOLDS=5 DBTP_RF_TUNE_MAX_GRID=18 DBTP_RESID_RF_TUNE_MAX_GRID=12
+#   DBTP_FAIR_PROFILE_MAX=6 DBTP_ENSEMBLE_TOP_K=3
 dbtarf_screen_params <- modifyList(dbtarf_default_params, list(
   n_folds                = as.integer(getnum("DBTP_N_FOLDS", 4L)),
   rf_tune_max_grid       = as.integer(getnum("DBTP_RF_TUNE_MAX_GRID", 8L)),
   resid_rf_tune_max_grid = as.integer(getnum("DBTP_RESID_RF_TUNE_MAX_GRID", 6L)),
-  fair_profile_max       = as.integer(getnum("DBTP_FAIR_PROFILE_MAX", 3L))
+  fair_profile_max       = as.integer(getnum("DBTP_FAIR_PROFILE_MAX", 3L)),
+  ensemble_top_k         = as.integer(getnum("DBTP_ENSEMBLE_TOP_K", 1L))
 ))
 
 dir.create(results_dir, recursive = TRUE, showWarnings = FALSE)
@@ -181,10 +198,78 @@ eval_kfold <- function(cal, iter, seed, spatial = FALSE) {
   score_pair(obs, p_rf, p_db, proto, iter)
 }
 
-# ---- Main loop --------------------------------------------------------------
+# ---- Output writers ---------------------------------------------------------
+
+results_path <- file.path(results_dir, "dbtarf_protocols_all_results.csv")
+summary_path <- file.path(results_dir, "dbtarf_protocols_summary.csv")
+
+# Paired summary per protocol. Written after EVERY iteration, so an interrupted
+# run still leaves a readable summary of the iterations it did complete.
+summarise_protocols <- function(results) {
+  do.call(rbind, lapply(split(results, results$protocol), function(d) {
+    delta <- d$delta_RMSE
+    ok <- is.finite(delta)
+    pval <- function(f) tryCatch(
+      if (sum(ok) >= 2 && stats::sd(delta[ok]) > 0)
+        f(d$RMSE_DBTARF, d$RMSE_RF, paired = TRUE, alternative = "less")$p.value
+      else NA_real_,
+      error = function(e) NA_real_)
+    data.frame(
+      protocol = d$protocol[1], n_iter = nrow(d),
+      RMSE_RF = round(mean(d$RMSE_RF, na.rm = TRUE), 3),
+      RMSE_DBTARF = round(mean(d$RMSE_DBTARF, na.rm = TRUE), 3),
+      mean_delta_RMSE = round(mean(delta, na.rm = TRUE), 3),
+      sd_delta_RMSE = round(stats::sd(delta[ok]), 3),
+      MEC_RF = round(mean(d$MEC_RF, na.rm = TRUE), 3),
+      MEC_DBTARF = round(mean(d$MEC_DBTARF, na.rm = TRUE), 3),
+      wins_DBTARF = sum(delta < 0, na.rm = TRUE),
+      losses_DBTARF = sum(delta > 0, na.rm = TRUE),
+      paired_t_p_less = round(pval(stats::t.test), 5),
+      wilcoxon_p_less = round(suppressWarnings(pval(stats::wilcox.test)), 5),
+      stringsAsFactors = FALSE)
+  }))
+}
+
+write_outputs <- function(all_rows) {
+  if (length(all_rows) == 0L) return(invisible(NULL))
+  res <- do.call(rbind, all_rows)
+  write.csv(res, results_path, row.names = FALSE)
+  write.csv(summarise_protocols(res), summary_path, row.names = FALSE)
+  invisible(res)
+}
+
+# ---- Resume -----------------------------------------------------------------
+#
+# Each iteration re-seeds itself deterministically (set.seed(seed_it) below),
+# so iterations are independent and completed ones can be replayed from disk
+# instead of recomputed. An iteration counts as done only when every requested
+# protocol produced a row for it, so a run killed mid-iteration redoes just
+# that iteration.
 
 all_rows <- list()
+done_iters <- integer(0)
+if (file.exists(results_path)) {
+  prev <- tryCatch(read.csv(results_path, stringsAsFactors = FALSE),
+                   error = function(e) NULL)
+  if (!is.null(prev) && nrow(prev) > 0L && "iteration" %in% names(prev)) {
+    prev <- prev[prev$protocol %in% protocols, , drop = FALSE]
+    per_iter <- table(prev$iteration)
+    done_iters <- as.integer(names(per_iter)[per_iter >= length(protocols)])
+    done_iters <- done_iters[done_iters <= n_iter]
+    if (length(done_iters) > 0L) {
+      keep <- prev[prev$iteration %in% done_iters, , drop = FALSE]
+      all_rows <- split(keep, keep$iteration)
+      cat(sprintf(
+        "[DBTARF-protocols] RESUME: %d complete iteration(s) already on disk (%s); skipping them.\n",
+        length(done_iters), paste(sort(done_iters), collapse = ",")))
+    }
+  }
+}
+
+# ---- Main loop --------------------------------------------------------------
+
 for (it in seq_len(n_iter)) {
+  if (it %in% done_iters) next
   seed_it <- train_seed0 + (it - 1L) * 1000L
   set.seed(seed_it)
   cal <- sample_simple_random_rows_wadoux(common_data$s_df, sample_size)
@@ -204,41 +289,13 @@ for (it in seq_len(n_iter)) {
     all_rows[[length(all_rows) + 1L]] <- eval_kfold(cal, it, seed_it, spatial = TRUE)
   }
 
-  # checkpoint after every iteration
-  ckpt <- do.call(rbind, all_rows)
-  write.csv(ckpt, file.path(results_dir, "dbtarf_protocols_all_results.csv"),
-            row.names = FALSE)
+  # checkpoint after every iteration (results + summary), so the run is
+  # both crash-safe and resumable
+  write_outputs(all_rows)
 }
 
-results <- do.call(rbind, all_rows)
-write.csv(results, file.path(results_dir, "dbtarf_protocols_all_results.csv"),
-          row.names = FALSE)
-
-# ---- Paired summary per protocol --------------------------------------------
-
-summ <- do.call(rbind, lapply(split(results, results$protocol), function(d) {
-  delta <- d$delta_RMSE
-  wins <- sum(delta < 0, na.rm = TRUE)
-  losses <- sum(delta > 0, na.rm = TRUE)
-  p_t <- tryCatch(
-    if (sum(is.finite(delta)) >= 2 && sd(delta, na.rm = TRUE) > 0)
-      t.test(d$RMSE_DBTARF, d$RMSE_RF, paired = TRUE,
-             alternative = "less")$p.value else NA_real_,
-    error = function(e) NA_real_)
-  data.frame(
-    protocol = d$protocol[1], n_iter = nrow(d),
-    RMSE_RF = round(mean(d$RMSE_RF, na.rm = TRUE), 3),
-    RMSE_DBTARF = round(mean(d$RMSE_DBTARF, na.rm = TRUE), 3),
-    mean_delta_RMSE = round(mean(delta, na.rm = TRUE), 3),
-    MEC_RF = round(mean(d$MEC_RF, na.rm = TRUE), 3),
-    MEC_DBTARF = round(mean(d$MEC_DBTARF, na.rm = TRUE), 3),
-    wins_DBTARF = wins, losses_DBTARF = losses,
-    paired_t_p_less = round(p_t, 4),
-    stringsAsFactors = FALSE)
-}))
-write.csv(summ, file.path(results_dir, "dbtarf_protocols_summary.csv"),
-          row.names = FALSE)
+results <- write_outputs(all_rows)
 
 cat("\n========== DB-TARF vs RF across protocols ==========\n")
-print(summ, row.names = FALSE)
+print(summarise_protocols(results), row.names = FALSE)
 cat(sprintf("\n[DBTARF-protocols] Done. Results in: %s\n", results_dir))
