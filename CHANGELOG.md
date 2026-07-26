@@ -4,6 +4,45 @@ All notable changes to this project should be documented in this file.
 
 The project is currently in research-stage development and follows a `0.x` versioning line.
 
+## [Unreleased]
+
+### Changed — canonical v0.3.0 reference campaign
+
+All DB-TARF-vs-RF figures in `README.md`, `docs/dbtarf_wadoux_validation.md`
+and the manuscript are now sourced from a **single** campaign, replacing
+several earlier runs whose numbers disagreed because they used different
+configurations (pre-`ensemble_top_k` vs `top_k = 3`) and therefore different
+RNG streams and RF baseline draws.
+
+The canonical campaign runs the exact code published on CRAN (`R/dbtarf.R`)
+with runner defaults (`ensemble_top_k = 3`, `n_folds = 5`), `n = 500`,
+`DesignBased`, seed 123, and **30 repetitions in each of the three sampling
+designs** — removing the uneven repetition counts (30 / 19 / 10) previously
+reported as a limitation. Results in
+`results/canon_v030_full_{random,regular_grid,clustered_random}_confirm30`:
+
+| Design | RF | RF_tuned | Cubist | DB-TARF | ΔRMSE | Wins | Wilcoxon p |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| random | 32.49 | 32.48 | 33.26 | 31.60 | −0.895 | 28/30 | 6.5e-09 |
+| regular_grid | 32.28 | 32.27 | 33.17 | 31.38 | −0.901 | 30/30 | 9.3e-10 |
+| clustered_random | 35.78 | 35.60 | 37.16 | 34.57 | −1.205 | 28/30 | 1.8e-08 |
+
+`RF_tuned` ≈ `RF` in every design, so the gain is the residual correction and
+not forest tuning. Design-based bias (ME) shrinks toward zero in all three.
+These figures supersede the `[0.3.0-dev]` entry below (RMSE 30.75 vs 31.63),
+which came from a pre-`ensemble_top_k` configuration.
+
+### Fixed
+
+- Reinstated the optional `Cubist` and `gstat` backends, which had gone
+  missing from the local R library. Without them DB-TARF silently lost its
+  Cubist and ordinary-kriging residual-correction candidates (and the Cubist
+  comparator returned `NA`), so a first pass of the campaign ran against a
+  degraded candidate library and was discarded.
+- README no longer leads its results section with the 3-repetition deep-backbone
+  table; the 30-repetition DB-TARF campaign comes first, and the two
+  non-comparable RF baselines are explicitly reconciled.
+
 ## [0.3.0] - 2026-07-06 — first CRAN release
 
 The DB-TARF core is published on CRAN as the **GeoVersa** R package:

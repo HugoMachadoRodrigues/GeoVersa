@@ -598,64 +598,65 @@ GeoVersa's thesis is not weakened by this distinction. On the contrary: the mode
 - strong local residual recovery when nearby signal is genuinely informative;
 - competitive map-level accuracy under design-based evaluation when the backbone has learned the large-scale structure well.
 
-### Current clean comparison
+### DB-TARF: the only model here that beats the RF reference
 
-Setup:
+**DB-TARF** (Design-Based Targeted Adaptive Residual Forest) predicts
+`RF_selected + lambda * correction`, choosing an RF profile and a cross-fitted
+residual correction that is accepted only when it improves the out-of-fold
+RMSE. It is the estimator published on CRAN.
 
-- scenario: `random`;
-- protocol: `DesignBased`;
-- sample size: `500`;
-- repetitions: `3`;
-- model profile: `auto`;
-- device: `mps`;
-- metric convention: `Pearson^2`.
+The canonical benchmark below is the **v0.3.0 reference campaign**: the exact
+code published on CRAN (`R/dbtarf.R`), runner defaults
+(`ensemble_top_k = 3`, `n_folds = 5`), `n = 500`, `DesignBased`, seed 123, and
+**30 repetitions in every one of the three Wadoux sampling designs**. RMSE and
+ME are in Mg ha⁻¹.
 
-| Model | ME | RMSE | Pearson^2 | MEC |
+| Design | RF (Wadoux default) | RF_tuned | Cubist | **DB-TARF** | ΔRMSE | Paired wins | Wilcoxon $p$ |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `random` | 32.49 | 32.48 | 33.26 | **31.60** | **−0.895** | 28 / 30 | 6.5×10⁻⁹ |
+| `regular_grid` | 32.28 | 32.27 | 33.17 | **31.38** | **−0.901** | **30 / 30** | 9.3×10⁻¹⁰ |
+| `clustered_random` | 35.78 | 35.60 | 37.16 | **34.57** | **−1.205** | 28 / 30 | 1.8×10⁻⁸ |
+
+95 % CIs for ΔRMSE: `random` [−1.08, −0.71], `regular_grid` [−1.05, −0.75],
+`clustered_random` [−1.47, −0.94].
+
+Two readings matter here:
+
+- **The gain is the residual correction, not forest tuning.** `RF_tuned` (the
+  selected base RF with no correction) is statistically indistinguishable from
+  the untuned reference in every design (32.48 vs 32.49; 32.27 vs 32.28;
+  35.60 vs 35.78). Tuning buys ≈nothing; the correction is what moves RMSE.
+- **DB-TARF also reduces design-based bias.** ME shrinks toward zero in all
+  three designs (`random` 1.06 → 0.84; `regular_grid` 0.66 → 0.49;
+  `clustered_random` −1.36 → −0.88), and MEC rises in each.
+
+The gain is largest under the hardest **clustered** design (−1.21), the regime
+where a calibration sample least resembles the population. The reference is the
+untuned default RF, as in Wadoux et al. (2021); DB-TARF performs all of its
+selection on the calibration sample only.
+
+Full method, honest caveats, reproduction commands and paired statistics:
+[`docs/dbtarf_wadoux_validation.md`](docs/dbtarf_wadoux_validation.md).
+
+### The deep backbone does not beat RF
+
+For contrast, the standalone **ConvKrigingNet2D / GeoVersa** deep path on the
+same protocol (`random`, `DesignBased`, n = 500, but only 3 repetitions,
+`auto` profile, `mps`):
+
+| Model | ME | RMSE | Pearson² | MEC |
 |---|---:|---:|---:|---:|
 | RF benchmark | 0.187 | 32.313 | 0.883 | 0.877 |
 | GeoVersa, standalone auto | 0.403 | 33.033 | 0.873 | 0.870 |
 
-Current reading:
-
-- this is the current clean benchmark for the standalone `auto` path in this repository;
-- GeoVersa is now being evaluated without any RF-guided training path;
-- GeoVersa still does not yet beat the RF benchmark on `DesignBased`.
-
-The current clean gap relative to the RF benchmark is:
-
-```math
-\Delta \mathrm{RMSE} = +0.720,
-\qquad
-\Delta \mathrm{Pearson}^2 = -0.010,
-\qquad
-\Delta \mathrm{MEC} = -0.007
-```
+The deep backbone **does not beat the RF benchmark** on `DesignBased`
+(ΔRMSE = +0.720). This is an honest negative result and is why the CRAN
+package ships DB-TARF rather than the deep model. Note this run uses 3
+repetitions against DB-TARF's 30, so its RF baseline (32.313) is a noisier
+draw than the campaign's (32.493); the two RF columns are not directly
+comparable across tables.
 
 The original saved Wadoux `.Rdata` outputs are still not present in the mirrored upstream checkout. Their availability is tracked in `docs/wadoux2021-reference/official_rdata_manifest.csv`.
-
-### DB-TARF: first model to beat the RF reference on DesignBased
-
-While the standalone deep backbone does not yet beat RF on `DesignBased`, **DB-TARF** (Design-Based Targeted Adaptive Residual Forest) does. DB-TARF predicts `RF_selected + lambda * correction`, choosing an RF profile and a cross-fitted residual correction that is accepted only when it improves the out-of-fold RMSE. Same setup (`random`, `DesignBased`, n = 500), 30 reproducible repetitions (seed 123):
-
-| Model | ME | RMSE | Pearson^2 | MEC |
-|---|---:|---:|---:|---:|
-| RF benchmark (Wadoux default) | 0.21 | 31.63 | 0.88 | 0.88 |
-| RF_tuned (selected profile, no correction) | 0.25 | 31.61 | 0.88 | 0.88 |
-| **DB-TARF** | **-0.04** | **30.75** | **0.89** | **0.89** |
-
-DB-TARF wins **27 / 30** paired runs against the untuned Wadoux default RF, with mean gains
-
-```math
-\Delta \mathrm{RMSE} = -0.872,
-\qquad
-\Delta \mathrm{Pearson}^2 = +0.004,
-\qquad
-\Delta \mathrm{MEC} = +0.007
-```
-
-(paired Wilcoxon signed-rank $p = 1.3\times10^{-8}$; 95% CI for $\Delta\mathrm{RMSE}$ $[-1.06, -0.68]$). Tuning the forest alone buys essentially nothing here (`RF_tuned` ≈ `RF`), so the gain comes from the **residual correction**, not the tuning — and DB-TARF drives the design-based bias to ≈0 (ME `-0.04` vs `0.21`). The reference is the untuned default RF, as in Wadoux et al. (2021); DB-TARF performs internal selection on the calibration sample.
-
-The result holds across all three Wadoux sampling designs — `random`, `regular_grid` (systematic), and `clustered_random` (two-stage): DB-TARF wins 27–28/30 in each (Wilcoxon $p < 10^{-7}$), with the largest gain under the hardest clustered design ($\Delta\mathrm{RMSE}=-1.16$). Full method, honest caveats, per-scenario table, reproduction commands, and paired statistics: see [`docs/dbtarf_wadoux_validation.md`](docs/dbtarf_wadoux_validation.md).
 
 ### Experimental DAD-RK Path
 

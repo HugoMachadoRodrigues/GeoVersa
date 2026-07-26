@@ -69,45 +69,57 @@ Sys.setenv(DBT_MODELS      = "RF,Cubist,DBTARF",
            DBT_N_ITER      = "30",
            DBT_SAMPLE_SIZE = "500",
            DBT_TRAIN_SEED  = "123",
-           DBT_RESULTS_DIR = "results/dbtarf_n500_confirm30")
+           DBT_RESULTS_DIR = "results/canon_v030_full_random_confirm30")
 source("code/run_dbtarf_wadoux_comparison.R")
 ```
 
 ## Confirm30 Result
 
 Scenario `random`, protocol `DesignBased`, n = 500, 30 repetitions, seed 123.
-Output directory: `results/dbtarf_n500_confirm30`.
+Output directory: `results/canon_v030_full_random_confirm30`.
+
+This is the **canonical v0.3.0 campaign**: the exact code published on CRAN
+(`R/dbtarf.R`) with runner defaults (`ensemble_top_k = 3`, `n_folds = 5`) and
+the complete optional-backend set installed (`Cubist`, `gstat`, `sp`, `nnet`),
+so the full residual-correction candidate library is available.
 
 | Model | ME mean | RMSE mean | RMSE sd | r2 mean | MEC mean |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| RF (Wadoux default) | 0.21 | 31.63 | 1.56 | 0.88 | 0.88 |
-| RF_tuned (selected profile, no correction) | 0.25 | 31.61 | 1.62 | 0.88 | 0.88 |
-| Cubist (default) | 1.32 | 32.19 | 1.67 | 0.88 | 0.88 |
-| **DBTARF** | **-0.04** | **30.75** | 1.65 | **0.89** | **0.89** |
+| RF (Wadoux default) | 1.06 | 32.49 | 1.22 | 0.88 | 0.88 |
+| RF_tuned (selected profile, no correction) | 1.14 | 32.48 | 1.25 | 0.88 | 0.88 |
+| Cubist (default) | 1.85 | 33.26 | 1.42 | 0.87 | 0.87 |
+| **DBTARF** | **0.84** | **31.60** | 1.31 | **0.88** | **0.88** |
 
-Paired DBTARF vs the Wadoux default RF (from the script-generated
-`dbtarf_winrate_vs_RF.csv`):
+Paired DBTARF vs the Wadoux default RF:
 
 | Metric | Value |
 | --- | ---: |
-| DBTARF wins | 27 / 30 |
-| Mean delta RMSE | -0.872 |
-| Median delta RMSE | -0.890 |
-| SD delta RMSE | 0.514 |
-| Mean delta ME | -0.244 |
+| DBTARF wins | 28 / 30 |
+| Mean delta RMSE | -0.895 |
+| Median delta RMSE | -0.970 |
+| SD delta RMSE | 0.497 |
+| Mean delta ME | -0.222 |
 | Mean delta MEC | +0.007 |
-| Mean delta r2 | +0.004 |
+| Mean delta r2 | +0.005 |
 
 Significance of the paired RMSE improvement (computed on the 30 paired deltas):
 
 | Test | Statistic | p-value |
 | --- | --- | ---: |
-| Wilcoxon signed-rank (H1: delta < 0) | V = 6 | 1.3e-08 |
-| Paired t-test (H1: delta < 0) | t = -9.29 | 1.7e-10 |
-| 95% CI for mean delta RMSE | [-1.064, -0.680] | — |
+| Wilcoxon signed-rank (H1: delta < 0) | V = 4 | 6.5e-09 |
+| Paired t-test (H1: delta < 0) | t = -9.87 | 4.4e-11 |
+| 95% CI for mean delta RMSE | [-1.080, -0.710] | — |
 
-DB-TARF also drives the design-based bias to essentially zero (ME -0.04 vs RF
-0.21). `RF_tuned` ≈ RF confirms the gain is the residual correction, not tuning.
+DB-TARF also reduces the design-based bias (ME 0.84 vs RF 1.06).
+`RF_tuned` ≈ RF confirms the gain is the residual correction, not tuning.
+
+> **Note on superseded figures.** Earlier revisions of this document reported
+> RMSE 31.63 → 30.75 with 27/30 wins. Those came from a pre-`ensemble_top_k`
+> configuration; because DB-TARF's RNG consumption differs between
+> configurations, the RF baseline draw shifts too, which is why *both* columns
+> moved. The paired effect size is essentially unchanged (≈ -0.87 then,
+> -0.895 now). All figures in this document, the README and the manuscript now
+> come from the single canonical campaign described above.
 
 ### Honest caveats
 
@@ -123,7 +135,7 @@ DB-TARF also drives the design-based bias to essentially zero (ME -0.04 vs RF
   Wadoux DesignBased protocol; all models share the identical validation draw in
   each iteration.
 - **Metric precision.** `wadoux_eval` rounds ME/RMSE/r2/MEC to 2 dp (the source
-  convention), so the paired deltas and the 27/30 count inherit that precision.
+  convention), so the paired deltas and the win counts inherit that precision.
   The deltas here are ~-0.9 (far from 0) with no ties, so the win count is robust
   to rounding.
 
@@ -135,30 +147,35 @@ default RF):
 
 | Scenario | RF RMSE | RF_tuned RMSE | DBTARF RMSE | DBTARF wins | Mean delta RMSE | 95% CI | Wilcoxon p |
 | --- | ---: | ---: | ---: | ---: | ---: | --- | ---: |
-| `random` (simple random) | 31.63 | 31.61 | 30.75 | 27/30 | -0.872 | [-1.06, -0.68] | 1.3e-08 |
-| `regular_grid` (systematic) | 32.16 | 32.13 | 31.41 | 28/30 | -0.750 | [-0.95, -0.55] | 3.7e-08 |
-| `clustered_random` (two-stage) | 35.65 | 35.63 | 34.49 | 28/30 | -1.156 | [-1.45, -0.87] | 4.9e-08 |
+| `random` (simple random) | 32.49 | 32.48 | 31.60 | 28/30 | -0.895 | [-1.08, -0.71] | 6.5e-09 |
+| `regular_grid` (systematic) | 32.28 | 32.27 | 31.38 | 30/30 | -0.901 | [-1.05, -0.75] | 9.3e-10 |
+| `clustered_random` (two-stage) | 35.78 | 35.60 | 34.57 | 28/30 | -1.205 | [-1.47, -0.94] | 1.8e-08 |
 
-DB-TARF wins ~28/30 with a statistically significant RMSE reduction under all
-three designs, and `RF_tuned` ≈ RF in every case (tuning the forest is neutral;
-the gain is the residual correction). The improvement is largest under the
-hardest clustered design (mean delta RMSE -1.16), where DB-TARF also nearly
-eliminates the design-based bias (ME 0.06 vs RF -0.73). Reproduce the other two
-designs by setting `DBT_SCENARIO=regular_grid` or `DBT_SCENARIO=clustered_random`
-(outputs in `results/dbtarf_n500_regular_grid30` and
-`results/dbtarf_n500_clustered_random30`).
+All three rows use **30 repetitions** (earlier revisions reported 19 and 10 for
+the grid and clustered designs). Output directories:
+`results/canon_v030_full_{random,regular_grid,clustered_random}_confirm30`.
+
+DB-TARF wins 28-30 of 30 with a statistically significant RMSE reduction under
+all three designs, and `RF_tuned` ≈ RF in every case (tuning the forest is
+neutral; the gain is the residual correction). The improvement is largest under
+the hardest clustered design (mean delta RMSE -1.21), where DB-TARF also cuts
+the design-based bias by roughly a third (ME -0.88 vs RF -1.36). Reproduce the
+other two designs by setting `DBT_SCENARIO=regular_grid` or
+`DBT_SCENARIO=clustered_random` (outputs in
+`results/canon_v030_full_regular_grid_confirm30` and
+`results/canon_v030_full_clustered_random_confirm30`).
 
 ## Local Evidence Files
 
 Generated outputs, intentionally gitignored through `results/**`:
 
-- `results/dbtarf_n500_confirm30/dbtarf_summary_by_protocol.csv`
-- `results/dbtarf_n500_confirm30/dbtarf_winrate_vs_RF.csv`
-- `results/dbtarf_n500_confirm30/dbtarf_paired_deltas_vs_RF.csv`
-- `results/dbtarf_n500_confirm30/dbtarf_all_results.csv`
-- `results/dbtarf_n500_confirm30/dbtarf_diagnostics.csv`
-- `results/dbtarf_n500_confirm30/dbtarf_candidate_scores.csv`
-- `results/dbtarf_n500_confirm30/dbtarf_fold_diagnostics.csv`
-- `results/dbtarf_n500_confirm30/dbtarf_rf_tuning_scores.csv`
-- `results/dbtarf_n500_confirm30/dbtarf_config.csv`
-- `results/dbtarf_n500_confirm30/dbtarf_checkpoint_status.csv`
+- `results/canon_v030_full_random_confirm30/dbtarf_summary_by_protocol.csv`
+- `results/canon_v030_full_random_confirm30/dbtarf_winrate_vs_RF.csv`
+- `results/canon_v030_full_random_confirm30/dbtarf_paired_deltas_vs_RF.csv`
+- `results/canon_v030_full_random_confirm30/dbtarf_all_results.csv`
+- `results/canon_v030_full_random_confirm30/dbtarf_diagnostics.csv`
+- `results/canon_v030_full_random_confirm30/dbtarf_candidate_scores.csv`
+- `results/canon_v030_full_random_confirm30/dbtarf_fold_diagnostics.csv`
+- `results/canon_v030_full_random_confirm30/dbtarf_rf_tuning_scores.csv`
+- `results/canon_v030_full_random_confirm30/dbtarf_config.csv`
+- `results/canon_v030_full_random_confirm30/dbtarf_checkpoint_status.csv`
