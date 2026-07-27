@@ -4,7 +4,43 @@ All notable changes to this project should be documented in this file.
 
 The project is currently in research-stage development and follows a `0.x` versioning line.
 
-## [Unreleased] — 0.4.0-dev
+## [Unreleased] — 0.4.0-dev (geostatistics as hyperparameters)
+
+The variogram family, its range as a working scale, the lag binning, the
+estimator and the anisotropic geometry now live in the profile search and are
+selected out-of-fold. Campaign result (30 reps per design, n = 500):
+
+| Design | RF | DB-TARF | wins | Wilcoxon p |
+|---|---:|---:|---:|---:|
+| random | 32.493 | 31.624 | 28/30 | 6.5e-09 |
+| regular_grid | 32.280 | 31.400 | 30/30 | 9.3e-10 |
+| clustered_random | 35.778 | 34.538 | 29/30 | 1.9e-09 |
+
+Accuracy is unchanged relative to the fixed recipe (+0.026, +0.021, -0.035 —
+inside repetition noise), so the contribution is not an RMSE gain. What the
+campaign shows is that the freedom is USED, and used discriminatingly:
+
+| Design | binning/estimator | range scale | anisotropy | conventional recipe kept |
+|---|---:|---:|---:|---:|
+| random | 9 | 7 | 4 | 10/30 |
+| regular_grid | 4 | 5 | 3 | 18/30 |
+| clustered_random | 11 | 5 | 0 | 14/30 |
+
+Under clustered sampling anisotropy is refused in every repetition (a clustered
+sample cannot support estimating direction) while the binning is displaced most
+often (clustering distorts the distance distribution, so a fixed 50% cutoff with
+15 lags is a poor fit). The same mechanism discriminates between the
+geostatistical parameters the design can support and those it cannot.
+
+**Honest boundary, now stated in the manuscript.** Pooled over 90 repetitions
+the selected corrector is a residual random forest 68 times; ordinary kriging
+wins outright 3 times and a purely geostatistical interpolator 4 times. The
+geostatistics therefore contributes the representation (variogram-scaled radial
+basis features, anisotropic geometry) and the regularisation (variogram-scaled
+spatial gate), not the final estimator. The manuscript says so explicitly rather
+than claiming kriging has returned to the centre of the map.
+
+## [Unreleased] — earlier 0.4.0-dev notes
 
 ### Added — anisotropy, admitted on merit
 
