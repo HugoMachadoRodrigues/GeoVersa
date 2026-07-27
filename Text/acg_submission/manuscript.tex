@@ -1,0 +1,1145 @@
+%% Applied Computing and Geosciences (Elsevier)
+%% Manuscript source. Build: pdflatex -> bibtex -> pdflatex -> pdflatex
+\documentclass[preprint,12pt,authoryear]{elsarticle}
+
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+
+%% No hyperlinks or PDF bookmarks in the submitted file.
+\usepackage[hidelinks,bookmarks=false,pdfpagemode=UseNone]{hyperref}
+\hypersetup{colorlinks=false,pdfborder={0 0 0}}
+
+\journal{Applied Computing and Geosciences}
+
+\newcommand{\Mgha}{Mg\,ha\textsuperscript{-1}}
+
+\begin{document}
+
+\begin{frontmatter}
+
+\title{Geostatistics as hyperparameters, and design-based interval
+coverage, for digital soil mapping}
+
+\author[uf]{Hugo Rodrigues}
+\ead{rodrigues.machado.hugo@gmail.com}
+
+\address[uf]{University of Florida, Range Cattle Research and Education
+Center, 3401 Experiment Station, Ona, FL 33865, USA}
+
+\begin{abstract}
+Map accuracy must be estimated from a probability sample by design-based
+inference rather than by spatial cross-validation. That established result
+concerns point accuracy. Map uncertainty, the prediction interval attached to
+each mapped value, matters just as much for decision making, yet its coverage
+is almost never checked against the sampling design. This paper makes two
+contributions of comparable weight. The first concerns where geostatistical
+decisions are made. Digital soil mapping has largely displaced geostatistics
+with machine learning, and where geostatistics survives it usually enters by
+assumption: a variogram family chosen by habit, a fixed lag binning, a range
+consumed as a constant. We instead place those choices in the hyperparameter
+space of the learner, where they are selected out of fold against a null in
+which no correction is applied. The variogram family, its range as a working
+scale, the lag binning and estimator, the anisotropic geometry, the reach of a
+spatial gate and the strength of the correction are all selected rather than
+assumed. We are explicit that geostatistics here supplies the hypothesis and
+feature space rather than the final estimator: the selected corrector is
+usually a residual forest whose features are variogram-scaled basis functions,
+and ordinary kriging wins outright in only a small minority of repetitions.
+The estimator built on this rule, DB-TARF, lowers the design-based root mean
+squared error relative to the default random forest on the Amazonian
+above-ground biomass data of Wadoux et al. (2021) under all three sampling
+designs (random 32.49 to 31.62, regular grid 32.28 to 31.40, clustered 35.78 to
+34.54 \Mgha{}), winning 28 of 30, 30 of 30 and 29 of 30 paired repetitions. The
+second contribution extends design-based assessment from accuracy to interval
+coverage. Coverage is a population proportion, so the same Horvitz-Thompson
+argument that makes the accuracy estimator design-unbiased applies unchanged.
+Under representative sampling the cross-fitted conformal intervals are
+calibrated and roughly 17 per cent narrower than a quantile regression forest
+baseline; under clustered sampling plain conformal under-covers, a failure only
+the design-based assessment reveals, and a spatial-block conformal calibration
+restores validity.
+\end{abstract}
+
+\begin{keyword}
+digital soil mapping \sep design-based inference \sep prediction intervals \sep
+conformal prediction \sep variogram \sep random forest
+\end{keyword}
+
+\end{frontmatter}
+
+%% ===================================================================
+\section{Introduction}
+\label{sec:intro}
+
+Maps of soil and ecological variables are built from point observations by
+machine learning models, and their quality has to be quantified.
+\citet{wadoux2021} established that the statistically valid route to point map
+accuracy is probability sampling with design-based inference. A probability
+sample, for instance a simple random one, yields model-free and design-unbiased
+estimates of accuracy indices with no need to model spatial autocorrelation,
+and they showed that spatial cross-validation is biased, usually pessimistic,
+and unsuitable for validating a map.
+
+Two questions follow. Given the correct yardstick, can the map be improved? And
+beyond the point map, can its uncertainty be quantified and, more importantly,
+validated under the same design-based principle? The second question is the
+more open of the two. Prediction intervals in digital soil mapping usually come
+from kriging variances or from quantile heuristics, and their coverage is
+rarely checked against a probability sample. An interval method can look
+entirely reasonable and still under-cover or over-cover the population.
+
+This paper makes two contributions, which we present as being of comparable
+weight.
+
+\paragraph{Geostatistics as hyperparameters} Digital soil mapping has largely
+migrated from geostatistics to machine learning, and where geostatistics
+survives it usually enters by assumption. The analyst decides that residuals
+should be kriged, picks a variogram family by eye or by habit, fixes a lag
+binning and an estimator, and adds the correction whether or not it helps. We
+propose that these decisions belong in the same place as every other modelling
+decision, namely the hyperparameter space of the learner, validated out of
+fold. The variogram family (exponential, spherical, Gaussian, Mat\'ern), its
+range treated as a working scale, the lag binning and estimator, the
+anisotropic geometry, the length of a spatial gate and the strength of the
+correction are all selected rather than assumed, and the whole geostatistical
+branch competes against a null in which no correction is applied, so that it
+can only enter by lowering out-of-fold risk.
+
+Two clarifications about what this does and does not claim. The individual
+ingredients are established: regression kriging \citep{hengl2018} and stacked
+generalization or the super learner \citep{wolpert1992,vanderlaan2007}. What is
+new is that the geostatistical decisions are made on evidence rather than by
+convention. More importantly, geostatistics here supplies the hypothesis and
+feature space, not the final estimator. The corrector that the data selects is,
+in the large majority of repetitions, a residual random forest, one whose
+features include radial basis functions scaled by the fitted variogram and
+whose output passes through a variogram-calibrated spatial gate
+(Section~\ref{sec:choices}). Ordinary kriging wins outright in a small minority
+of cases. The claim is therefore not that kriging has returned to the centre of
+the map, but that where, at what scale, in which geometry and with how much
+confidence a spatial correction acts are geostatistical questions, and that we
+let the data answer them.
+
+\paragraph{Uncertainty under the design-based paradigm} We define and estimate
+prediction-interval coverage as a design-based population parameter, extending
+\citet{wadoux2021} from root mean squared error to coverage; we give the
+estimator conformal prediction intervals computed from its own cross-fitted
+residuals; and we show that plain conformal calibration is well calibrated and
+sharp under representative sampling but under-covers under clustered sampling,
+and that a spatial-block conformal calibration restores design-based validity.
+To our knowledge this is the first design-based assessment and correction of
+prediction-interval coverage for large-scale digital soil mapping.
+
+The two contributions are connected. The same cross-fitting that selects the
+geostatistical hyperparameters is what supplies leakage-free conformity scores
+for the intervals.
+
+%% ===================================================================
+\section{Design-based assessment of point and interval accuracy}
+\label{sec:designbased}
+
+\subsection{The population, the map, and where the randomness lives}
+
+Let the domain be discretised into a finite population of $N$ cells,
+$U=\{1,\dots,N\}$, with true values $z(s_i)$. A map is a function
+$\hat z: U \rightarrow \mathbb{R}$. The essential move of the design-based
+paradigm is that once the map has been produced it is a fixed, non-random
+object, and the true field is fixed as well. The only randomness admitted into
+the assessment is the randomness of the validation sampling design. Nothing is
+assumed about spatial autocorrelation, about stationarity, or about the model
+that produced the map \citep{degruijter2006,brus2011}.
+
+This is what makes the assessment assumption-free. A model-based assessment has
+to posit a stochastic process for $z$ and is only ever as good as that posit,
+whereas a design-based assessment inherits its validity from a randomisation
+that the analyst controls.
+
+\subsection{Any cell-level loss is a population mean}
+\label{sec:ht}
+
+Let $g: U \rightarrow \mathbb{R}$ be any function evaluated cell by cell, and
+let its population mean be
+
+\begin{equation}
+\bar G = \frac{1}{N}\sum_{i \in U} g(i).
+\label{eq:popmean}
+\end{equation}
+
+Draw a probability sample $S \subset U$ of size $n$ with inclusion
+probabilities $\pi_i = \Pr(i \in S)$. The Horvitz-Thompson estimator
+\citep{horvitz1952} is
+
+\begin{equation}
+\widehat{\bar G} = \frac{1}{N}\sum_{i \in S} \frac{g(i)}{\pi_i}.
+\label{eq:ht}
+\end{equation}
+
+It is design-unbiased for $\bar G$, and the proof is one line. Writing
+$I_i = \mathbf{1}\{i \in S\}$ for the sample-membership indicator, we have
+$\mathbb{E}[I_i] = \pi_i$ over repeated sampling, so
+
+\begin{equation}
+\mathbb{E}\!\left[\widehat{\bar G}\right]
+= \frac{1}{N}\sum_{i \in U} \frac{\mathbb{E}[I_i]}{\pi_i} g(i)
+= \frac{1}{N}\sum_{i \in U} g(i) = \bar G .
+\label{eq:htproof}
+\end{equation}
+
+Under simple random sampling without replacement $\pi_i = n/N$ for every cell,
+and Eq.~\eqref{eq:ht} collapses to the sample mean,
+
+\begin{equation}
+\widehat{\bar G} = \frac{1}{n}\sum_{i \in S} g(i).
+\label{eq:srs}
+\end{equation}
+
+Everything that follows in this section is a corollary of choosing $g$. That is
+the whole point, and it is why extending the framework from accuracy to
+interval coverage costs nothing conceptually.
+
+\subsection{Point accuracy: $g$ is the squared error}
+
+Taking $g(i) = (\hat z(s_i) - z(s_i))^2$ gives the population mean squared
+error and, by Eq.~\eqref{eq:srs}, its design-unbiased estimator,
+
+\begin{equation}
+\mathrm{MSE} = \frac{1}{N}\sum_{i \in U}\big(\hat z(s_i)-z(s_i)\big)^2,
+\qquad
+\widehat{\mathrm{MSE}} = \frac{1}{n}\sum_{i \in S}\big(\hat z(s_i)-z(s_i)\big)^2 ,
+\label{eq:mse}
+\end{equation}
+
+with $\widehat{\mathrm{RMSE}} = \sqrt{\widehat{\mathrm{MSE}}}$. One caveat
+deserves to be stated rather than hidden. Because the square root is concave,
+Jensen's inequality gives
+$\mathbb{E}[\widehat{\mathrm{RMSE}}] \le \mathrm{RMSE}$, so the root mean
+squared error is not exactly design-unbiased even though the mean squared error
+is. The bias is of order $n^{-1}$ and is negligible at the sample sizes used
+here, but it is a property of the square root and not of the design. Taking
+$g(i) = \hat z(s_i) - z(s_i)$ gives the mean error, which is exactly
+design-unbiased. We also report the squared Pearson correlation and the
+model efficiency coefficient of \citet{nash1970}, following the reference
+study.
+
+\subsection{Interval accuracy: $g$ is the coverage indicator}
+\label{sec:picp}
+
+Let $[\hat \ell(s), \hat u(s)]$ be a nominal $1-\alpha$ prediction interval
+attached to every cell, and choose
+
+\begin{equation}
+g(i) = \mathbf{1}\{\hat \ell(s_i) \le z(s_i) \le \hat u(s_i)\}.
+\label{eq:covind}
+\end{equation}
+
+Its population mean is the prediction-interval coverage probability, and
+Section~\ref{sec:ht} immediately supplies a design-unbiased estimator,
+
+\begin{equation}
+\mathrm{PICP} = \frac{1}{N}\sum_{i \in U} g(i),
+\qquad
+\widehat{\mathrm{PICP}} = \frac{1}{n}\sum_{i \in S} g(i).
+\label{eq:picp}
+\end{equation}
+
+Here $g$ is an indicator, so $\widehat{\mathrm{PICP}}$ is a sample proportion.
+It is exactly unbiased, with no Jensen problem, its design variance under
+simple random sampling is $\mathrm{PICP}(1-\mathrm{PICP})/n$ up to the
+finite-population correction, and confidence statements about it are
+elementary.
+
+This is the conceptual contribution of the paper, and it is deliberately
+unglamorous: coverage is just another population mean, so it inherits the
+entire design-based apparatus that \citet{wadoux2021} established for accuracy.
+A valid interval has $\widehat{\mathrm{PICP}} \approx 1-\alpha$, and among
+valid intervals the better one is narrower, measured by the mean prediction
+interval width
+
+\begin{equation}
+\mathrm{MPIW} = \frac{1}{n}\sum_{i \in S}\big(\hat u(s_i) - \hat \ell(s_i)\big).
+\label{eq:mpiw}
+\end{equation}
+
+Width without validity is meaningless, so the two must always be read together.
+The practical consequence is the important one. Coverage estimated this way is
+model-free, so it can convict an interval method of miscoverage without
+sharing any of that method's assumptions. Section~\ref{sec:intervals-results}
+shows a case where it does exactly that.
+
+%% ===================================================================
+\section{Methods}
+\label{sec:methods}
+
+\subsection{The point predictor, derived}
+\label{sec:predictor}
+
+\subsubsection{Why a residual correction can help at all}
+
+Write the base random forest \citep{breiman2001} as $\hat f$ and decompose the
+truth as
+
+\begin{equation}
+z(s) = \hat f(s) + r(s), \qquad r(s) := z(s) - \hat f(s).
+\label{eq:decomp}
+\end{equation}
+
+The residual field $r$ is not noise. A forest is fitted on a finite sample and
+cannot represent every relation, so whatever spatial or covariate structure it
+failed to capture remains in $r$. If $r$ is predictable, from coordinates, from
+covariates, or from both, then a second model $\hat g$ of $r$ carries
+information the map is currently discarding. This is the logic of regression
+kriging \citep{hengl2018}: fit a trend, then interpolate what the trend left
+behind.
+
+\subsubsection{The shrinkage weight, and why it is not optional}
+\label{sec:lambda}
+
+Consider the corrected predictor $\hat y = \hat f + \lambda \hat g$ and its
+population risk as a function of $\lambda$,
+
+\begin{equation}
+\mathcal{R}(\lambda)
+= \mathbb{E}\big[(r - \lambda \hat g)^2\big]
+= \mathbb{E}[r^2] - 2\lambda\,\mathbb{E}[r\hat g] + \lambda^2\,\mathbb{E}[\hat g^2].
+\label{eq:risk}
+\end{equation}
+
+This is a convex parabola in $\lambda$. Differentiating and setting the
+derivative to zero gives the optimum and the risk attained there,
+
+\begin{equation}
+\lambda^\star = \frac{\mathbb{E}[r \hat g]}{\mathbb{E}[\hat g^2]},
+\qquad
+\mathcal{R}(\lambda^\star)
+= \mathbb{E}[r^2] - \frac{\mathbb{E}[r\hat g]^2}{\mathbb{E}[\hat g^2]}
+\;\le\; \mathbb{E}[r^2] = \mathcal{R}(0).
+\label{eq:lambdastar}
+\end{equation}
+
+Three consequences follow, and each one motivates a design decision.
+
+First, at the optimal $\lambda$ the correction can never hurt, and it helps
+exactly to the extent that $\hat g$ correlates with the residual. That is the
+reason a correction is worth attempting at all.
+
+Second, $\lambda = 1$ is not the optimum. Adding the raw residual prediction is
+optimal only when $\mathbb{E}[r\hat g] = \mathbb{E}[\hat g^2]$, that is only
+when $\hat g$ is a perfectly calibrated predictor of $r$. A noisy $\hat g$ has
+$\mathbb{E}[\hat g^2]$ inflated by its own variance, which pushes
+$\lambda^\star$ below one. Shrinkage is therefore not a safety hack bolted on
+afterwards; it is the solution of the risk minimisation.
+
+Third, $\lambda^\star$ has to be estimated, and a badly estimated $\lambda$ can
+hurt. Setting $\mathcal{R}(\lambda) > \mathcal{R}(0)$ in Eq.~\eqref{eq:risk}
+and solving shows that the correction damages the map whenever
+
+\begin{equation}
+\lambda > 2\lambda^\star .
+\label{eq:overcorrect}
+\end{equation}
+
+Over-correction is a real failure mode rather than a hypothetical one, and
+Sections~\ref{sec:crossfit} and \ref{sec:selection} exist to prevent it. In
+practice we do not use the closed form of Eq.~\eqref{eq:lambdastar}, because it
+presumes an $\hat g$ fixed in advance; $\lambda$ is selected on a grid jointly
+with the choice of $\hat g$.
+
+\subsubsection{Why the residuals must be cross-fitted}
+\label{sec:crossfit}
+
+Suppose everything were estimated on the same data: fit $\hat f$ on all $n$
+points, form the in-sample residuals $\hat r_i = y_i - \hat f(x_i)$, fit
+$\hat g$ to them, and choose $\lambda$ by minimising
+$\sum_i (y_i - \hat f(x_i) - \lambda \hat g(x_i))^2$.
+
+This fails, and it fails in a specific direction. A random forest interpolates
+its training data to some degree, so $\hat f(x_i)$ is pulled toward $y_i$ and
+the in-sample residual $\hat r_i$ is shrunk toward zero relative to the true
+$r$. Worse, $\hat r_i$ is correlated with the noise in $y_i$ itself. A model
+$\hat g$ fitted to those residuals partly relearns that noise, and when scored
+on the same points it appears to explain more of $r$ than it can out of sample.
+The selected $\lambda$ is therefore biased upward, which is exactly the regime
+in Eq.~\eqref{eq:overcorrect} where the correction damages the map.
+
+The remedy is $K$-fold cross-fitting. Partition the calibration sample into
+folds $F_1,\dots,F_K$, and for each $k$ fit the base model on $U \setminus F_k$
+and predict $F_k$,
+
+\begin{equation}
+\tilde f_i = \hat f^{(-k(i))}(x_i),
+\qquad
+\tilde r_i = y_i - \tilde f_i ,
+\label{eq:oofresid}
+\end{equation}
+
+and likewise fit each candidate correction on the training folds' residuals and
+predict the held-out fold, $\tilde g_i = \hat g^{(-k(i))}(x_i, s_i)$. By
+construction neither $\tilde f_i$ nor $\tilde g_i$ depends on $y_i$, so
+$\tilde r_i$ is an honest residual and the criterion
+
+\begin{equation}
+\widehat{\mathcal{R}}(c,\lambda)
+= \sqrt{\frac{1}{n}\sum_{i=1}^{n}
+\big(y_i - \tilde f_i - \lambda\,\tilde g_i^{(c)}\big)^2}
+\label{eq:oofcrit}
+\end{equation}
+
+estimates the out-of-sample risk of configuration $(c,\lambda)$ rather than its
+in-sample fit. This is the same device that underlies double or debiased
+machine learning \citep{chernozhukov2018}: cross-fitting removes the
+own-observation dependence that otherwise contaminates a plug-in estimate.
+
+\subsubsection{Selection over a library, and the do-no-harm guarantee}
+\label{sec:selection}
+
+The correction is not a single model but a library $\mathcal{C}$ of candidates,
+each able to recover a different kind of structure that the forest may have
+missed. Table~\ref{tab:library} lists them.
+
+\begin{table}[!ht]
+\centering
+\caption{The correction library. Each candidate is fitted to cross-fitted
+residuals and scored by Eq.~\eqref{eq:oofcrit}.}
+\label{tab:library}
+\begin{tabular}{ll}
+\toprule
+Candidate & Structure it can recover \\
+\midrule
+Residual random forest & non-linear residual dependence on covariates \\
+Residual Cubist \citep{quinlan1992} & the same, through piecewise-linear rules \\
+Single-hidden-layer network & smooth residual dependence, different bias \\
+Ordinary kriging of residuals & classical spatial autocorrelation \\
+Radial basis or kernel smoother & local spatial structure at a variogram scale \\
+Ensemble of the above & averages out individual-candidate variance \\
+Linear and quadratic recalibration & systematic bias in the base prediction \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+We select
+
+\begin{equation}
+(c^\star,\lambda^\star)
+= \operatorname*{arg\,min}_{c \in \mathcal{C},\; \lambda \in \Lambda}
+\widehat{\mathcal{R}}(c,\lambda),
+\label{eq:argmin}
+\end{equation}
+
+and the key structural detail is that the search space contains the null
+correction. Since $\lambda = 0$ belongs to the grid $\Lambda$, and reproduces
+the base forest exactly,
+
+\begin{equation}
+\widehat{\mathcal{R}}(c^\star,\lambda^\star)
+\;\le\; \widehat{\mathcal{R}}(\cdot\,,0)
+= \widehat{\mathcal{R}}_{\mathrm{RF\ only}}
+\label{eq:donoharm}
+\end{equation}
+
+holds by construction. The method cannot select a configuration that is worse
+than the plain forest on the out-of-fold criterion, and a correction is
+deployed only once it has demonstrated an improvement on data it did not see.
+This is the do-no-harm property, and it is why the estimator degrades to a
+random forest, rather than to something worse, when the residual field carries
+no recoverable signal.
+
+Two qualifications belong here rather than in a footnote. The minimum of
+$\widehat{\mathcal{R}}$ over many candidates is itself optimistically biased,
+the familiar winner's curse, so
+$\widehat{\mathcal{R}}(c^\star,\lambda^\star)$ is not an unbiased estimate of
+the deployed model's risk and we never report it as one. That is precisely why
+the two-stage design of Section~\ref{sec:designbased} matters: all selection
+happens inside the calibration sample, and the reported accuracy is computed on
+an independent probability sample that entered no part of fitting or selection.
+The winner's curse contaminates the selection score, not the design-based
+estimate.
+
+\subsubsection{The spatial gate}
+\label{sec:gate}
+
+A residual correction is credible only where there are data to support it. Far
+from every calibration point $\hat g$ extrapolates, and an extrapolated
+correction adds variance without removing bias. We therefore attach a
+location-dependent gate. Let
+
+\begin{equation}
+d_1(s) = \min_{i \le n} \lVert s - s_i \rVert
+\label{eq:d1}
+\end{equation}
+
+be the distance from $s$ to the nearest calibration point, and set
+
+\begin{equation}
+w(s) = \exp\!\big(-d_1(s)/\ell\big) \in (0,1],
+\label{eq:gate}
+\end{equation}
+
+so that $w \rightarrow 1$ where the correction is well supported and
+$w \rightarrow 0$ where it is not. The deployed predictor is
+
+\begin{equation}
+\hat y(s) = \hat f(s) + \lambda^\star\, w(s)\, \hat g^{(c^\star)}(s).
+\label{eq:final}
+\end{equation}
+
+The length scale $\ell$ is not free. Beyond the range of the residual
+variogram, residuals are effectively uncorrelated, so a spatially interpolated
+correction carries no information about them and the gate should decay on that
+scale. We therefore set $\ell = c_{\mathrm{gate}} \cdot \rho$ with $\rho$ the
+fitted range, and select $c_{\mathrm{gate}}$ out of fold, including
+$c_{\mathrm{gate}} = \infty$, which disables the gate, among the candidates.
+
+\subsection{Geostatistics in the hyperparameter space}
+\label{sec:geohyper}
+
+Sections~\ref{sec:lambda} to \ref{sec:gate} already tune how much the
+correction is trusted and how far it reaches. The variogram that feeds those
+quantities, however, is normally a fixed recipe: a family chosen by habit, a
+cutoff at half the maximum distance, a fixed number of lags, one estimator, and
+a range consumed as a constant. For a method that argues geostatistical choices
+should rest on evidence, that would be the last unexamined assumption. We
+therefore place the variogram itself in the selection space.
+
+\subsubsection{Family, and why the comparison is legitimate here}
+
+Let $\hat\gamma(h)$ be the empirical variogram computed with the robust
+estimator of \citet{cressie1980},
+
+\begin{equation}
+2\hat\gamma(h) =
+\frac{\Big(\frac{1}{|N(h)|}\sum_{N(h)} |r_i - r_j|^{1/2}\Big)^{4}}
+{0.457 + 0.494/|N(h)| },
+\label{eq:cressie}
+\end{equation}
+
+where $N(h)$ is the set of pairs separated by approximately $h$. Candidate
+families, exponential, spherical, Gaussian and Mat\'ern
+\citep{matheron1963,journel1978}, are each fitted to this same empirical
+variogram by weighted least squares, and the family with the lowest weighted
+residual sum of squares is retained.
+
+Comparing fitted models by their sum of squares is legitimate in this direction
+precisely because the binning and the pair counts are identical across
+candidates, so the criteria are computed on the same quantity. It would not be
+legitimate if the geometry or the binning changed, a point we return to below.
+
+Parsimony is enforced among nested families. The Mat\'ern model nests the
+exponential at smoothness $\kappa = 1/2$ and approaches the Gaussian as
+$\kappa \rightarrow \infty$, and the smoothness is itself fitted, so raw sum of
+squares hands Mat\'ern a win by one extra degree of freedom even when the truth
+is exactly exponential, which we observed. We therefore retain the simplest
+family whose criterion lies within a tolerance of the best.
+
+\subsubsection{Range, binning and estimator}
+
+The fitted range $\rho$ enters as a working scale rather than a constant. The
+radial basis bandwidth is
+
+\begin{equation}
+b = m_{b}\,\rho ,
+\label{eq:bandwidth}
+\end{equation}
+
+with the multiplier $m_b$ selected out of fold. The value $m_b = 1/2$
+reproduces the conventional derived value.
+
+The lag binning, that is the cutoff fraction and the number of lags, and the
+choice between the robust estimator of Eq.~\eqref{eq:cressie} and the classical
+estimator of \citet{matheron1963}, cannot be compared by variogram sum of
+squares at all, because changing them changes the empirical variogram itself
+and therefore the quantity being fitted. They are selected by out-of-fold
+predictive merit through Eq.~\eqref{eq:oofcrit}, like every other
+hyperparameter.
+
+\subsubsection{Anisotropy}
+\label{sec:aniso}
+
+Nothing above requires the spatial structure to be isotropic, and assuming that
+it is would sit badly with the argument of this paper. We estimate a geometric
+anisotropy, a major-axis angle $\theta$ and a ratio
+$\varrho = \ell_{\min}/\ell_{\max} \in (0,1]$, and map coordinates into the
+space where Euclidean distance equals anisotropic distance,
+
+\begin{equation}
+T_{\theta,\varrho}(s) =
+\begin{pmatrix}
+\sin\theta & \cos\theta \\[2pt]
+-\cos\theta/\varrho & \sin\theta/\varrho
+\end{pmatrix} s ,
+\label{eq:anisotransform}
+\end{equation}
+
+so that $\varrho = 1$ is a pure rotation and recovers the isotropic method
+exactly. The transform is applied to all three spatial components: the radial
+basis, both query points and centres, so that the kernel becomes an ellipse
+elongated along the major axis; the kernel residual smoother; and the ordinary
+kriging correction, since kriging under geometric anisotropy is ordinary
+kriging in the transformed space \citep{journel1978}.
+
+Estimating $(\theta,\varrho)$ deserves a note, because the obvious routes fail.
+Fitting one variogram per direction and taking the ratio of the smallest to the
+largest fitted range is badly biased: the maximum of noisy range estimates
+overshoots and the minimum undershoots, so the procedure reports anisotropy for
+perfectly isotropic fields. Scoring candidate geometries by variogram fit in
+the transformed space fails differently, because the transform changes the
+distance distribution and hence the binning and pair counts, so the criteria
+are not comparable. We therefore score each candidate geometry by $k$-fold
+out-of-fold prediction error of a kernel smoother using the corresponding
+distance, on the same held-out points for every candidate, with the bandwidth
+set as a fraction of the median pairwise distance in the transformed space so
+that the score responds to shape and not to the rescaling the transform
+induces. On simulated fields this recovers the true angle and returns exact
+isotropy for isotropic fields, and its errors are false negatives rather than
+false positives.
+
+The geometry is not imposed even once estimated. The anisotropic variant enters
+the profile search as an additional candidate and has to beat the isotropic one
+on the criterion of Eq.~\eqref{eq:oofcrit}.
+
+\subsection{Design-based prediction intervals}
+\label{sec:intervals}
+
+\subsubsection{Construction}
+
+Cross-fitting has already produced leakage-free residuals for the deployed
+configuration,
+
+\begin{equation}
+e_i = y_i - \big(\tilde f_i + \lambda^\star \tilde g_i^{(c^\star)}\big),
+\label{eq:conformity}
+\end{equation}
+
+and these are exactly what split conformal prediction requires as conformity
+scores \citep{papadopoulos2002,vovk2005,lei2018}. Define $q$ as the
+$\lceil (n+1)(1-\alpha) \rceil$-th smallest value of
+$|e_1|,\dots,|e_n|$ and attach to every cell the interval
+
+\begin{equation}
+\big[\hat y(s) - q,\; \hat y(s) + q\big].
+\label{eq:interval}
+\end{equation}
+
+\subsubsection{Why it is valid, and what the validity rests on}
+
+The conformal guarantee is a statement about exchangeability, not about
+distributional form. If $|e_1|,\dots,|e_n|,|e_{\mathrm{new}}|$ are
+exchangeable, then $|e_{\mathrm{new}}|$ is equally likely to occupy any rank
+among the $n+1$ values, so
+
+\begin{equation}
+\Pr\big(|e_{\mathrm{new}}| \le q\big) \;\ge\; 1-\alpha ,
+\label{eq:conformalvalid}
+\end{equation}
+
+with no assumption of Gaussianity, homoscedasticity or stationarity
+\citep{vovk2005}. When calibration and target cells are both drawn by simple
+random sampling from the same finite population, exchangeability holds, and the
+marginal coverage statement of Eq.~\eqref{eq:conformalvalid} is a statement
+about the population, which is to say it is design-based coverage in the sense
+of Section~\ref{sec:picp}.
+
+\subsubsection{Why it breaks under clustered sampling, and two repairs}
+
+Now let the calibration sample be spatially clustered. The map still has to
+predict everywhere, including regions far from every cluster, and the residuals
+it will incur there are systematically larger than any residual observed within
+the clusters, because those locations are extrapolations. Formally,
+$|e_{\mathrm{new}}|$ for a distant target cell is not exchangeable with the
+calibration scores, which are concentrated on well-supported locations. The
+consequence is directional and predictable: $q$ is calibrated on residuals that
+are too small, the intervals are too narrow, and coverage falls below nominal.
+Section~\ref{sec:intervals-results} measures this, and the design-based
+estimator of Section~\ref{sec:picp} is what makes the failure visible, since a
+model-based coverage check would rely on the same exchangeability that has just
+broken.
+
+We consider two repairs. Covariate-shift weighting replaces the empirical
+quantile by a weighted one with density-ratio weights
+$w_i \propto p_{\mathrm{pop}}(x_i)/p_{\mathrm{sample}}(x_i)$, estimated by a
+classifier separating calibration points from the known population covariates
+\citep{tibshirani2019}. Its limitation is fundamental rather than technical:
+reweighting can only redistribute mass over residuals that were actually
+observed, and a clustered sample never observes the large extrapolation
+residuals in the first place. Spatial-block conformal calibration instead
+changes what the conformity scores are. The deployed configuration is refitted
+on spatial $k$-means blocks and each held-out block is scored, so that every
+residual is generated in an extrapolation regime resembling the one the map
+faces \citep{roberts2017}. Those scores are larger, $q$ grows, and coverage is
+restored. The price is wider intervals, and the gain is validity; an interval
+that is narrow but invalid is worse than useless, because it is confidently
+wrong.
+
+All variants are compared against a quantile regression forest
+\citep{meinshausen2006} interval, the standard model-based baseline, and every
+interval is evaluated by design-based coverage and width through
+Eqs.~\eqref{eq:picp} and \eqref{eq:mpiw}.
+
+%% ===================================================================
+\section{Materials and experimental design}
+\label{sec:materials}
+
+We use the public materials of \citet{wadoux2021}: above-ground live woody
+biomass \citep{baccini2012} over a 928 by 1642 km Amazonian rectangle at 1 km
+resolution, giving 1{,}310{,}143 cells, with 28 covariates known over the whole
+grid. Calibration samples of $n=500$ are drawn under three designs, simple
+random, systematic on a regular grid, and two-stage clustered random, and each
+resulting map is evaluated design-based on an independent simple random
+validation sample as in Section~\ref{sec:designbased}. We report 30 repetitions
+for each design with a fixed seed.
+
+Comparators are the untuned default random forest exactly as in the reference
+study, a default Cubist, and a transparency model we label RF-tuned, which is
+the base forest of the selected profile with no correction applied. RF-tuned
+isolates the effect of tuning the forest from the effect of the residual
+correction, and it matters for interpreting the result: if RF-tuned were to
+account for the gain, the correction would be doing nothing.
+
+Random forests are fitted with \texttt{ranger} \citep{wright2017} and all
+variogram work uses \texttt{gstat} \citep{pebesma2004}. Every forest receives an
+explicit seed, so the benchmark is reproducible. The estimator itself is
+released as the \texttt{GeoVersa} package for R.
+
+%% ===================================================================
+\section{Results}
+\label{sec:results}
+
+\subsection{Point accuracy}
+\label{sec:point}
+
+Table~\ref{tab:accuracy} reports the design-based accuracy of each model under
+the three calibration designs. DB-TARF lowers the root mean squared error
+relative to the default forest under all three, winning 28 of 30, 30 of 30 and
+29 of 30 paired repetitions, with paired Wilcoxon signed-rank $p$ values of
+$6.5\times10^{-9}$, $9.3\times10^{-10}$ and $1.9\times10^{-9}$ respectively.
+The design-based bias also moves toward zero in every design.
+
+\begin{table}[!ht]
+\centering
+\caption{Design-based accuracy by calibration design, 30 repetitions each,
+$n=500$. ME and RMSE in \Mgha{}. RF-tuned is the selected base forest with no
+correction applied.}
+\label{tab:accuracy}
+\begin{tabular}{llrrr}
+\toprule
+Design & Model & ME & RMSE & MEC \\
+\midrule
+\multirow{4}{*}{Simple random}
+ & RF (default)   & $+1.061$ & 32.493 & 0.876 \\
+ & RF-tuned       & $+1.129$ & 32.475 & 0.876 \\
+ & Cubist         & $+1.853$ & 33.264 & 0.870 \\
+ & \textbf{DB-TARF} & $\mathbf{+0.826}$ & \textbf{31.624} & \textbf{0.882} \\
+\midrule
+\multirow{4}{*}{Regular grid}
+ & RF (default)   & $+0.664$ & 32.280 & 0.877 \\
+ & RF-tuned       & $+0.707$ & 32.264 & 0.878 \\
+ & Cubist         & $+1.921$ & 33.171 & 0.870 \\
+ & \textbf{DB-TARF} & $\mathbf{+0.479}$ & \textbf{31.400} & \textbf{0.884} \\
+\midrule
+\multirow{4}{*}{Clustered random}
+ & RF (default)   & $-1.356$ & 35.778 & 0.851 \\
+ & RF-tuned       & $-1.252$ & 35.598 & 0.853 \\
+ & Cubist         & $+1.771$ & 37.155 & 0.837 \\
+ & \textbf{DB-TARF} & $\mathbf{-0.787}$ & \textbf{34.538} & \textbf{0.860} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The RF-tuned row is the one to read carefully. Tuning the forest buys between
+0.02 and 0.18 \Mgha{}, which is one to fifteen per cent of the gain that
+DB-TARF achieves. The improvement therefore comes from the residual correction,
+not from a better-tuned forest, which is what the construction of
+Section~\ref{sec:selection} was designed to deliver.
+Figures~\ref{fig:deltas} and \ref{fig:bymodel} show the paired differences and
+the by-design summary.
+
+\begin{figure}[!ht]
+\centering
+\includegraphics[width=0.85\textwidth]{figures/fig2_delta_boxplots.png}
+\caption{Paired difference in design-based RMSE, DB-TARF minus the default
+random forest, for each repetition. Values below zero favour DB-TARF.}
+\label{fig:deltas}
+\end{figure}
+
+\begin{figure}[!ht]
+\centering
+\includegraphics[width=0.85\textwidth]{figures/fig3_rmse_by_model.png}
+\caption{Design-based RMSE by model and calibration design, mean and standard
+deviation over 30 repetitions. RF-tuned sits on top of the default forest,
+which localises the gain in the residual correction.}
+\label{fig:bymodel}
+\end{figure}
+
+Figure~\ref{fig:maps} shows the maps themselves for one calibration sample,
+together with the error fields. Panels share one colour scale for the value
+maps and one symmetric scale for the errors, so the three surfaces and the two
+error fields are directly comparable. Computed over all 1{,}310{,}143 cells,
+that is over the population rather than a sample of it, the root mean squared
+error is 31.655 \Mgha{} for the default forest and 31.079 \Mgha{} for DB-TARF,
+with the bias falling from $+0.378$ to $+0.127$ \Mgha{}.
+
+\begin{figure}[!ht]
+\centering
+\includegraphics[width=\textwidth]{figures/fig7_maps.png}
+\caption{Observed above-ground biomass, the two predicted surfaces, and their
+error fields for one calibration sample of $n=500$. Panels (a) to (c) share a
+common colour scale and panels (d) and (e) share a common symmetric scale, so
+that all comparisons are visual as well as numerical. Red circles in (a) mark
+the calibration points.}
+\label{fig:maps}
+\end{figure}
+
+\subsection{Which geostatistical choices does the data make?}
+\label{sec:choices}
+
+Section~\ref{sec:geohyper} places the variogram family, its range, the lag
+binning and estimator, and the anisotropic geometry in the selection space.
+Table~\ref{tab:axes} reports what the data does with that freedom, because the
+claim in the title stands or falls on it.
+
+\begin{table}[!ht]
+\centering
+\caption{Number of repetitions, out of 30 per design, in which the out-of-fold
+search departs from the conventional recipe, namely an exponential family, a
+cutoff at half the maximum distance, 15 lags, the robust estimator, a bandwidth
+of half the range, and isotropy.}
+\label{tab:axes}
+\begin{tabular}{lrrrr}
+\toprule
+Calibration design & Binning or estimator & Range scale & Anisotropy & Conventional recipe kept \\
+\midrule
+Simple random    &  9 & 7 & 4 & 10 \\
+Regular grid     &  4 & 5 & 3 & 18 \\
+Clustered random & 11 & 5 & 0 & 14 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+In two designs out of three the conventional recipe is displaced in a majority
+of repetitions, so the defaults were not innocuous. Two contrasts within the
+same design are worth drawing out. Under clustered sampling the anisotropic
+geometry is accepted in none of the 30 repetitions, while the binning and
+estimator are displaced in 11, the highest count of the three designs. Both
+behaviours are what a design-aware procedure should show. A clustered sample
+concentrates points in a few neighbourhoods and therefore carries almost no
+information about direction at the scale of the domain, so the criterion
+refuses a geometry it cannot estimate. The same clustering, however, severely
+distorts the distribution of pairwise distances, so a cutoff at half the
+maximum distance with 15 equal lags is a poor description of that sample and
+the criterion replaces it. The mechanism is not a switch that turns
+geostatistics on; it discriminates between the geostatistical parameters a
+design can support and those it cannot.
+
+Table~\ref{tab:modes} reports which corrector is selected, pooled over all 90
+repetitions, and it is also the honest limit of the claim.
+
+\begin{table}[!ht]
+\centering
+\caption{Selected corrector, pooled over 90 repetitions.}
+\label{tab:modes}
+\begin{tabular}{lr}
+\toprule
+Selected corrector & Count \\
+\midrule
+Residual random forest & 68 \\
+Ensemble of residual forest, Cubist and kernel smoother & 15 \\
+Ordinary kriging of residuals & 3 \\
+Cubist delta & 2 \\
+Kernel smoother & 1 \\
+Linear recalibration & 1 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Ordinary kriging wins outright in 3 of 90 repetitions, and a purely
+geostatistical interpolator, kriging or the kernel smoother, in 4. In 68 the
+selected corrector is a residual random forest which, carrying a shrinkage
+weight, is formally a single boosting step. A reader is entitled to ask whether
+this is geostatistics at all or a two-stage forest wearing geostatistical
+clothes.
+
+The answer is that the geostatistics is in the representation and the
+regularisation rather than in the final estimator. The residual forest is not
+fitted on coordinates alone. Its features include radial basis functions whose
+centres and bandwidth come from the fitted variogram through
+Eq.~\eqref{eq:bandwidth}, and from the anisotropic geometry of
+Eq.~\eqref{eq:anisotransform} when that is accepted, and its output is
+multiplied by the spatial gate of Eq.~\eqref{eq:gate} whose length scale is the
+fitted range. Remove the variogram and those features and that gate do not
+exist. What Table~\ref{tab:modes} shows is that, once spatial structure has been
+encoded this way, a forest exploits it better than a kriging predictor does on
+these data, which is a statement about the relative strengths of two learners
+rather than evidence that the geostatistical information was unnecessary. We
+therefore make the narrower claim throughout: geostatistics supplies the
+hypothesis space, the features and the hyperparameters, and the learner that
+consumes them is chosen by the data.
+
+Figure~\ref{fig:modes} shows the distribution of selected correctors under the
+simple random design.
+
+\begin{figure}[!ht]
+\centering
+\includegraphics[width=0.7\textwidth]{figures/fig5_selected_modes.png}
+\caption{Frequency of the selected correction mode under the simple random
+design.}
+\label{fig:modes}
+\end{figure}
+
+\subsection{Robustness across validation estimands}
+\label{sec:estimands}
+
+Section~\ref{sec:point} scores the maps on a validation sample of $n=500$. Two
+questions follow: does the advantage survive a much larger probability sample,
+and does the ranking survive a change of scoring protocol? We drew 10 further
+calibration samples under the simple random design and scored each under three
+additional protocols, holding the configuration and the sample size fixed:
+Population, an independent simple random sample of 20{,}000 cells drawn from
+the population excluding the calibration cells; random 10-fold
+cross-validation; and spatial block cross-validation with complete-linkage
+blocks at 350 km.
+
+Two qualifications bound what this experiment can show, and both belong before
+the numbers. Only the first of the three is a map-accuracy estimand. The two
+cross-validation protocols are not valid estimators of map accuracy, which is
+precisely the result of \citet{wadoux2021} that we accept, and they are
+reported here as model-comparison estimands only. Furthermore, the two
+cross-validation protocols are aligned with the internal selection criteria of
+the method, since corrections are accepted on random-fold out-of-fold risk and
+the gate length is chosen by spatial cross-validation. They are therefore the
+least independent of the four checks rather than the most adversarial, and
+their differences should be read as an upper bound. The Population row carries
+the evidential weight.
+
+\begin{table}[!ht]
+\centering
+\caption{DB-TARF against the untuned default forest under four validation
+estimands, simple random calibration design. RMSE in \Mgha{}. The DesignBased
+row is the 30-repetition campaign of Table~\ref{tab:accuracy}; the other three
+share the same 10 calibration draws.}
+\label{tab:estimands}
+\begin{tabular}{lrrrrr}
+\toprule
+Estimand & Reps & RF & DB-TARF & $\Delta$RMSE & Wins \\
+\midrule
+\multicolumn{6}{l}{\emph{Design-based map accuracy}} \\
+Population (SRS 20{,}000) & 10 & 32.18 & 31.51 & $-0.669$ & 10/10 \\
+DesignBased (SRS 500)     & 30 & 32.49 & 31.62 & $-0.869$ & 28/30 \\
+\midrule
+\multicolumn{6}{l}{\emph{Model comparison only, not map accuracy}} \\
+Random 10-fold CV           & 10 & 32.24 & 31.12 & $-1.125$ & 10/10 \\
+Spatial block CV (350 km)   & 10 & 34.72 & 33.45 & $-1.275$ & 10/10 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+DB-TARF is better under every protocol, winning all 10 draws under each of the
+three additional ones, and mean model efficiency rises under each. Three
+cautions on how much this carries. The one-sided paired Wilcoxon $p$ value at
+10 repetitions cannot fall below $2^{-10} \approx 0.00098$, which is the value
+attained; it certifies that all ten draws favour DB-TARF and nothing stronger.
+These are 10 calibration draws scored three ways rather than 30 independent
+repetitions, and the protocol results within a draw are dependent, with the
+paired differences of random and spatial cross-validation correlating at
+$r = 0.59$. Finally the cross-validation rows train on strict subsets of the
+calibration sample, 450 points for 10-fold and a data-dependent number for
+spatial blocks, so their absolute values are not commensurable with the two
+design-based rows.
+
+We deliberately do not read the ordering of the four differences as a gradient.
+The point estimates do order as $-0.67$, $-0.87$, $-1.13$ and $-1.28$, but
+adjacent protocols are not statistically distinguishable, with a paired
+$p = 0.36$ between random and spatial block cross-validation, the confidence
+intervals overlap heavily, and the ordering is not one of spatial stress, since
+random 10-fold cross-validation holds out points interspersed among the
+training points and is the least spatially demanding of the four. The one
+interpretable comparison is that the largest difference occurs under spatial
+block cross-validation, the only protocol that forces prediction into
+spatially disjoint regions.
+
+Buffered leave-one-out cross-validation was not run. It requires of the order
+of $10^3$ sequential model fits per repetition, which is prohibitive at this
+per-fit cost. We note that it would be the most adversarial model-comparison
+estimand available, being the one least aligned with the internal selection,
+and leave it to future work.
+
+\begin{figure}[!ht]
+\centering
+\includegraphics[width=0.9\textwidth]{figures/fig4_protocols.png}
+\caption{DB-TARF against the default forest under four validation estimands,
+simple random calibration design. Population and DesignBased estimate map
+accuracy; the two cross-validation estimands are reported for model comparison
+only and are not valid map-accuracy estimates. The cross-validation bars train
+on subsets of the calibration sample, so their absolute heights are not
+comparable with the first two.}
+\label{fig:protocols}
+\end{figure}
+
+\subsection{Design-based interval coverage}
+\label{sec:intervals-results}
+
+Table~\ref{tab:coverage} reports coverage and width estimated design-based
+through Eqs.~\eqref{eq:picp} and \eqref{eq:mpiw}, and it contains the paper's
+main finding.
+
+\begin{table}[!ht]
+\centering
+\caption{Design-based interval coverage at a nominal 0.90 level and mean
+interval width in \Mgha{}.}
+\label{tab:coverage}
+\begin{tabular}{llrr}
+\toprule
+Calibration design & Interval & PICP & MPIW \\
+\midrule
+\multirow{2}{*}{Simple random}
+ & DB-TARF conformal        & 0.896 & 100 \\
+ & Quantile regression forest & 0.937 & 123 \\
+\midrule
+\multirow{2}{*}{Regular grid}
+ & DB-TARF conformal        & 0.907 & 104 \\
+\midrule
+\multirow{3}{*}{Clustered random}
+ & DB-TARF conformal, plain & 0.840 & 111 \\
+ & Covariate-shift weighted & 0.850 & 114 \\
+ & \textbf{Spatial-block conformal} & \textbf{0.946} & 145 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Under representative sampling, whether simple random or on a regular grid, the
+plain conformal intervals are calibrated, with coverage of 0.896 and 0.907
+against a nominal 0.90, and they are roughly 17 per cent narrower than the
+quantile regression forest baseline, which over-covers at 0.937. Under
+clustered sampling the plain intervals under-cover at 0.840, and the
+covariate-shift weighting of \citet{tibshirani2019} barely helps, reaching
+0.850. This is the limitation anticipated in Section~\ref{sec:intervals}:
+reweighting can only redistribute mass over residuals that were actually
+observed, and a clustered sample never observes the large extrapolation
+residuals. The spatial-block calibration restores validity at 0.946, at the
+cost of intervals that are about 40 per cent wider.
+
+The result that matters most is not any single number but the fact that the
+failure is visible at all. A model-based coverage check would have relied on
+the same exchangeability assumption that clustering breaks, and would therefore
+have reported the intervals as adequate. Estimating coverage as a population
+parameter on a probability sample is what convicts them.
+
+\begin{figure}[!ht]
+\centering
+\includegraphics[width=\textwidth]{figures/fig6_uncertainty.png}
+\caption{Design-based interval assessment. Left, coverage with the nominal 0.90
+level marked; right, mean interval width. Plain conformal calibration is
+calibrated and sharpest under representative sampling but under-covers under
+clustering, and the spatial-block calibration restores coverage at the cost of
+width.}
+\label{fig:uncertainty}
+\end{figure}
+
+%% ===================================================================
+\section{Discussion}
+\label{sec:discussion}
+
+The point result should be read as a claim about where modelling decisions are
+made, not about a new learner. Its ingredients, regression kriging and the
+super learner, are established and we say so. What the experiments support is
+narrower and, we think, more useful. When the geostatistical decisions are
+moved into the hyperparameter space of the learner and validated out of fold,
+the map improves reliably under the valid design-based yardstick, and it does
+so without the analyst judging a variogram by eye or deciding in advance
+whether kriging is warranted. The RF-tuned control shows the gain is the
+correction rather than forest tuning, the do-no-harm construction of
+Eq.~\eqref{eq:donoharm} bounds the downside by the forest itself, and
+Table~\ref{tab:axes} shows the freedom is used, with the conventional recipe
+displaced in most repetitions under two of the three designs.
+
+We are equally clear about the boundary. Table~\ref{tab:modes} shows that the
+selected corrector is usually a residual forest and that ordinary kriging wins
+outright in 3 of 90 repetitions. The contribution is not that kriging has been
+restored to the centre of digital soil mapping. It is that the geostatistical
+questions, at what scale, in which geometry, with how much confidence and
+whether at all, are posed explicitly and answered by evidence, and that the
+answers materially change what the model does even when the final corrector is
+a forest.
+
+The uncertainty result is the genuinely new and, we believe, more consequential
+contribution. Extending design-based assessment from error to coverage is
+conceptually simple, as Section~\ref{sec:picp} shows in three lines, but it
+changes what can be checked. Prediction intervals that look entirely reasonable
+can be badly miscalibrated for the population under clustered sampling, which
+is the same regime in which \citet{wadoux2021} found point-accuracy estimators
+to fail. The practical recommendation follows directly: always assess coverage
+design-based, and use a spatial-block calibration when clustering is suspected,
+accepting wider but valid intervals.
+
+\paragraph{Limitations} The point gain is incremental, of the order of 0.9 to
+1.2 \Mgha{}. Opening the geostatistical hyperparameters leaves accuracy
+unchanged relative to the fixed recipe, so the value demonstrated here is that
+the choices are made on evidence and are shown to matter to what the model
+does, not that they lower error on these data. Geometric anisotropy is
+implemented and offered to the selection but is accepted in about one
+repetition in five under representative sampling and never under clustered
+sampling, and whether it pays off on other data is untested; the anisotropy
+model is also geometric and global, a single angle and ratio for the whole
+domain, so locally varying or non-elliptical structure is not represented. The
+covariate-shift weighted conformal calibration helps only marginally, for the
+structural reason given above. Finally these results come from a single, large
+and widely used dataset at one sample size, and generality to other variables,
+resolutions and sample sizes remains to be tested.
+
+%% ===================================================================
+\section{Conclusions}
+\label{sec:conclusions}
+
+Accepting the design-based validation paradigm of \citet{wadoux2021}, we make
+two arguments. First, the decisions that geostatistics contributes to a map,
+the variogram family, its range, the binning, the estimator, the anisotropy,
+the reach of a spatial gate and the strength of the correction, belong in the
+hyperparameter space of the learner, selected out of fold against a null in
+which no correction applies, rather than fixed by habit. The estimator built on
+that rule improves on the default forest under all three sampling designs and
+degrades to the forest when there is nothing to recover. The freedom is used,
+and it is used discriminatingly: the procedure refuses an anisotropic geometry
+under clustered sampling, where the design cannot support estimating direction,
+while replacing the lag binning most often in exactly that design, where
+clustering most distorts the distance distribution.
+
+Second, we extend the paradigm to uncertainty. Coverage is a population
+proportion, so it inherits the same design-unbiased estimator as accuracy.
+Cross-fitted conformal intervals are calibrated and sharper than a quantile
+regression forest baseline under representative sampling; under clustered
+sampling the design-based assessment reveals that plain conformal calibration
+under-covers, and a spatial-block calibration restores validity.
+
+Map uncertainty, like map accuracy, must be assessed design-based, and interval
+calibration must be made design-aware. Geostatistics, for its part, need not be
+assumed into a map nor exiled from it. Its parameters can be treated as
+hyperparameters and asked to prove themselves, fold by fold. On these data the
+corrector the model ultimately prefers is a forest, but it is a forest that
+sees the landscape through a variogram.
+
+%% ===================================================================
+\section*{CRediT authorship contribution statement}
+
+\textbf{Hugo Rodrigues}: Conceptualization, Methodology, Software, Formal
+analysis, Investigation, Data curation, Writing -- original draft, Writing --
+review and editing, Visualization.
+
+\section*{Declaration of competing interest}
+
+The author declares that he has no known competing financial interests or
+personal relationships that could have appeared to influence the work reported
+in this paper.
+
+\section*{Data availability}
+
+The validation data are the public materials of \citet{wadoux2021}, available at
+\texttt{github.com/AlexandreWadoux/SpatialValidation}, and derive from
+\citet{baccini2012}. The estimator is released as the \texttt{GeoVersa} package
+for R on CRAN, and the analysis code is available in the project repository.
+
+\bibliographystyle{elsarticle-harv}
+\bibliography{references}
+
+\end{document}
