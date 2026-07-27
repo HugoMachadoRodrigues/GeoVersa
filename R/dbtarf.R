@@ -577,6 +577,24 @@
   as.numeric(predict(model, newdata = as.data.frame(x), neighbors = 0L))
 }
 
+# Distance at which a fitted variogram model first reaches `frac` of its sill.
+# Applied identically to every family so that ranges are comparable across the
+# families the search may select.
+.dbt_practical_range <- function(vg_fit, frac = 0.95, n_eval = 2000L) {
+  if (!requireNamespace("gstat", quietly = TRUE) || is.null(vg_fit)) return(NA_real_)
+  sill <- sum(vg_fit$psill, na.rm = TRUE)
+  if (!is.finite(sill) || sill <= 0) return(NA_real_)
+  rr <- vg_fit$range[is.finite(vg_fit$range) & vg_fit$range > 0]
+  if (length(rr) == 0L) return(NA_real_)
+  maxd <- max(rr) * 10
+  vl <- tryCatch(gstat::variogramLine(vg_fit, maxdist = maxd, n = n_eval),
+                 error = function(e) NULL)
+  if (is.null(vl) || nrow(vl) == 0L) return(NA_real_)
+  hit <- which(vl$gamma >= frac * sill)
+  if (length(hit) == 0L) return(max(vl$dist, na.rm = TRUE))
+  as.numeric(vl$dist[hit[1L]])
+}
+
 # Fit a residual variogram WITHOUT assuming the model family.
 #
 # The family is the classical modelling decision that is normally made by eye or
@@ -639,8 +657,24 @@
   vg_fit <- best$fit
   vg_family <- best$family
 
-  positive_ranges <- vg_fit$range[is.finite(vg_fit$range) & vg_fit$range > 0]
-  iso_range <- if (length(positive_ranges) > 0L) max(positive_ranges) else range_init
+  # PRACTICAL range, not the raw model parameter.
+  #
+  # gstat's `range` means different things in different families: for the
+  # spherical model it is the distance at which the correlation reaches zero,
+  # for the exponential it is the scale parameter a (practical range ~ 3a), for
+  # the Gaussian ~ a*sqrt(3), and for Matern it depends on the smoothness. Since
+  # the family is now selected from the data, using the raw parameter would put
+  # the radial-basis bandwidth and the gate length on scales that are not
+  # comparable across repetitions: a nominal range of 100 corresponds to a
+  # practical range of roughly 79 (spherical), 167 (Gaussian) or 278
+  # (exponential). We therefore evaluate the fitted model numerically and take
+  # the distance at which the variogram first reaches 95 per cent of its sill,
+  # which is one definition applied identically to every family.
+  iso_range <- .dbt_practical_range(vg_fit)
+  if (!is.finite(iso_range) || iso_range <= 0) {
+    positive_ranges <- vg_fit$range[is.finite(vg_fit$range) & vg_fit$range > 0]
+    iso_range <- if (length(positive_ranges) > 0L) max(positive_ranges) else range_init
+  }
   if (!is.finite(iso_range) || iso_range <= 0) iso_range <- range_init
   psill_sum <- sum(vg_fit$psill, na.rm = TRUE)
   nugget_ratio <- if (is.finite(psill_sum) && psill_sum > 1e-8) {
@@ -1021,9 +1055,77 @@
 # Refit the base RF + a single residual-correction `mode` on a training subset
 # and predict a held-out subset. Used by the spatial-CV gate selector; mirrors
 # the cross-fit/apply correction logic for one mode.
+# CV+ prediction intervals (Barber, Candes, Ramdas and Tibshirani, 2021).
+#
+# Why this replaces a pooled out-of-fold quantile. Split conformal requires the
+# point prediction to come from a model that never saw the calibration set. The
+# earlier construction centred the interval on the model refitted on the WHOLE
+# calibration sample while calibrating the half-width on residuals pooled from K
+# fold models, which is neither split conformal nor covered by its guarantee.
+# CV+ instead evaluates, for every calibration point i, the model that excluded
+# i's fold AT THE NEW LOCATION, and forms the interval from the n values
+#
+#     f_hat^(-k(i))(x) +/- R_i ,     R_i = |y_i - f_hat^(-k(i))(x_i)| ,
+#
+# taking the floor(alpha (n+1)) smallest of the lower set and the
+# ceiling((1-alpha)(n+1)) smallest of the upper set. This carries a finite-sample
+# marginal coverage guarantee of at least 1 - 2 alpha under exchangeability.
+#
+# The fold split used here is drawn INDEPENDENTLY of the one used to select the
+# mode, shrinkage and gate. Selection and calibration therefore do not reuse the
+# same residuals, which removes the second-order adaptivity that a single shared
+# split would introduce.
+.dbt_cvplus <- function(train_df, test_df, response_name, predictor_names,
+                        coord_names, mode, lambda, base_params, n_basis,
+                        bandwidth, use_spatial, k = 5L, seed = 1L,
+                        alpha = 0.10, max_test = 20000L) {
+  n <- nrow(train_df); n_test <- nrow(test_df)
+  if (n < 20L || n_test < 1L) return(NULL)
+  # the dense n x n_test construction is only affordable for moderate test sets
+  if (n_test > max_test) return(NULL)
+  lam <- if (is.finite(lambda)) lambda else 0
+
+  fold <- sample(rep_len(seq_len(k), n))
+  y <- as.numeric(train_df[[response_name]])
+  R <- rep(NA_real_, n)
+  P <- matrix(NA_real_, nrow = n, ncol = n_test)
+
+  keep <- intersect(names(train_df), names(test_df))
+  for (kk in seq_len(k)) {
+    te <- which(fold == kk); tr <- which(fold != kk)
+    if (length(tr) < 20L || length(te) < 1L) next
+    va <- rbind(train_df[te, keep, drop = FALSE], test_df[, keep, drop = FALSE])
+    bc <- tryCatch(.dbt_block_base_corr(
+      train_df[tr, , drop = FALSE], va, response_name, predictor_names,
+      coord_names, mode, base_params, n_basis, bandwidth, use_spatial,
+      seed + kk), error = function(e) NULL)
+    if (is.null(bc)) next
+    pred <- bc$base + lam * bc$corr
+    n_te <- length(te)
+    R[te] <- abs(y[te] - pred[seq_len(n_te)])
+    P[te, ] <- matrix(pred[-seq_len(n_te)], nrow = n_te, ncol = n_test,
+                      byrow = TRUE)
+  }
+
+  ok <- is.finite(R) & stats::complete.cases(P)
+  m <- sum(ok)
+  if (m < 10L) return(NULL)
+  lo_i <- max(1L, floor(alpha * (m + 1)))
+  hi_i <- min(m, ceiling((1 - alpha) * (m + 1)))
+  Lo <- P[ok, , drop = FALSE] - R[ok]
+  Hi <- P[ok, , drop = FALSE] + R[ok]
+  list(lower = apply(Lo, 2L, function(v) sort(v)[lo_i]),
+       upper = apply(Hi, 2L, function(v) sort(v)[hi_i]),
+       n_used = m, alpha = alpha)
+}
+
+
 .dbt_block_base_corr <- function(tr, va, response_name, predictor_names, coord_names,
                                  mode, base_params, n_basis, bandwidth,
-                                 use_spatial, seed) {
+                                 use_spatial, seed,
+                                 use_aniso = FALSE, bw_mult = 0.5,
+                                 vg_cutoff = 0.50, vg_lags = 15L,
+                                 vg_cressie = TRUE) {
   rf <- .dbt_fit_rf(tr, response_name, predictor_names, rf_params = base_params,
                     seed = seed)
   base_tr <- .dbt_oob_or_in_sample(rf, tr)
@@ -1045,7 +1147,7 @@
     coords_va <- as.matrix(va[, coord_names, drop = FALSE])
     basis <- .dbt_fit_basis(coords_tr, resid_tr, n_basis = n_basis,
                             bandwidth = bandwidth, use_aniso = use_aniso, bw_mult = bw_mult,
-                                vg_cutoff = vg_cutoff, vg_lags = vg_lags, vg_cressie = vg_cressie, seed = seed)
+                                                            vg_cutoff = vg_cutoff, vg_lags = vg_lags, vg_cressie = vg_cressie, seed = seed)
   }
   feat_tr <- .dbt_residual_features(tr, predictor_names, coord_names, base_tr, cb_tr, basis)
   feat_va <- .dbt_residual_features(va, predictor_names, coord_names, base_va, cb_va, basis)
