@@ -4,7 +4,55 @@ All notable changes to this project should be documented in this file.
 
 The project is currently in research-stage development and follows a `0.x` versioning line.
 
-## [Unreleased]
+## [Unreleased] — 0.4.0-dev
+
+### Added — anisotropy, admitted on merit
+
+Geometric anisotropy (major-axis angle + minor/major ratio) is estimated from
+the residual field and applied to ALL three spatial components: the radial
+basis (query points and centres), the kernel residual smoother, and the
+ordinary-kriging correction. A ratio of 1 reduces the transform to a pure
+rotation, so the isotropic method is recovered exactly — verified bit-for-bit.
+
+The geometry is not imposed: the anisotropic variant enters the fair profile
+search as an extra candidate and must beat the isotropic one on the same
+out-of-fold criterion (`aniso_search`, default TRUE).
+
+**Estimating the geometry took three attempts; the first two are recorded
+because they are instructive failures.** (1) Fitting one variogram per
+direction and taking min/max of the fitted ranges is biased by order
+statistics — it reports anisotropy for perfectly isotropic fields. (2) Scoring
+candidate geometries by variogram fit (SSE) in the transformed space is
+invalid — the transform changes the lag binning and pair counts, so the SSEs
+are not comparable. (3) The implemented estimator scores each candidate
+geometry by k-fold out-of-fold prediction error of a kernel smoother, on the
+same held-out points, with a bandwidth set from the median pairwise distance in
+the transformed space. Validated on synthetic fields: exact isotropy recovered
+for isotropic fields (no false positives), correct angles for anisotropic ones,
+errors only ever false negatives.
+
+Result on the Wadoux Amazonian benchmark (30 reps per design, n = 500):
+
+| Design | anisotropy accepted | DB-TARF iso | DB-TARF aniso offered | dRMSE |
+|---|---:|---:|---:|---:|
+| random | 6/30 | 31.598 | 31.589 | -0.010 |
+| regular_grid | 6/30 | 31.379 | 31.378 | -0.001 |
+| clustered_random | 0/30 | 34.572 | 34.563 | -0.009 |
+
+Accuracy is unchanged (differences are inside repetition noise), so this
+dataset is effectively isotropic at this scale. The informative result is the
+clustered row: anisotropy is refused in every repetition, because a clustered
+sample carries little information about directional structure and the
+out-of-fold criterion declines a geometry the design cannot support.
+
+Written up as Sections 3.1.6 and 5.4 of the manuscript.
+
+### Changed
+
+- Package version 0.3.0 -> 0.4.0.9000. The code now diverges from the CRAN
+  0.3.0 release; a CRAN update is planned once the anisotropy work settles.
+
+## [Unreleased — 0.3.0 line]
 
 ### Added — robustness across validation estimands
 

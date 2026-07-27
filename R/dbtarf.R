@@ -620,11 +620,116 @@
     .dbt_clamp(vg_fit$psill[1L] / psill_sum, 0.02, 0.90)
   } else 0.50
 
-  list(range_major = iso_range, nugget_ratio = nugget_ratio)
+  # ---- directional (anisotropic) structure ---------------------------------
+  # Empirical variograms along four directions; the ranges of the fitted
+  # exponential models give the major/minor axes and the major-axis angle.
+  # This is only ever ADVISORY: whether the anisotropy is actually used is
+  # decided out-of-fold by the profile search, never assumed here.
+  aniso <- .dbt_fit_anisotropy(y, coords, n_lags, sill_tot, iso_range)
+
+  list(range_major  = iso_range,
+       nugget_ratio = nugget_ratio,
+       aniso_angle  = aniso$angle,   # degrees clockwise from North (gstat convention)
+       aniso_ratio  = aniso$ratio,   # minor / major in (0, 1]; 1 = isotropic
+       aniso_major  = aniso$major,
+       aniso_minor  = aniso$minor)
+}
+
+# Anisotropy estimation by geometry search.
+#
+# Fitting one variogram per direction and taking min/max of the four ranges is
+# badly biased: the maximum of noisy range estimates over-shoots and the minimum
+# under-shoots, so min/max reports anisotropy even for a perfectly isotropic
+# field. We instead search over candidate geometries: for each (angle, ratio)
+# the coordinates are mapped into the space where Euclidean distance IS the
+# anisotropic distance, a single omnidirectional exponential variogram is fitted
+# there, and the geometry retained is the one under which that single model fits
+# best (weighted SSE from gstat). Isotropy (ratio = 1) is one of the candidates
+# and wins ties, and an anisotropic geometry is returned only when it improves
+# the fit by more than `tol` — so the estimator is parsimonious by construction.
+.dbt_fit_anisotropy <- function(y, coords, n_lags, sill_tot, iso_range,
+                                angles = seq(0, 157.5, by = 22.5),
+                                ratios = c(1, 0.75, 0.55, 0.40, 0.25),
+                                tol = 0.03, k = 5L, bw_frac = 0.15) {
+  iso <- list(angle = 0, ratio = 1, major = iso_range, minor = iso_range)
+  if (!requireNamespace("gstat", quietly = TRUE) ||
+      !requireNamespace("sp", quietly = TRUE)) return(iso)
+
+  xy <- as.matrix(coords)
+  yv <- as.numeric(y)
+  n <- length(yv)
+  if (n < 40L) return(iso)
+
+  # Scoring a geometry by fitted-variogram SSE does not work: transforming the
+  # coordinates changes the distance distribution, hence the lag binning and the
+  # pair counts, so SSE is not comparable across geometries. We therefore score
+  # each geometry by k-fold OUT-OF-FOLD prediction error of a Gaussian kernel
+  # smoother that uses the corresponding anisotropic distance — the same held-out
+  # points for every geometry, so the comparison is like for like. The bandwidth
+  # is set as a fraction of the median pairwise distance IN THE TRANSFORMED
+  # SPACE, which makes the score invariant to the overall rescaling the
+  # transform induces and sensitive only to the SHAPE (angle and ratio).
+  set.seed(11L)
+  fold <- sample(rep_len(seq_len(k), n))
+
+  cv_rmse <- function(angle, ratio) {
+    z <- .dbt_aniso_transform(xy, angle, ratio)
+    D <- as.matrix(stats::dist(z))
+    med <- stats::median(D[upper.tri(D)], na.rm = TRUE)
+    if (!is.finite(med) || med <= 0) return(NA_real_)
+    h <- med * bw_frac
+    pred <- rep(NA_real_, n)
+    for (kk in seq_len(k)) {
+      te <- which(fold == kk); tr <- which(fold != kk)
+      if (length(tr) < 5L) next
+      W <- exp(-(D[te, tr, drop = FALSE] / h)^2)
+      sw <- rowSums(W)
+      ok <- sw > 1e-12
+      pred[te[ok]] <- (W[ok, , drop = FALSE] %*% yv[tr]) / sw[ok]
+      pred[te[!ok]] <- mean(yv[tr])
+    }
+    ok <- is.finite(pred)
+    if (sum(ok) < 20L) return(NA_real_)
+    sqrt(mean((yv[ok] - pred[ok])^2))
+  }
+
+  rmse_iso <- cv_rmse(0, 1)
+  if (!is.finite(rmse_iso)) return(iso)
+
+  best <- list(rmse = rmse_iso, angle = 0, ratio = 1)
+  for (a in angles) for (r in ratios[ratios < 1]) {
+    s <- cv_rmse(a, r)
+    if (is.finite(s) && s < best$rmse) best <- list(rmse = s, angle = a, ratio = r)
+  }
+
+  # Parsimony: isotropy is the default and is displaced only when an
+  # anisotropic geometry predicts held-out values materially better.
+  if (best$ratio >= 1 || !is.finite(best$rmse) ||
+      best$rmse > rmse_iso * (1 - tol)) return(iso)
+
+  list(angle = as.numeric(best$angle), ratio = as.numeric(best$ratio),
+       major = iso_range, minor = iso_range * best$ratio)
+}
+
+# Map coordinates into the space where Euclidean distance equals anisotropic
+# distance: rotate so the major axis lies on x, then compress the minor axis by
+# 1/ratio. With ratio = 1 this is (up to rotation) the identity, so isotropic
+# behaviour is recovered exactly.
+.dbt_aniso_transform <- function(coords, angle_deg, ratio) {
+  coords <- as.matrix(coords)
+  if (!is.finite(ratio) || ratio >= 1 || ratio <= 0 || !is.finite(angle_deg)) {
+    return(coords)
+  }
+  # gstat angles run clockwise from North (the +y axis)
+  th <- angle_deg * pi / 180
+  R <- matrix(c(sin(th), cos(th), -cos(th), sin(th)), nrow = 2L, byrow = TRUE)
+  z <- coords %*% t(R)
+  z[, 2L] <- z[, 2L] / ratio
+  z
 }
 
 .dbt_fit_basis <- function(coords, residuals, n_basis = NULL,
-                           bandwidth = NULL, seed = NULL) {
+                           bandwidth = NULL, seed = NULL, use_aniso = FALSE) {
   coords <- as.matrix(coords)
   area <- diff(range(coords[, 1], na.rm = TRUE)) *
     diff(range(coords[, 2], na.rm = TRUE))
@@ -638,6 +743,10 @@
     rho <- vg$range_major
     nugget_ratio <- vg$nugget_ratio
   }
+  # anisotropic geometry (ratio = 1 means the variogram search kept isotropy)
+  an_angle <- if (is.null(vg) || is.null(vg$aniso_angle)) 0 else vg$aniso_angle
+  an_ratio <- if (is.null(vg) || is.null(vg$aniso_ratio)) 1 else vg$aniso_ratio
+  if (!isTRUE(use_aniso)) { an_angle <- 0; an_ratio <- 1 }
 
   if (is.null(n_basis)) {
     n_basis_theory <- 4 * area / (pi * rho ^ 2) * (1 - nugget_ratio)
@@ -652,7 +761,8 @@
   if (n_basis <= 0L) {
     return(list(centers = matrix(numeric(0), nrow = 0L, ncol = 2L),
                 bandwidth = bandwidth, range_major = rho,
-                nugget_ratio = nugget_ratio, n_basis = 0L))
+                nugget_ratio = nugget_ratio, n_basis = 0L,
+                aniso_angle = an_angle, aniso_ratio = an_ratio))
   }
 
   if (!is.null(seed)) set.seed(as.integer(seed))
@@ -667,13 +777,24 @@
     } else km
   }
   list(centers = as.matrix(centers), bandwidth = bandwidth,
-       range_major = rho, nugget_ratio = nugget_ratio, n_basis = n_basis)
+       range_major = rho, nugget_ratio = nugget_ratio, n_basis = n_basis,
+       aniso_angle = an_angle, aniso_ratio = an_ratio)
 }
 
 .dbt_make_basis <- function(coords, basis) {
   coords <- as.matrix(coords)
   centers <- as.matrix(basis$centers)
   if (nrow(centers) == 0L) return(matrix(numeric(0), nrow(coords), 0L))
+  # Apply the fitted anisotropic geometry to BOTH the query points and the
+  # centres, so the radial basis becomes an ellipse elongated along the major
+  # axis. With ratio = 1 the transform is a rotation and the basis is exactly
+  # the isotropic one, so this is a strict generalisation.
+  ar <- if (is.null(basis$aniso_ratio)) 1 else basis$aniso_ratio
+  aa <- if (is.null(basis$aniso_angle)) 0 else basis$aniso_angle
+  if (is.finite(ar) && ar < 1) {
+    coords  <- .dbt_aniso_transform(coords,  aa, ar)
+    centers <- .dbt_aniso_transform(centers, aa, ar)
+  }
   d2 <- outer(rowSums(coords ^ 2), rowSums(centers ^ 2), `+`) -
     2 * coords %*% t(centers)
   d2[d2 < 0] <- 0
@@ -750,9 +871,17 @@
 
 .dbt_kernel_residual_predict <- function(coords_train, residuals_train,
                                          coords_new, bandwidth,
-                                         chunk = 20000L) {
+                                         chunk = 20000L,
+                                         aniso_angle = 0, aniso_ratio = 1) {
   coords_train <- as.matrix(coords_train)
   coords_new <- as.matrix(coords_new)
+  # Anisotropic geometry: distances are measured after rotating onto the major
+  # axis and compressing the minor one, so the smoothing kernel becomes an
+  # ellipse. ratio = 1 leaves the isotropic behaviour untouched.
+  if (is.finite(aniso_ratio) && aniso_ratio < 1) {
+    coords_train <- .dbt_aniso_transform(coords_train, aniso_angle, aniso_ratio)
+    coords_new   <- .dbt_aniso_transform(coords_new,   aniso_angle, aniso_ratio)
+  }
   residuals_train <- as.numeric(residuals_train)
   bw2 <- 2 * max(bandwidth, 1e-6) ^ 2
   ct2 <- rowSums(coords_train ^ 2)
@@ -782,9 +911,16 @@
 # kernel smoother (or the residual mean) if gstat/sp are unavailable or the
 # variogram fit fails, so it is always safe to call.
 .dbt_krige_residual_predict <- function(coords_train, residuals_train, coords_new,
-                                        fallback_bandwidth = NULL, chunk = 20000L) {
+                                        fallback_bandwidth = NULL, chunk = 20000L,
+                                        aniso_angle = 0, aniso_ratio = 1) {
   coords_train <- as.matrix(coords_train)
   coords_new <- as.matrix(coords_new)
+  # Kriging under geometric anisotropy is ordinary kriging in the transformed
+  # space, so we transform once here and let the variogram be fitted there.
+  if (is.finite(aniso_ratio) && aniso_ratio < 1) {
+    coords_train <- .dbt_aniso_transform(coords_train, aniso_angle, aniso_ratio)
+    coords_new   <- .dbt_aniso_transform(coords_new,   aniso_angle, aniso_ratio)
+  }
   r <- as.numeric(residuals_train)
   keep <- is.finite(r) & is.finite(coords_train[, 1]) & is.finite(coords_train[, 2])
   r <- r[keep]; coords_train <- coords_train[keep, , drop = FALSE]
@@ -873,7 +1009,7 @@
     coords_tr <- as.matrix(tr[, coord_names, drop = FALSE])
     coords_va <- as.matrix(va[, coord_names, drop = FALSE])
     basis <- .dbt_fit_basis(coords_tr, resid_tr, n_basis = n_basis,
-                            bandwidth = bandwidth, seed = seed)
+                            bandwidth = bandwidth, use_aniso = use_aniso, seed = seed)
   }
   feat_tr <- .dbt_residual_features(tr, predictor_names, coord_names, base_tr, cb_tr, basis)
   feat_va <- .dbt_residual_features(va, predictor_names, coord_names, base_va, cb_va, basis)
@@ -886,14 +1022,17 @@
     resid_mlp = { pm <- .dbt_predict_mlp(.dbt_fit_mlp(feat_tr, resid_tr, seed = seed), feat_va)
                   if (is.null(pm)) rep(0, nrow(va)) else pm },
     resid_spatial = if (use_spatial) .dbt_kernel_residual_predict(
-      coords_tr, resid_tr, coords_va, basis$bandwidth) else rep(0, nrow(va)),
+      coords_tr, resid_tr, coords_va, basis$bandwidth,
+      aniso_angle = basis$aniso_angle, aniso_ratio = basis$aniso_ratio) else rep(0, nrow(va)),
     resid_kriging = if (use_spatial) .dbt_krige_residual_predict(
-      coords_tr, resid_tr, coords_va, fallback_bandwidth = basis$bandwidth) else rep(0, nrow(va)),
+      coords_tr, resid_tr, coords_va, fallback_bandwidth = basis$bandwidth,
+      aniso_angle = basis$aniso_angle, aniso_ratio = basis$aniso_ratio) else rep(0, nrow(va)),
     resid_ensemble = {
       parts <- list(rf = .dbt_predict_residual_rf(fit_rrf()$model, feat_va),
                     cb = .dbt_predict_cubist(.dbt_fit_cubist(feat_tr, resid_tr), feat_va))
       if (use_spatial) parts$sp <- .dbt_kernel_residual_predict(
-        coords_tr, resid_tr, coords_va, basis$bandwidth)
+        coords_tr, resid_tr, coords_va, basis$bandwidth,
+        aniso_angle = basis$aniso_angle, aniso_ratio = basis$aniso_ratio)
       rowMeans(as.data.frame(parts), na.rm = TRUE)
     },
     rep(0, nrow(va)))
@@ -1059,6 +1198,7 @@
                                       lambda_grid = NULL,
                                       n_basis = NULL,
                                       bandwidth = NULL,
+                                      use_aniso = FALSE,
                                       min_oof_improvement = 0.00,
                                       train_seed = 123L,
                                       rf_tune = TRUE,
@@ -1210,7 +1350,7 @@
       coords_tr <- as.matrix(tr[, coord_names, drop = FALSE])
       coords_va <- as.matrix(va[, coord_names, drop = FALSE])
       basis_j <- .dbt_fit_basis(coords_tr, resid_tr, n_basis = n_basis,
-                                bandwidth = bandwidth,
+                                bandwidth = bandwidth, use_aniso = use_aniso,
                                 seed = train_seed + j)
     }
     feat_tr <- .dbt_residual_features(
@@ -1253,9 +1393,11 @@
 
     if (use_spatial) {
       corr_oof$resid_spatial[id_val] <- .dbt_kernel_residual_predict(
-        coords_tr, resid_tr, coords_va, basis_j$bandwidth)
+        coords_tr, resid_tr, coords_va, basis_j$bandwidth,
+        aniso_angle = basis_j$aniso_angle, aniso_ratio = basis_j$aniso_ratio)
       corr_oof$resid_kriging[id_val] <- .dbt_krige_residual_predict(
-        coords_tr, resid_tr, coords_va, fallback_bandwidth = basis_j$bandwidth)
+        coords_tr, resid_tr, coords_va, fallback_bandwidth = basis_j$bandwidth,
+        aniso_angle = basis_j$aniso_angle, aniso_ratio = basis_j$aniso_ratio)
     }
 
     fold_rows[[j]] <- data.frame(
@@ -1397,7 +1539,8 @@
     if (use_spatial) {
       basis_full <- .dbt_fit_basis(
         as.matrix(train_df[, coord_names, drop = FALSE]), residual_full,
-        n_basis = n_basis, bandwidth = bandwidth, seed = train_seed)
+        n_basis = n_basis, bandwidth = bandwidth, seed = train_seed,
+        use_aniso = use_aniso)
     }
     feat_train <- .dbt_residual_features(
       train_df, predictor_names, coord_names, base_train_full,
@@ -1447,12 +1590,14 @@
     } else if (mode == "resid_spatial" && use_spatial) {
       selected_correction_test <- .dbt_kernel_residual_predict(
         as.matrix(train_df[, coord_names, drop = FALSE]), residual_full,
-        as.matrix(test_df[, coord_names, drop = FALSE]), basis_full$bandwidth)
+        as.matrix(test_df[, coord_names, drop = FALSE]), basis_full$bandwidth,
+        aniso_angle = basis_full$aniso_angle, aniso_ratio = basis_full$aniso_ratio)
     } else if (mode == "resid_kriging" && use_spatial) {
       selected_correction_test <- .dbt_krige_residual_predict(
         as.matrix(train_df[, coord_names, drop = FALSE]), residual_full,
         as.matrix(test_df[, coord_names, drop = FALSE]),
-        fallback_bandwidth = basis_full$bandwidth)
+        fallback_bandwidth = basis_full$bandwidth,
+        aniso_angle = basis_full$aniso_angle, aniso_ratio = basis_full$aniso_ratio)
     } else if (mode == "resid_ensemble") {
       parts <- list()
       if (!is.null(resid_rf_full_fit)) {
@@ -1464,7 +1609,8 @@
       if (use_spatial) {
         parts$resid_spatial <- .dbt_kernel_residual_predict(
           as.matrix(train_df[, coord_names, drop = FALSE]), residual_full,
-          as.matrix(test_df[, coord_names, drop = FALSE]), basis_full$bandwidth)
+          as.matrix(test_df[, coord_names, drop = FALSE]), basis_full$bandwidth,
+          aniso_angle = basis_full$aniso_angle, aniso_ratio = basis_full$aniso_ratio)
       }
       if (length(parts) == 0L) {
         selected_correction_test <- rep(0, length(base_test))
@@ -1647,6 +1793,7 @@ train_dbtarf_one_fold <- function(train_df,
                                   resid_rf_min_node_size = NULL,
                                   resid_rf_sample_fraction = NULL,
                                   fair_profile_search = TRUE,
+                                  aniso_search = TRUE,
                                   fair_profile_max = 6L,
                                   ensemble_top_k = 1L,
                                   ensemble_weighting = "softmax",
@@ -1700,6 +1847,7 @@ train_dbtarf_one_fold <- function(train_df,
       lambda_grid = lambda_grid,
       n_basis = n_basis,
       bandwidth = bandwidth,
+      use_aniso = isTRUE(spec$use_aniso),
       min_oof_improvement = min_oof_improvement,
       train_seed = train_seed,
       rf_tune = FALSE,
@@ -1730,6 +1878,21 @@ train_dbtarf_one_fold <- function(train_df,
       p = length(pred_for_specs),
       n = nrow(train_df_for_specs),
       max_profiles = fair_profile_max)
+    profile_specs$use_aniso <- FALSE
+
+    # Anisotropy is admitted on merit, exactly like every other component: the
+    # best isotropic profile is duplicated with the fitted anisotropic geometry
+    # and the two compete on the same out-of-fold criterion. If the residual
+    # field has no directional structure the variogram search already returns
+    # ratio = 1 (the transform is then a pure rotation and the two profiles are
+    # equivalent), and if it has but the geometry does not pay off out-of-fold,
+    # the isotropic profile simply wins.
+    if (.dbt_as_bool(aniso_search) && length(coord_for_specs) == 2L) {
+      aniso_specs <- profile_specs[seq_len(min(2L, nrow(profile_specs))), , drop = FALSE]
+      aniso_specs$use_aniso <- TRUE
+      aniso_specs$profile <- paste0(aniso_specs$profile, "_aniso")
+      profile_specs <- rbind(profile_specs, aniso_specs)
+    }
     profile_out <- vector("list", nrow(profile_specs))
     for (i in seq_len(nrow(profile_specs))) {
       # Isolate each profile: one degenerate profile/fold must not abort the run.
@@ -1831,6 +1994,7 @@ train_dbtarf_one_fold <- function(train_df,
     return(selected)
   }
 
+  use_aniso_requested <- FALSE
   requested_label <- if (.dbt_as_bool(rf_tune) || .dbt_as_bool(resid_rf_tune)) {
     "single_tuned"
   } else {
@@ -1922,6 +2086,7 @@ dbtarf_default_params <- list(
   resid_rf_sample_fraction = NULL,
   fair_profile_search = TRUE,
   fair_profile_max = 6L,
+  aniso_search = TRUE,
   ensemble_top_k = 1L,
   ensemble_weighting = "softmax",
   ensemble_temperature = 0.75
