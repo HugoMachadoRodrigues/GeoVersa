@@ -577,7 +577,18 @@
   as.numeric(predict(model, newdata = as.data.frame(x), neighbors = 0L))
 }
 
-.dbt_fit_variogram <- function(y, coords, cutoff_frac = 0.50, n_lags = 15L) {
+# Fit a residual variogram WITHOUT assuming the model family.
+#
+# The family is the classical modelling decision that is normally made by eye or
+# by habit; here all candidates are fitted to the SAME empirical variogram and
+# the one with the lowest weighted SSE is kept. Comparing SSE is legitimate in
+# this direction precisely because the binning and the pair counts are identical
+# across candidates — which is NOT true when the geometry or the binning changes
+# (see .dbt_fit_anisotropy, where SSE comparison is invalid and out-of-fold
+# prediction error is used instead).
+.dbt_fit_variogram <- function(y, coords, cutoff_frac = 0.50, n_lags = 15L,
+                               families = c("Exp", "Sph", "Gau", "Mat"),
+                               cressie = TRUE, family_tol = 0.05) {
   if (!requireNamespace("gstat", quietly = TRUE) ||
       !requireNamespace("sp", quietly = TRUE)) {
     return(NULL)
@@ -595,22 +606,38 @@
   sp::coordinates(df) <- ~ x + y2
   vg_emp <- tryCatch(
     gstat::variogram(yv ~ 1, data = df, cutoff = cutoff,
-                     width = cutoff / n_lags, cressie = TRUE),
+                     width = cutoff / n_lags, cressie = isTRUE(cressie)),
     error = function(e) NULL
   )
   if (is.null(vg_emp) || nrow(vg_emp) < 3L) return(NULL)
 
   sill_tot <- stats::var(y, na.rm = TRUE)
   range_init <- cutoff * 0.30
-  vg_fit <- tryCatch(
-    suppressWarnings(gstat::fit.variogram(
-      vg_emp,
-      gstat::vgm(sill_tot * 0.80, "Exp", range_init, sill_tot * 0.20),
-      fit.method = 7L
-    )),
-    error = function(e) NULL
-  )
-  if (is.null(vg_fit) || !any(is.finite(vg_fit$range))) return(NULL)
+
+  # select the variogram family by weighted SSE on this empirical variogram
+  fit_family <- function(fam) {
+    f <- tryCatch(suppressWarnings(gstat::fit.variogram(
+      vg_emp, gstat::vgm(sill_tot * 0.80, fam, range_init, sill_tot * 0.20),
+      fit.method = 7L)), error = function(e) NULL)
+    if (is.null(f) || !any(is.finite(f$range))) return(NULL)
+    e <- attr(f, "SSErr")
+    if (is.null(e) || !is.finite(e)) return(NULL)
+    list(fit = f, sse = as.numeric(e), family = fam)
+  }
+  cand <- Filter(Negate(is.null), lapply(families, fit_family))
+  if (length(cand) == 0L) return(NULL)
+
+  # Parsimony among nested families. Raw SSE always favours the most flexible
+  # candidate: Matern nests the exponential (kappa = 1/2) and approaches the
+  # Gaussian (kappa -> Inf), and gstat fits kappa, so Matern wins by one extra
+  # degree of freedom even when the truth is exactly exponential. We therefore
+  # keep the SIMPLEST family that is statistically indistinguishable from the
+  # best one, where `families` is ordered from least to most flexible.
+  sse <- vapply(cand, function(z) z$sse, numeric(1))
+  thresh <- min(sse) * (1 + family_tol)
+  best <- cand[[which(sse <= thresh)[1L]]]
+  vg_fit <- best$fit
+  vg_family <- best$family
 
   positive_ranges <- vg_fit$range[is.finite(vg_fit$range) & vg_fit$range > 0]
   iso_range <- if (length(positive_ranges) > 0L) max(positive_ranges) else range_init
@@ -629,6 +656,7 @@
 
   list(range_major  = iso_range,
        nugget_ratio = nugget_ratio,
+       family       = vg_family,
        aniso_angle  = aniso$angle,   # degrees clockwise from North (gstat convention)
        aniso_ratio  = aniso$ratio,   # minor / major in (0, 1]; 1 = isotropic
        aniso_major  = aniso$major,
@@ -729,11 +757,14 @@
 }
 
 .dbt_fit_basis <- function(coords, residuals, n_basis = NULL,
-                           bandwidth = NULL, seed = NULL, use_aniso = FALSE) {
+                           bandwidth = NULL, seed = NULL, use_aniso = FALSE,
+                           bw_mult = 0.5, vg_cutoff = 0.50, vg_lags = 15L,
+                           vg_cressie = TRUE) {
   coords <- as.matrix(coords)
   area <- diff(range(coords[, 1], na.rm = TRUE)) *
     diff(range(coords[, 2], na.rm = TRUE))
-  vg <- .dbt_fit_variogram(residuals, coords)
+  vg <- .dbt_fit_variogram(residuals, coords, cutoff_frac = vg_cutoff,
+                           n_lags = vg_lags, cressie = vg_cressie)
   if (is.null(vg)) {
     D <- as.matrix(stats::dist(coords))
     rho <- stats::median(D[upper.tri(D)], na.rm = TRUE)
@@ -756,7 +787,11 @@
   dup <- duplicated(round(coords, 6))
   n_distinct <- sum(!dup)
   n_basis <- as.integer(min(max(n_basis, 0L), n_distinct))
-  if (is.null(bandwidth)) bandwidth <- max(rho / 2, 1e-6)
+  # The variogram range enters as a TUNED scale: bandwidth = bw_mult * range,
+  # with bw_mult selected out-of-fold by the profile search. bw_mult = 0.5
+  # reproduces the previous derived-and-fixed behaviour exactly.
+  if (!is.finite(bw_mult) || bw_mult <= 0) bw_mult <- 0.5
+  if (is.null(bandwidth)) bandwidth <- max(rho * bw_mult, 1e-6)
 
   if (n_basis <= 0L) {
     return(list(centers = matrix(numeric(0), nrow = 0L, ncol = 2L),
@@ -1009,7 +1044,8 @@
     coords_tr <- as.matrix(tr[, coord_names, drop = FALSE])
     coords_va <- as.matrix(va[, coord_names, drop = FALSE])
     basis <- .dbt_fit_basis(coords_tr, resid_tr, n_basis = n_basis,
-                            bandwidth = bandwidth, use_aniso = use_aniso, seed = seed)
+                            bandwidth = bandwidth, use_aniso = use_aniso, bw_mult = bw_mult,
+                                vg_cutoff = vg_cutoff, vg_lags = vg_lags, vg_cressie = vg_cressie, seed = seed)
   }
   feat_tr <- .dbt_residual_features(tr, predictor_names, coord_names, base_tr, cb_tr, basis)
   feat_va <- .dbt_residual_features(va, predictor_names, coord_names, base_va, cb_va, basis)
@@ -1199,6 +1235,10 @@
                                       n_basis = NULL,
                                       bandwidth = NULL,
                                       use_aniso = FALSE,
+                                      bw_mult = 0.5,
+                                      vg_cutoff = 0.50,
+                                      vg_lags = 15L,
+                                      vg_cressie = TRUE,
                                       min_oof_improvement = 0.00,
                                       train_seed = 123L,
                                       rf_tune = TRUE,
@@ -1350,7 +1390,8 @@
       coords_tr <- as.matrix(tr[, coord_names, drop = FALSE])
       coords_va <- as.matrix(va[, coord_names, drop = FALSE])
       basis_j <- .dbt_fit_basis(coords_tr, resid_tr, n_basis = n_basis,
-                                bandwidth = bandwidth, use_aniso = use_aniso,
+                                bandwidth = bandwidth, use_aniso = use_aniso, bw_mult = bw_mult,
+                                vg_cutoff = vg_cutoff, vg_lags = vg_lags, vg_cressie = vg_cressie,
                                 seed = train_seed + j)
     }
     feat_tr <- .dbt_residual_features(
@@ -1540,7 +1581,8 @@
       basis_full <- .dbt_fit_basis(
         as.matrix(train_df[, coord_names, drop = FALSE]), residual_full,
         n_basis = n_basis, bandwidth = bandwidth, seed = train_seed,
-        use_aniso = use_aniso)
+        use_aniso = use_aniso, bw_mult = bw_mult,
+        vg_cutoff = vg_cutoff, vg_lags = vg_lags, vg_cressie = vg_cressie)
     }
     feat_train <- .dbt_residual_features(
       train_df, predictor_names, coord_names, base_train_full,
@@ -1794,6 +1836,8 @@ train_dbtarf_one_fold <- function(train_df,
                                   resid_rf_sample_fraction = NULL,
                                   fair_profile_search = TRUE,
                                   aniso_search = TRUE,
+                                  bw_search = TRUE,
+                                  vg_search = TRUE,
                                   fair_profile_max = 6L,
                                   ensemble_top_k = 1L,
                                   ensemble_weighting = "softmax",
@@ -1848,6 +1892,10 @@ train_dbtarf_one_fold <- function(train_df,
       n_basis = n_basis,
       bandwidth = bandwidth,
       use_aniso = isTRUE(spec$use_aniso),
+      bw_mult = if (is.null(spec$bw_mult) || !is.finite(spec$bw_mult)) 0.5 else spec$bw_mult,
+      vg_cutoff = if (is.null(spec$vg_cutoff)) 0.50 else spec$vg_cutoff,
+      vg_lags = if (is.null(spec$vg_lags)) 15L else as.integer(spec$vg_lags),
+      vg_cressie = if (is.null(spec$vg_cressie)) TRUE else isTRUE(spec$vg_cressie),
       min_oof_improvement = min_oof_improvement,
       train_seed = train_seed,
       rf_tune = FALSE,
@@ -1879,6 +1927,45 @@ train_dbtarf_one_fold <- function(train_df,
       n = nrow(train_df_for_specs),
       max_profiles = fair_profile_max)
     profile_specs$use_aniso <- FALSE
+    profile_specs$bw_mult <- 0.5
+    profile_specs$vg_cutoff <- 0.50
+    profile_specs$vg_lags <- 15L
+    profile_specs$vg_cressie <- TRUE
+
+    # Binning and estimator cannot be compared by variogram SSE (a different
+    # cutoff or lag width changes the empirical variogram itself, so the SSEs
+    # are computed on different quantities). They therefore enter the profile
+    # search and are decided by out-of-fold predictive merit, like everything
+    # else in the method.
+    if (.dbt_as_bool(vg_search) && length(coord_for_specs) == 2L) {
+      vg_variants <- list(
+        list(cutoff = 0.35, lags = 15L, cressie = TRUE,  tag = "vgc35"),
+        list(cutoff = 0.65, lags = 20L, cressie = TRUE,  tag = "vgc65"),
+        list(cutoff = 0.50, lags = 15L, cressie = FALSE, tag = "vgmath"))
+      vg_specs <- do.call(rbind, lapply(vg_variants, function(v) {
+        z <- profile_specs[seq_len(min(1L, nrow(profile_specs))), , drop = FALSE]
+        z$vg_cutoff <- v$cutoff; z$vg_lags <- v$lags; z$vg_cressie <- v$cressie
+        z$profile <- paste0(z$profile, "_", v$tag)
+        z
+      }))
+      profile_specs <- rbind(profile_specs, vg_specs)
+    }
+
+    # The variogram RANGE enters the search as a tuned scale rather than a
+    # derived constant: the top profiles are duplicated with a shorter and a
+    # longer radial-basis bandwidth (bw_mult x range), so how far the
+    # geostatistical structure is trusted is decided out-of-fold like any other
+    # hyperparameter. bw_mult = 0.5 is the previous derived value and is kept as
+    # the default arm.
+    if (.dbt_as_bool(bw_search) && length(coord_for_specs) == 2L) {
+      bw_specs <- do.call(rbind, lapply(c(0.25, 1.0), function(m) {
+        z <- profile_specs[seq_len(min(2L, nrow(profile_specs))), , drop = FALSE]
+        z$bw_mult <- m
+        z$profile <- sprintf("%s_bw%02d", z$profile, round(m * 100))
+        z
+      }))
+      profile_specs <- rbind(profile_specs, bw_specs)
+    }
 
     # Anisotropy is admitted on merit, exactly like every other component: the
     # best isotropic profile is duplicated with the fitted anisotropic geometry
@@ -2087,6 +2174,8 @@ dbtarf_default_params <- list(
   fair_profile_search = TRUE,
   fair_profile_max = 6L,
   aniso_search = TRUE,
+  bw_search = TRUE,
+  vg_search = TRUE,
   ensemble_top_k = 1L,
   ensemble_weighting = "softmax",
   ensemble_temperature = 0.75
