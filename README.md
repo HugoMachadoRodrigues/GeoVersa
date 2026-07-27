@@ -635,6 +635,41 @@ where a calibration sample least resembles the population. The reference is the
 untuned default RF, as in Wadoux et al. (2021); DB-TARF performs all of its
 selection on the calibration sample only.
 
+#### The advantage is not an artifact of the estimand
+
+DB-TARF selects its correction by an out-of-fold criterion and is scored on the
+design-based protocol it is named for, so a fair objection is that the gain
+might be specific to that yardstick. Repeating the comparison under three
+further protocols (same configuration, `n = 500`, seed 123, 10 repetitions
+each) shows it is not:
+
+| Estimand | $n$ | RF | DB-TARF | ΔRMSE | Wins | Wilcoxon $p$ |
+|---|---:|---:|---:|---:|---:|---:|
+| Population (SRS 20 000) | 10 | 32.18 | **31.51** | −0.669 | 10/10 | 0.00098 |
+| DesignBased (SRS 500) | 30 | 32.49 | **31.60** | −0.895 | 28/30 | 6.5×10⁻⁹ |
+| Random 10-fold CV | 10 | 32.24 | **31.12** | −1.125 | 10/10 | 0.00098 |
+| Spatial block CV (350 km) | 10 | 34.72 | **33.45** | −1.275 | 10/10 | 0.00098 |
+
+DB-TARF wins in **all 10 draws under every one of the three additional
+protocols**, and mean MEC rises under each.
+
+Four honest qualifications:
+
+- Only the Population and DesignBased rows estimate **map accuracy**. The
+  cross-validation rows are model-comparison estimands only — spatial CV is not
+  a valid accuracy estimator (Wadoux et al. 2021).
+- The two CV protocols **favour DB-TARF**: it accepts corrections by random-fold
+  OOF RMSE and picks its gate by spatial CV, so these protocols mirror its own
+  selection criteria and are the least independent checks here.
+- These are 10 calibration draws scored three ways, **not 30 independent
+  repetitions** (within a draw the results are dependent, r = 0.59).
+- `p = 0.00098` is simply the floor of a one-sided paired Wilcoxon at n = 10.
+
+The point estimates do order −0.67 → −0.90 → −1.13 → −1.28, but adjacent
+protocols are not statistically distinguishable (random vs spatial CV,
+p = 0.36) and this is **not** an ordering in spatial stress — random 10-fold CV
+is the least spatially demanding of the four. BLOOCV is excluded by cost.
+
 Full method, honest caveats, reproduction commands and paired statistics:
 [`docs/dbtarf_wadoux_validation.md`](docs/dbtarf_wadoux_validation.md).
 
@@ -751,7 +786,7 @@ Sys.setenv(
   DBT_N_ITER      = "30",
   DBT_SAMPLE_SIZE = "500",
   DBT_TRAIN_SEED  = "123",
-  DBT_RESULTS_DIR = "results/dbtarf_n500_confirm30"
+  DBT_RESULTS_DIR = "results/canon_v030_full_random_confirm30"
 )
 
 source("code/run_dbtarf_wadoux_comparison.R")

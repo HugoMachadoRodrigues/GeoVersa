@@ -6,6 +6,40 @@ The project is currently in research-stage development and follows a `0.x` versi
 
 ## [Unreleased]
 
+### Added — robustness across validation estimands
+
+The DB-TARF-vs-RF comparison was repeated under three protocols beyond
+`DesignBased`, with the DB-TARF configuration, sample size (n = 500) and seed
+held fixed at the canonical settings, 10 repetitions each
+(`results/canon_v030_protocols_confirm10`):
+
+| Estimand | n | RF | DB-TARF | ΔRMSE | Wins | Wilcoxon p |
+|---|---:|---:|---:|---:|---:|---:|
+| Population (SRS 20 000) | 10 | 32.175 | 31.506 | −0.669 | 10/10 | 0.00098 |
+| DesignBased (SRS 500)* | 30 | 32.493 | 31.598 | −0.895 | 28/30 | 6.5e-09 |
+| Random 10-fold CV | 10 | 32.240 | 31.115 | −1.125 | 10/10 | 0.00098 |
+| Spatial block CV (350 km) | 10 | 34.722 | 33.447 | −1.275 | 10/10 | 0.00098 |
+
+*The DesignBased row is the separate 30-rep campaign, shown for comparison.
+
+DB-TARF wins in all 10 draws under each additional protocol and mean MEC
+improves under each. Qualifications, all now stated in the write-ups: only the
+Population and DesignBased rows estimate map accuracy (spatial CV is not a valid
+accuracy estimator — Wadoux et al. 2021); the two CV protocols are *aligned with
+DB-TARF's own selection criteria* (random-fold OOF acceptance, spatial-CV gate
+choice) and so favour it rather than stressing it; these are 10 calibration
+draws scored three ways, not 30 independent repetitions (within-draw r = 0.59);
+and `p = 0.00098` is merely the floor of a one-sided paired Wilcoxon at n = 10.
+The deltas order −0.67 → −0.90 → −1.13 → −1.28, but adjacent protocols are not
+distinguishable (p = 0.36) and the ordering is not one of spatial stress —
+random 10-fold CV is the least spatially demanding. BLOOCV excluded by cost.
+
+Written up as Section 5.3 of the manuscript, a new section in
+`docs/dbtarf_wadoux_validation.md`, and a README subsection. Figure 4 (which
+had been orphaned and carried superseded numbers) was regenerated from the
+canonical result directories by the new `code/figures_protocols.R`, so it can
+no longer drift from the tables.
+
 ### Changed — canonical v0.3.0 reference campaign
 
 All DB-TARF-vs-RF figures in `README.md`, `docs/dbtarf_wadoux_validation.md`

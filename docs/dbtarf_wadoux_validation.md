@@ -26,7 +26,8 @@ out-of-fold (OOF) RMSE.
   same cross-fit folds and keeps the profile with the best OOF RMSE. Optionally,
   an explicit per-fold grid search (OOB or inner-CV) can be used instead
   (`DBT_RF_TUNE`, `DBT_RF_TUNE_METHOD`).
-- **Correction candidates.** Residual RF, residual Cubist, a spatial RBF/kernel
+- **Correction candidates.** Residual RF, residual Cubist, a single-hidden-layer
+  MLP, ordinary kriging of the residuals (via `gstat`), a spatial RBF/kernel
   residual smoother, their ensemble, and RF recalibration / RF+Cubist stacking.
   All candidates — including the linear/quadratic/stacking recalibrators — are
   scored with the **same cross-fit folds** (OOF vs OOF), and the selected
@@ -164,6 +165,79 @@ other two designs by setting `DBT_SCENARIO=regular_grid` or
 `DBT_SCENARIO=clustered_random` (outputs in
 `results/canon_v030_full_regular_grid_confirm30` and
 `results/canon_v030_full_clustered_random_confirm30`).
+
+## Robustness across validation estimands
+
+The DesignBased result above scores DB-TARF on the estimand it is named for.
+To check that the advantage is not an artifact of that choice, the comparison
+was repeated under three further protocols with the DB-TARF configuration,
+sample size (n = 500) and seed held fixed, 10 repetitions each
+(`code/run_dbtarf_protocols_comparison.R`, output
+`results/canon_v030_protocols_confirm10`):
+
+| Estimand | n | RF RMSE | DBTARF RMSE | Mean delta RMSE | 95% CI | Wins | Wilcoxon p |
+| --- | ---: | ---: | ---: | ---: | --- | ---: | ---: |
+| Population (SRS 20 000) | 10 | 32.175 | 31.506 | -0.669 | [-0.82, -0.51] | 10/10 | 0.00098 |
+| DesignBased (SRS 500) | 30 | 32.493 | 31.598 | -0.895 | [-1.08, -0.71] | 28/30 | 6.5e-09 |
+| Random 10-fold CV | 10 | 32.240 | 31.115 | -1.125 | [-1.49, -0.76] | 10/10 | 0.00098 |
+| Spatial block CV (350 km) | 10 | 34.722 | 33.447 | -1.275 | [-1.68, -0.87] | 10/10 | 0.00098 |
+
+MEC also improves under each: 0.879 -> 0.885 (Population), 0.880 -> 0.888
+(random CV), 0.859 -> 0.871 (spatial block CV).
+
+**What this does and does not claim.** Only the Population and DesignBased rows
+estimate *map accuracy*; the two cross-validation rows are **not** valid
+map-accuracy estimators — that is the central result of Wadoux et al. (2021)
+and is not disputed here. They are reported as *model-comparison* estimands
+only, to test whether the DB-TARF-vs-RF ranking survives a change of scoring
+protocol. It does, in all 10 draws under each protocol.
+
+**The CV protocols FAVOUR DB-TARF; they are not adversarial.** DB-TARF accepts a
+correction only if it lowers OOF RMSE on *random* folds (`caret::createFolds`) —
+the same construction as the RandomKFold protocol — and its gate length is
+chosen by spatial CV, the same construction as SpatialKFold. These are therefore
+the least independent of the four checks, and their deltas should be read as an
+upper bound. The Population row is the one that carries evidential weight.
+
+Two honest notes:
+
+- `p = 0.00098` is the **smallest value attainable** from a one-sided paired
+  Wilcoxon test at n = 10 (2^-10). It certifies that all ten repetitions favour
+  DB-TARF and nothing stronger.
+- The four deltas order as -0.67 < -0.90 < -1.13 < -1.28, but this is an
+  ordering of point estimates only: adjacent protocols are not statistically
+  distinguishable (random vs spatial block CV, paired p = 0.36) and the CIs
+  overlap heavily. It is also NOT an ordering in spatial stress — random 10-fold
+  CV holds out points interspersed among the training points and is the least
+  spatially demanding of the four. The defensible statement is that the largest
+  gain occurs under spatial block CV.
+- These are 10 calibration draws scored three ways, not 30 independent
+  repetitions: within a draw the protocol results are dependent (the random- and
+  spatial-CV deltas correlate at r = 0.59).
+- The CV rows train on strict subsets of the calibration sample (450 points for
+  10-fold; data-dependent for spatial blocks), so their absolute RMSE is not
+  commensurable with the two design-based rows.
+- All four estimands were run under the simple-random calibration design only.
+- The DesignBased row comes from a separate campaign
+  (`results/canon_v030_full_random_confirm30`, 30 reps, full tuning budget), not
+  from the protocols runner.
+
+BLOOCV is deliberately excluded on cost: ~10^3 sequential fits per repetition.
+Note that it would be the most adversarial model-comparison estimand available,
+being the one least aligned with DB-TARF's internal selection.
+
+Reproduce (the runner is resumable — re-invoke with the same results dir to
+continue an interrupted run):
+
+```sh
+DBTP_N_ITER=10 DBTP_PROTOCOLS="Population,RandomKFold,SpatialKFold" \
+DBTP_SAMPLE_SIZE=500 DBTP_POP_TEST_SIZE=20000 DBTP_KFOLD_K=10 \
+DBTP_VAL_DIST_KM=350 DBTP_TRAIN_SEED=123 \
+DBTP_N_FOLDS=5 DBTP_RF_TUNE_MAX_GRID=18 DBTP_RESID_RF_TUNE_MAX_GRID=12 \
+DBTP_FAIR_PROFILE_MAX=6 DBTP_ENSEMBLE_TOP_K=3 \
+DBTP_RESULTS_DIR="results/canon_v030_protocols_confirm10" \
+  Rscript code/run_dbtarf_protocols_comparison.R
+```
 
 ## Local Evidence Files
 

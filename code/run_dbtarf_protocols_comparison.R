@@ -4,7 +4,7 @@
 # Extends the DB-TARF vs RF head-to-head BEYOND the DesignBased protocol.
 #
 # The shipped DB-TARF runner (run_dbtarf_wadoux_comparison.R) supports only the
-# DesignBased estimand. This script evaluates DB-TARF against the tuned RF
+# DesignBased estimand. This script evaluates DB-TARF against the UNTUNED default RF
 # baseline under the remaining Wadoux (2021) validation protocols, with BOTH
 # models scored on IDENTICAL splits each iteration (paired comparison):
 #
