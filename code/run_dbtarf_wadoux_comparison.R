@@ -33,6 +33,9 @@
 #   DBT_RESID_RF_MIN_NODE_SIZE   optional comma list
 #   DBT_RESID_RF_SAMPLE_FRACTION optional comma list
 #   DBT_FAIR_PROFILE_SEARCH      TRUE/FALSE, default TRUE
+#   DBT_VG_SEARCH                select variogram binning/estimator, default TRUE
+#   DBT_BW_SEARCH                select the range multiplier, default TRUE
+#   DBT_ANISO_SEARCH             offer anisotropic geometry, default TRUE
 #   DBT_FAIR_PROFILE_MAX         default 6
 #   DBT_ENSEMBLE_TOP_K           top-k profile ensemble, default 3 (1 = off)
 #   DBT_ENSEMBLE_WEIGHTING       softmax | inverse | uniform, default softmax
@@ -147,6 +150,9 @@ dbtarf_params <- modifyList(
     resid_rf_min_node_size = parse_num_list_dbt("DBT_RESID_RF_MIN_NODE_SIZE", NULL),
     resid_rf_sample_fraction = parse_num_list_dbt("DBT_RESID_RF_SAMPLE_FRACTION", NULL),
     fair_profile_search = parse_bool_dbt("DBT_FAIR_PROFILE_SEARCH", TRUE),
+    vg_search = parse_bool_dbt("DBT_VG_SEARCH", TRUE),
+    bw_search = parse_bool_dbt("DBT_BW_SEARCH", TRUE),
+    aniso_search = parse_bool_dbt("DBT_ANISO_SEARCH", TRUE),
     fair_profile_max = as.integer(parse_num_dbt("DBT_FAIR_PROFILE_MAX", 6L)),
     ensemble_top_k = as.integer(parse_num_dbt("DBT_ENSEMBLE_TOP_K", 3L)),
     ensemble_weighting = dbt_ensemble_weighting,

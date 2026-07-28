@@ -47,8 +47,9 @@ paired repetitions. The conventional variogram recipe is displaced in most
 repetitions, and the procedure discriminates: it refuses an anisotropic geometry
 under clustered sampling, where the design cannot support estimating direction,
 while replacing the lag binning most often in exactly that design. Second, we
-argue that prediction-interval coverage is a population parameter no different
-from RMSE, so the same design-unbiased estimator applies. This matters because
+argue that prediction-interval coverage is a population parameter of the same
+kind as the mean squared error, so the same design-based estimator applies to
+it. This matters because
 it exposes a failure that is otherwise invisible: cross-fitted conformal
 intervals are calibrated and 17 per cent sharper than quantile regression
 forests under representative sampling, but under clustered sampling they
@@ -58,8 +59,8 @@ design-based.
 \end{abstract}
 
 \begin{keyword}
-digital soil mapping \sep design-based inference \sep prediction intervals \sep
-conformal prediction \sep variogram \sep random forest
+Digital soil mapping\sep Design-based inference\sep Prediction intervals\sep
+Conformal prediction\sep Variogram\sep Random forest
 \end{keyword}
 
 \end{frontmatter}
@@ -68,9 +69,8 @@ conformal prediction \sep variogram \sep random forest
 
 \citet{wadoux2021} showed that map accuracy indices must be estimated from a
 probability sample by design-based inference, and that spatial cross-validation
-has no theoretical underpinning for this purpose. The argument is now widely
-accepted. It concerns, however, only the point map and only its accuracy, and
-it leaves two questions that we take up here.
+has no theoretical underpinning for this purpose. That argument concerns the
+point map and its accuracy, and it leaves two questions that we take up here.
 
 The first is where geostatistics belongs. Digital soil mapping has largely
 replaced kriging with machine learning \citep{mcbratney2003}, and where
@@ -81,16 +81,24 @@ anything. Here we argue that these are not modelling truths to be asserted but
 hyperparameters to be selected, and that they should be chosen out of fold
 against a null in which no correction is applied, exactly as the number of trees
 or the depth of a forest would be. We are candid about what this does and does
-not deliver. Regression kriging \citep{hengl2018} and the super learner
-\citep{wolpert1992,vanderlaan2007} are established; what is new is that the
-geostatistical decisions are made on evidence. And, as our experiment shows,
+not deliver. Selecting variogram parameters by cross-validation or by
+interpolation performance is not new; it is long-standing practice and has been
+automated before \citep{li2014}, and letting a forest represent spatial
+structure through distance-based features is the RFsp idea of
+\citet{hengl2018}. Regression kriging and the super learner
+\citep{wolpert1992,vanderlaan2007} are equally established. What we contribute
+is narrower: a nested, out-of-fold selection in which variogram-informed
+residual representations and non-spatial corrections compete with each other and
+against an explicit no-correction baseline, with the geostatistical
+hyperparameters inside that selection rather than fixed beforehand, and with the
+selected configuration then assessed on an independent probability sample. And, as our experiment shows,
 geostatistics ends up supplying the hypothesis and feature space rather than the
 final estimator, since the corrector the data prefers is usually a residual
 forest whose features are variogram-scaled basis functions.
 
 The second question is uncertainty. Prediction intervals in soil and ecological
 mapping are routinely obtained from kriging variances or quantile heuristics,
-and their coverage is almost never checked against the sampling design. Here we
+and we are not aware of studies that check their coverage against the sampling design. Here we
 argue that coverage is a population parameter of exactly the same kind as RMSE,
 so the design-based apparatus of \citet{wadoux2021} applies to it unchanged and
 without further assumptions. This is not a technical refinement. It exposes a
@@ -124,7 +132,12 @@ we have $\mathbb{E}[I_i] = \pi_i$ over repeated sampling, so
 \eqnum{2}
 \]
 Under simple random sampling without replacement $\pi_i = n/N$ and Eq.~(1)
-collapses to the sample mean.
+collapses to the sample mean. Everything reported below uses a simple random
+validation sample, so from here on the estimators are written in that form. For
+a design with unequal inclusion probabilities, or for cluster sampling, the
+$\pi$-weighted form of Eq.~(1) must be used instead, and its variance depends on
+first and second order inclusion probabilities rather than on the simple
+expressions given below.
 
 The point of writing it this generally is that everything else follows from
 choosing $g$. Taking $g(i) = (\hat z(s_i)-z(s_i))^2$ gives the population mean
@@ -140,8 +153,11 @@ gives $\mathbb{E}[\widehat{\mathrm{RMSE}}] \le \mathrm{RMSE}$: the root mean
 squared error is not exactly design-unbiased even though the mean squared error
 is. The bias is $O(n^{-1})$ and negligible here, and it is a property of the
 square root rather than of the design. The mean error, obtained with
-$g(i) = \hat z(s_i)-z(s_i)$, is exactly unbiased. We also report the model
-efficiency coefficient \citep{nash1970}.
+$g(i) = \hat z(s_i)-z(s_i)$, is exactly unbiased. We also report the model efficiency coefficient \citep{nash1970},
+$\mathrm{MEC} = 1 - \sum_{i \in S}(\hat z_i - z_i)^2 / \sum_{i \in S}(z_i - \bar z_S)^2$.
+Being a ratio of two estimated quantities it is not a design-unbiased estimator
+of its population counterpart, and we report it for comparability with the
+reference study rather than as an unbiased quantity.
 
 Now take $[\hat \ell(s), \hat u(s)]$ to be a nominal $1-\alpha$ prediction
 interval and set $g(i) = \mathbf{1}\{\hat \ell(s_i) \le z(s_i) \le \hat u(s_i)\}$.
@@ -152,9 +168,12 @@ supplies the estimator at once,
 \mathbf{1}\{\hat \ell(s_i) \le z(s_i) \le \hat u(s_i)\}.
 \eqnum{4}
 \]
-Because $g$ is an indicator, $\widehat{\mathrm{PICP}}$ is a sample proportion:
-exactly unbiased, with design variance $\mathrm{PICP}(1-\mathrm{PICP})/n$ up to
-the finite-population correction, and elementary confidence statements. Among
+Because $g$ is an indicator, $\widehat{\mathrm{PICP}}$ is a sample proportion.
+Under the simple random validation sample used here it is exactly
+design-unbiased, with design variance $\mathrm{PICP}(1-\mathrm{PICP})/n$ up to
+the finite-population correction. Both statements are properties of this design;
+under a general probability design the $\pi$-weighted estimator applies and the
+variance follows the design rather than this formula. Among
 valid intervals the better one is narrower, measured by the mean width
 $\mathrm{MPIW}$, but width without validity is meaningless and the two must be
 read together.
@@ -356,8 +375,12 @@ extrapolation regime resembling the one the map faces.
 \label{sec:case}
 
 We use the public materials of \citet{wadoux2021}: above-ground live woody
-biomass \citep{baccini2012} over a 928 by 1642 km Amazonian rectangle at 1 km
+biomass surface of \citet{baccini2012} over a 928 by 1642 km Amazonian rectangle at 1 km
 resolution, 1{,}310{,}143 cells, with 28 covariates known over the whole grid.
+Following \citet{wadoux2021} we treat that surface as the finite population for
+the numerical experiment. It is itself a remote-sensing estimate carrying its own
+error rather than field-measured biomass, so the results below concern how well a
+mapping procedure reconstructs this benchmark pseudo-population.
 Calibration samples of $n = 500$ are drawn under the same three designs they
 used, simple random, systematic and two-stage clustered random, and each map is
 evaluated design-based on an independent simple random validation sample, with
@@ -397,32 +420,10 @@ $+0.127$ (Fig.~\ref{fig:maps}).
 
 \begin{table}[!ht]
 \centering
-\caption{Design-based accuracy by calibration design, 30 repetitions each,
-$n=500$. ME and RMSE in \Mgha{}.}
+\caption{Design-based accuracy by calibration design, 30 repetitions each, $n=500$. ME and RMSE in \Mgha{}; SD is the standard deviation of the RMSE across repetitions.}
 \label{tab:accuracy}
-\begin{tabular}{llrrr}
-\toprule
-Design & Model & ME & RMSE & MEC \\
-\midrule
-\multirow{4}{*}{Simple random}
- & RF (default) & $+1.061$ & 32.493 & 0.876 \\
- & RF-tuned     & $+1.129$ & 32.475 & 0.876 \\
- & Cubist       & $+1.853$ & 33.264 & 0.870 \\
- & \textbf{This method} & $\mathbf{+0.826}$ & \textbf{31.624} & \textbf{0.882} \\
-\midrule
-\multirow{4}{*}{Systematic}
- & RF (default) & $+0.664$ & 32.280 & 0.877 \\
- & RF-tuned     & $+0.707$ & 32.264 & 0.878 \\
- & Cubist       & $+1.921$ & 33.171 & 0.870 \\
- & \textbf{This method} & $\mathbf{+0.479}$ & \textbf{31.400} & \textbf{0.884} \\
-\midrule
-\multirow{4}{*}{Clustered random}
- & RF (default) & $-1.356$ & 35.778 & 0.851 \\
- & RF-tuned     & $-1.252$ & 35.598 & 0.853 \\
- & Cubist       & $+1.771$ & 37.155 & 0.837 \\
- & \textbf{This method} & $\mathbf{-0.787}$ & \textbf{34.538} & \textbf{0.860} \\
-\bottomrule
-\end{tabular}
+\small
+\input{tables/accuracy}
 \end{table}
 
 \begin{figure}[!ht]
@@ -443,19 +444,10 @@ repetitions, so the defaults were not innocuous.
 
 \begin{table}[!ht]
 \centering
-\caption{Repetitions, out of 30 per design, in which the search departs from the
-conventional recipe (exponential family, cutoff at half the maximum distance, 15
-lags, robust estimator, bandwidth of half the range, isotropy).}
+\caption{Repetitions, out of 30 per design, in which the out-of-fold search departs from the conventional recipe: an exponential family, a cutoff at half the maximum distance, 15 lags, the robust estimator, a bandwidth of half the practical range, and isotropy.}
 \label{tab:axes}
-\begin{tabular}{lrrrr}
-\toprule
-Design & Binning or estimator & Range scale & Anisotropy & Recipe kept \\
-\midrule
-Simple random    &  9 & 7 & 4 & 10 \\
-Systematic       &  4 & 5 & 3 & 18 \\
-Clustered random & 11 & 5 & 0 & 14 \\
-\bottomrule
-\end{tabular}
+\small
+\input{tables/axes}
 \end{table}
 
 Two contrasts within the clustered design deserve attention. The anisotropic
@@ -479,20 +471,10 @@ geostatistics at all.
 
 \begin{table}[!ht]
 \centering
-\caption{Selected corrector across 90 repetitions.}
+\caption{Selected corrector across all 90 repetitions.}
 \label{tab:modes}
-\begin{tabular}{lr}
-\toprule
-Selected corrector & Count \\
-\midrule
-Residual random forest & 68 \\
-Ensemble of residual forest, Cubist and kernel smoother & 15 \\
-Ordinary kriging of residuals & 3 \\
-Cubist delta & 2 \\
-Kernel smoother & 1 \\
-Linear recalibration & 1 \\
-\bottomrule
-\end{tabular}
+\small
+\input{tables/modes}
 \end{table}
 
 It is, but in the representation rather than in the estimator. The residual
@@ -623,6 +605,61 @@ cost of width.}
 \label{fig:uncertainty}
 \end{figure}
 
+
+\subsection{What the simulations show, including where they contradict us}
+\label{sec:sims}
+
+The claims above about the geometry estimator, and our reading of the clustered
+result, need evidence rather than assertion. We therefore ran controlled
+simulations on Gaussian fields with exponential covariance and known anisotropy.
+
+Table~\ref{tab:sim1} gives recovery under simple random sampling with 500
+points. On isotropic fields the estimator declares anisotropy in none of the
+runs, so the parsimony rule of Section~\ref{sec:geohyper} holds, and whenever it
+does declare anisotropy the recovered major axis is exactly correct. Its
+weakness is power rather than specificity: a ratio of $0.20$ is detected in 92
+to 100 per cent of runs, $0.35$ in 29 to 58 per cent, and $0.60$ never. The
+errors are therefore false negatives, and the field results should be read as a
+lower bound on how often directional structure is present.
+
+\begin{table}[!ht]
+\centering
+\caption{Simulation S1. Proportion of runs in which anisotropy is declared, by
+true ratio and signal-to-noise ratio, under simple random sampling with 500
+points. A true ratio of 1 is an isotropic field.}
+\label{tab:sim1}
+\small
+\input{tables/sim_s1.tex}
+\end{table}
+
+Table~\ref{tab:sim2} tests our own explanation of the clustered result and does
+not support it. Holding the true anisotropy fixed and varying only the sampling
+design, anisotropy is declared in 58.3 per cent of simple random runs and 50.0
+per cent of clustered runs, a difference that is not distinguishable
+(Fisher exact test, $p = 1$). Clustering therefore does not prevent the
+estimator from recovering direction at this sample size, and the refusal
+observed in the field experiment cannot be attributed to the design in the way
+we first suggested. The likelier readings are that the residual field of this
+dataset is close to isotropic at this scale, or that an anisotropic geometry
+simply did not lower out-of-fold risk enough to win the profile search. We
+report this because it is the kind of post hoc explanation that is easy to
+assert and, as it turns out, wrong.
+
+\begin{table}[!ht]
+\centering
+\caption{Simulation S2. Proportion of runs declaring anisotropy when the true
+geometry is held fixed and only the sampling design changes.}
+\label{tab:sim2}
+\small
+\input{tables/sim_s2.tex}
+\end{table}
+
+Finally, we checked the interval construction itself. Generating one field
+realisation and splitting it into calibration and test sets, CV+ attains
+empirical coverage of $0.916$ under the random design and $0.905$ under the
+clustered design against a nominal $0.90$, comfortably above the
+$1-2\alpha = 0.80$ guarantee and mildly conservative, as the theory predicts.
+
 \section{Discussion}
 
 Our first argument is about where decisions are made, not about a new learner.
@@ -679,6 +716,93 @@ is easy to miss and consequential when missed: under clustered sampling
 conformal intervals under-cover, no model-based check can reveal it, and a
 spatial-block calibration repairs it. Map uncertainty, like map accuracy, must
 be assessed design-based.
+
+\appendix
+
+\section{Full specification of the procedure}
+\label{app:spec}
+
+Every setting needed to reproduce the experiments is stated here; all values are
+the defaults in the released code unless noted.
+
+\paragraph{Cross-fitting and selection} $K=5$ folds assigned by
+\texttt{caret::createFolds} on the response. The shrinkage grid is
+$\lambda \in [-0.25, 0.60]$ in steps of $0.05$, 18 values, for $n \ge 300$;
+narrower grids apply at smaller $n$. Selection minimises Eq.~(8) over the
+correction library crossed with that grid, with $\lambda=0$ included.
+
+\paragraph{Base forest profiles} Six fixed profiles are compared on identical
+folds: \texttt{default\_rf}, \texttt{more\_trees}, \texttt{deeper\_trees},
+\texttt{subsample}, \texttt{wide\_mtry}, \texttt{wide\_deep\_subsample}. Across
+them the number of trees takes values in $\{500,1000,1500,2000\}$,
+\texttt{mtry} in $\{5,9,14\}$ for $p=28$, minimum node size in $\{1,5\}$ and
+sample fraction in $\{0.632,0.8,1\}$; residual forests use 300 or 500 trees.
+Where explicit grid tuning is enabled instead, the base grid is capped at 18
+candidates and the residual grid at 12, scored out of bag.
+
+\paragraph{Correction library} Residual random forest; residual Cubist with 10
+committees and 0 neighbours; a single-hidden-layer network; ordinary kriging of
+residuals; a radial basis or kernel smoother; the unweighted mean of the
+residual learners; and bias, linear, quadratic and stacked recalibrations. The
+radial basis places centres by $k$-means on the coordinates, their number
+derived from the domain area, the practical range and the nugget ratio and
+clamped to $[8,48]$, with bandwidth $b=m_b\rho$.
+
+\paragraph{Variogram} Empirical variogram with the robust estimator of
+\citet{cressie1980}, cutoff at half the maximum pairwise distance, 15 lags.
+Exponential, spherical, Gaussian and Mat\'ern models are each fitted by weighted
+least squares to the same empirical variogram, and the simplest family within a
+relative tolerance of $0.05$ of the best weighted residual sum of squares is
+retained. The practical range is the distance at which the fitted model first
+reaches 95 per cent of its sill, evaluated numerically so that it means the same
+thing for every family.
+
+\paragraph{Search axes} Three variogram configurations join the default: cutoff
+$0.35$ with 15 lags, cutoff $0.65$ with 20 lags, and the classical
+\citet{matheron1963} estimator at the default binning. The range multiplier
+takes $m_b \in \{0.25,0.5,1.0\}$, with $0.5$ the default arm. The anisotropic
+variant is offered for the two leading profiles; candidate geometries are angles
+$\{0,22.5,\dots,157.5\}$ degrees crossed with ratios
+$\{1,0.75,0.55,0.40,0.25\}$, scored by 5-fold out-of-fold error of a kernel
+smoother whose bandwidth is $0.15$ times the median pairwise distance in the
+transformed space, and accepted only on an improvement exceeding 3 per cent.
+
+\paragraph{Gate and intervals} The gate length multiplier is chosen by spatially
+blocked cross-validation with four $k$-means blocks, the candidate set including
+the value that disables the gate. Intervals use CV+ with $K=5$ and
+$\alpha=0.10$, on a calibration fold split drawn independently of the selection
+split. The covariate-shift variant estimates density ratios with a forest
+classifier separating calibration points from a sample of the population
+covariates, clipping weights at 20; the spatial-block variant refits on five
+$k$-means blocks. The quantile regression forest baseline uses \texttt{ranger}
+with \texttt{quantreg = TRUE} and the same predictors.
+
+\paragraph{Sampling designs} Simple random sampling draws $n=500$ cells without
+replacement; the systematic design draws a regular grid; the clustered design is
+two-stage with 20 primary units chosen over 100 $k$-means centres and 25 points
+each. The validation sample is an independent simple random sample of $n=500$;
+the Population estimand uses 20{,}000 cells drawn after excluding the
+calibration cells. Spatial block cross-validation uses complete-linkage
+clustering of coordinates cut at 350 km.
+
+\paragraph{Preprocessing, missing data, seeds} Covariates and response enter
+untransformed. Rows with non-finite response or coordinates are dropped before
+variogram fitting, and constant or duplicated predictor columns are removed
+before fitting. Every \texttt{ranger} call receives an explicit seed and
+\texttt{ranger} 0.18 and later is reproducible across thread counts; the
+calibration draw for repetition $i$ uses seed $123 + 1000(i-1)$. The internal
+random state is restored on exit with \texttt{withr}, so calling the estimator
+does not alter the user's stream.
+
+\paragraph{Software and scripts} R 4.6.0 with \texttt{ranger}
+\citep{wright2017}, \texttt{gstat} \citep{pebesma2004}, \texttt{caret},
+\texttt{Cubist} and \texttt{nnet}. The estimator is the \texttt{GeoVersa}
+package. Every table and figure in this paper is produced by
+\texttt{run\_dbtarf\_wadoux\_comparison.R} (accuracy campaigns),
+\texttt{run\_dbtarf\_protocols\_comparison.R} (estimands),
+\texttt{simulations.R} (Section~\ref{sec:sims}), \texttt{tables\_manuscript.R}
+(all tables) and \texttt{maps\_compute.R} with \texttt{maps\_plot.R} (the maps).
+
 
 \section*{Declaration of generative AI in the writing process}
 
