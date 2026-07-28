@@ -21,8 +21,8 @@
 
 \begin{frontmatter}
 
-\title{Geostatistics belongs in the hyperparameter space, and coverage
-belongs in the design-based assessment}
+\title{Prediction-interval coverage is a design-based quantity, and
+clustered sampling breaks it}
 
 \author[uf]{Hugo Rodrigues}
 \ead{rodrigues.machado.hugo@gmail.com}
@@ -32,30 +32,33 @@ Center, 3401 Experiment Station, Ona, FL 33865, USA}
 
 \begin{abstract}
 Map accuracy must be estimated from a probability sample by design-based
-inference, not by cross-validation. That argument settled how the point map
-should be judged, but it left two questions open. Here we address both. First,
-we argue that the geostatistical decisions still made by habit in digital soil
-mapping, the variogram family, its range, the lag binning, the estimator and
-the anisotropy, are hyperparameters and should be selected out of fold like any
-other. We are explicit that geostatistics then supplies the hypothesis and
-feature space rather than the final estimator: on the Amazonian above-ground
-biomass data of \citet{wadoux2021} the corrector the data selects is a residual
-forest in 68 of 90 repetitions and ordinary kriging in three, yet the resulting
-estimator lowers design-based RMSE under all three sampling designs (32.49 to
-31.62, 32.28 to 31.40 and 35.78 to 34.54 \Mgha{}), winning 28, 30 and 29 of 30
-paired repetitions. The conventional variogram recipe is displaced in most
-repetitions, and the procedure discriminates: it refuses an anisotropic geometry
-under clustered sampling, where the design cannot support estimating direction,
-while replacing the lag binning most often in exactly that design. Second, we
-argue that prediction-interval coverage is a population parameter of the same
-kind as the mean squared error, so the same design-based estimator applies to
-it. This matters because
-it exposes a failure that is otherwise invisible: cross-fitted conformal
-intervals are calibrated and 17 per cent sharper than quantile regression
-forests under representative sampling, but under clustered sampling they
-under-cover at 0.84 against a nominal 0.90, and only a spatial-block
-calibration restores validity. Coverage, like accuracy, must be assessed
-design-based.
+inference rather than by cross-validation. That result concerns the point map.
+The prediction interval attached to each mapped value is just as consequential
+for decision making, yet its coverage is rarely confronted with the sampling
+design. We show that coverage is a population parameter of exactly the same kind
+as the mean squared error, so the Horvitz-Thompson argument that makes accuracy
+design-unbiased applies to it unchanged, and in the case of coverage the
+estimator is exactly rather than approximately unbiased. This costs no new
+theory and buys something a model-based check cannot provide. On the Amazonian
+above-ground biomass benchmark of Wadoux et al. (2021) we find that CV+
+intervals built from cross-fitted residuals are calibrated and about 17 per cent
+narrower than quantile regression forests under representative sampling, but
+that under clustered sampling they cover only 0.84 against a nominal 0.90. The
+failure is invisible to any check that assumes exchangeability, which is
+precisely the property clustering destroys, and a spatial-block calibration
+restores nominal coverage. As the point predictor we use a random forest with a
+cross-fitted, out-of-fold-selected residual correction whose geostatistical
+settings, the variogram family, its practical range, the lag binning, the
+estimator and the anisotropy, are treated as hyperparameters rather than fixed
+by convention. It lowers design-based RMSE under all three sampling designs
+(32.49 to 31.62, 32.28 to 31.38 and 35.78 to 34.54 Mg ha-1), winning 28, 30 and
+29 of 30 paired repetitions. An ablation locates that gain: the residual
+correction accounts for 95 per cent of it, forest tuning for 2 per cent, and
+selecting the geostatistical hyperparameters for the remaining 2 per cent, which
+is not distinguishable from zero. We therefore claim no accuracy benefit for the
+geostatistical selection, only that it costs nothing, that it changes the fitted
+model, and that it lets us state, rather than assume, that the conventional
+variogram recipe was adequate for these data.
 \end{abstract}
 
 \begin{keyword}
@@ -70,40 +73,57 @@ Conformal prediction\sep Variogram\sep Random forest
 \citet{wadoux2021} showed that map accuracy indices must be estimated from a
 probability sample by design-based inference, and that spatial cross-validation
 has no theoretical underpinning for this purpose. That argument concerns the
-point map and its accuracy, and it leaves two questions that we take up here.
+point map and its accuracy. It leaves open what should be done about the other
+half of a map's quality statement, the uncertainty attached to each prediction,
+and that is where this paper begins.
 
-The first is where geostatistics belongs. Digital soil mapping has largely
-replaced kriging with machine learning \citep{mcbratney2003}, and where
-geostatistics survives it usually enters by assumption: the analyst decides that
-residuals should be kriged, selects a variogram family by eye, fixes a lag
-binning and an estimator, and adds the correction whether or not it improves
-anything. Here we argue that these are not modelling truths to be asserted but
-hyperparameters to be selected, and that they should be chosen out of fold
-against a null in which no correction is applied, exactly as the number of trees
-or the depth of a forest would be. We are candid about what this does and does
-not deliver. Selecting variogram parameters by cross-validation or by
-interpolation performance is not new; it is long-standing practice and has been
-automated before \citep{li2014}, and letting a forest represent spatial
-structure through distance-based features is the RFsp idea of
-\citet{hengl2018}. Regression kriging and the super learner
-\citep{wolpert1992,vanderlaan2007} are equally established. What we contribute
-is narrower: a nested, out-of-fold selection in which variogram-informed
-residual representations and non-spatial corrections compete with each other and
-against an explicit no-correction baseline, with the geostatistical
-hyperparameters inside that selection rather than fixed beforehand, and with the
-selected configuration then assessed on an independent probability sample. And, as our experiment shows,
-geostatistics ends up supplying the hypothesis and feature space rather than the
-final estimator, since the corrector the data prefers is usually a residual
-forest whose features are variogram-scaled basis functions.
+Prediction intervals in soil and ecological mapping are routinely obtained from
+kriging variances or from quantile heuristics, and we are not aware of studies
+that confront their coverage with the sampling design. Our first and principal
+argument is that this is unnecessary, because coverage is a population parameter
+of exactly the same kind as the mean squared error. Section~\ref{sec:ht} shows
+that the Horvitz-Thompson estimator applies to any cell-level function, so the
+apparatus \citet{wadoux2021} established for accuracy carries over to coverage
+without a single new assumption, and in the case of coverage the estimator is
+exactly rather than approximately unbiased. The derivation takes three lines.
 
-The second question is uncertainty. Prediction intervals in soil and ecological
-mapping are routinely obtained from kriging variances or quantile heuristics,
-and we are not aware of studies that check their coverage against the sampling design. Here we
-argue that coverage is a population parameter of exactly the same kind as RMSE,
-so the design-based apparatus of \citet{wadoux2021} applies to it unchanged and
-without further assumptions. This is not a technical refinement. It exposes a
-failure that model-based checking cannot see, because model-based checking
-relies on the very assumption that clustered sampling breaks.
+The payoff is not the derivation but what it lets us see. A coverage check that
+assumes exchangeability cannot detect a failure of exchangeability, and clustered
+sampling is exactly such a failure: the map must predict far from every cluster,
+where the residuals it incurs are larger than any the calibration sample
+observed. Section~\ref{sec:intervals-results} measures this. Conformal intervals
+that are calibrated and sharp under representative sampling cover only 0.84
+against a nominal 0.90 once the calibration sample is clustered, and a
+spatial-block calibration restores nominal coverage. To our knowledge this is the
+first design-based assessment and correction of interval coverage for
+large-scale digital soil mapping.
+
+The second argument concerns the point predictor those intervals are attached
+to, and we present it as the more modest of the two. Digital soil mapping has
+largely migrated from geostatistics to machine learning \citep{mcbratney2003},
+and where geostatistics survives it usually enters by assumption: the analyst
+decides residuals should be kriged, picks a variogram family by eye, fixes a
+binning and an estimator. We instead place those decisions in the hyperparameter
+space of the learner, selected out of fold against a null in which no correction
+is applied.
+
+We are candid about what this does and does not deliver, because an ablation
+settles it. Selecting variogram parameters by cross-validation is not new; it is
+long-standing practice and has been automated before \citep{li2014}, and letting
+a forest represent spatial structure through distance-based features is the RFsp
+idea of \citet{hengl2018}. Regression kriging and the super learner
+\citep{wolpert1992,vanderlaan2007} are equally established. More to the point,
+Section~\ref{sec:ablation} shows that opening the geostatistical hyperparameters
+does not make the map more accurate: it is worth $0.017$ \Mgha{}, which a paired
+test cannot separate from zero. What it does deliver is that it costs nothing,
+that it changes the fitted model in a little under half the repetitions, that it
+declines a geometry the sampling design cannot support, and that it converts an
+assumption into a measured statement, namely that the conventional recipe was
+adequate for these data. That is worth reporting, and it is all we claim.
+
+The two arguments are connected by construction: the same cross-fitting that
+selects the correction supplies the leakage-free conformity scores from which
+the intervals are built.
 
 \section{Coverage is a population parameter, exactly as accuracy is}
 \label{sec:ht}
@@ -555,6 +575,7 @@ repetition; it would be the most adversarial estimand available and is left to
 future work.
 
 \subsection{Design-based assessment convicts the intervals}
+\label{sec:intervals-results}
 
 Table~\ref{tab:coverage} contains the finding we consider most consequential.
 Under representative sampling the plain conformal intervals are calibrated,
@@ -704,66 +725,79 @@ $1-2\alpha = 0.80$ guarantee and mildly conservative, as the theory predicts.
 
 \section{Discussion}
 
-Our first argument is about where decisions are made, not about a new learner.
-The ingredients are established and we say so. What the experiment supports is
-narrower and, we think, more useful: when geostatistical decisions are moved
-into the hyperparameter space and validated out of fold, the map improves
-reliably under the design-based yardstick, and it does so without the analyst
-judging a variogram by eye or deciding in advance whether kriging is warranted.
-The RF-tuned control localises the gain in the correction, Eq.~(9) bounds the
-downside by the forest itself, and Table~\ref{tab:axes} shows the freedom is used
-and used discriminatingly. What it does not do is make the map more accurate.
-Table~\ref{tab:ablation} puts the selection's contribution at $0.017$ \Mgha{},
-indistinguishable from zero, so we claim no accuracy benefit for it: only that it
-costs nothing, that it changes the fitted model, and that it converts an
-assumption into a measured statement about this dataset.
+The uncertainty result is the one we would defend first. Extending design-based
+assessment from error to coverage is conceptually slight, three lines in
+Section~\ref{sec:ht}, but it changes what can be checked, and the check has
+teeth. Intervals that look entirely reasonable, and that are demonstrably
+calibrated and sharp under representative sampling, cover only 0.84 of the
+population once the calibration sample is clustered. That is the same regime in
+which \citet{wadoux2021} found point-accuracy estimators to fail, and it fails
+for a related reason: the sample is not representative of the domain the map has
+to cover. The practical recommendation follows directly. Assess coverage
+design-based, and when clustering is suspected use a spatial-block calibration,
+accepting wider but valid intervals.
 
-We are equally clear about the boundary, because overstating it would repeat the
-error \citet{wadoux2021} criticised. The selected corrector is usually a
-residual forest and ordinary kriging wins outright in three of 90 repetitions.
-We do not claim that kriging has returned to the centre of digital soil mapping.
-We claim that the geostatistical questions, at what scale, in which geometry,
-with how much confidence and whether at all, are posed explicitly and answered
-by evidence, and that the answers change what the model does even when the final
-corrector is a forest.
+We are careful about how strong a claim this supports. CV+ carries a
+finite-sample marginal guarantee of at least $1-2\alpha$ under exchangeability
+\citep{barber2021}, and our simulations confirm that it is attained. Clustered
+sampling violates exchangeability, so no guarantee survives it, and what
+Section~\ref{sec:intervals-results} reports for the spatial-block variant is
+restored \emph{empirical} coverage in this experiment rather than a theorem. The
+comparison with quantile regression forests is likewise qualified: the two
+methods sit at different effective coverage levels, 0.896 against 0.937, so the
+17 per cent width advantage should be read alongside that difference rather than
+as a like-for-like sharpening.
 
-The second argument is the more consequential. Extending design-based assessment
-from error to coverage took three lines in Section~\ref{sec:ht}, but it changes
-what can be checked. Intervals that look entirely reasonable can be badly
-miscalibrated for the population under clustered sampling, which is the same
-regime in which \citet{wadoux2021} found point-accuracy estimators to fail. The
-recommendation follows directly: assess coverage design-based, and use a
-spatial-block calibration when clustering is suspected, accepting wider but
-valid intervals.
+The point predictor is the more modest contribution, and the ablation is what
+disciplines the claim. Table~\ref{tab:ablation} attributes 95 per cent of the
+improvement to the residual correction, 2 per cent to tuning the forest and 2
+per cent, indistinguishable from zero, to selecting the geostatistical
+hyperparameters. We therefore do not argue that moving the variogram into the
+hyperparameter space makes maps better. We argue something narrower: that it can
+be done at no cost, since Eq.~(9) bounds the result below by the uncorrected
+forest; that it changes the fitted model, displacing the conventional recipe in
+14, 12 and 11 of 30 repetitions; that it declines an anisotropic geometry in
+every clustered repetition; and that it replaces an assumption with a
+measurement, letting us report that the conventional recipe was adequate here
+instead of taking it on faith.
 
-Several limitations qualify all of this. The point gain is incremental, of order
-0.9 to 1.2 \Mgha{}, and Table~\ref{tab:ablation} attributes almost all of it to
-the residual correction rather than to the geostatistical selection. Opening the
-geostatistical hyperparameters leaves accuracy
-essentially unchanged relative to the fixed recipe, so what is demonstrated is
-that the choices are made on evidence and are shown to matter to the fitted
-model, not that they lower error on these data. Anisotropy is accepted in about
-one repetition in five under representative sampling and never under clustering,
-and the model is geometric and global, one angle and ratio for the whole domain.
-These results come from a single, large and widely used dataset at one sample
-size.
+Two further boundaries deserve stating, because overstating them would repeat
+the error \citet{wadoux2021} criticised. The corrector the data selects is
+usually a residual forest, and ordinary kriging wins outright in three of 90
+repetitions, so the geostatistics contributes the representation and the
+regularisation rather than the final estimator. And our own explanation of the
+clustered anisotropy result did not survive testing: Section~\ref{sec:sims}
+holds the true geometry fixed and varies only the design, finding no detectable
+difference in recovery, so the refusal cannot be attributed to the design in the
+way we first supposed.
+
+\paragraph{Limitations} The point gain is incremental, of order 0.9 to 1.2
+\Mgha{}. The anisotropy model is geometric and global, one angle and ratio for
+the whole domain, and the geometry estimator has limited power against mild
+anisotropy. The covariate-shift calibration helps only marginally, for the
+structural reason that reweighting cannot manufacture residuals a clustered
+sample never observed. The reference surface is a remote-sensing product treated
+as a finite population, so conclusions concern reconstructing that benchmark
+rather than agreement with field measurements. And all results come from a
+single dataset at one sample size.
 
 \section{Conclusion}
 
-Geostatistics need not be assumed into a map nor exiled from it. Its parameters,
-the variogram family, the range, the binning, the estimator and the anisotropy,
-can be treated as hyperparameters and asked to prove themselves out of fold, and
-when they are, the conventional recipe is displaced in most repetitions and the
-procedure declines the parameters the sampling design cannot support. On these
-data the corrector the model finally prefers is a forest, but it is a forest
-that sees the landscape through a variogram.
+Coverage is a population parameter of the same kind as the mean squared error,
+and it inherits the same design-unbiased estimator. Saying so costs nothing and
+reveals something: cross-fitted conformal intervals that are calibrated and
+sharp under representative sampling under-cover badly once the calibration
+sample is clustered, a failure no exchangeability-assuming check can detect, and
+a spatial-block calibration restores nominal coverage in this experiment. Map
+uncertainty, like map accuracy, should be confronted with the sampling design.
 
-Coverage, meanwhile, is a population parameter of exactly the same kind as RMSE,
-and inherits the same design-unbiased estimator. This is worth saying because it
-is easy to miss and consequential when missed: under clustered sampling
-conformal intervals under-cover, no model-based check can reveal it, and a
-spatial-block calibration repairs it. Map uncertainty, like map accuracy, must
-be assessed design-based.
+The geostatistical decisions behind the point map can meanwhile be treated as
+hyperparameters and selected out of fold rather than fixed by habit. On these
+data that does not lower the error, and we do not pretend otherwise. It costs
+nothing, it changes what the model does, it declines the parameters a design
+cannot support, and it lets a modeller state that the conventional recipe was
+adequate rather than assume it. The corrector the model finally prefers is a
+forest, but it is a forest that sees the landscape through a variogram.
 
 \appendix
 
