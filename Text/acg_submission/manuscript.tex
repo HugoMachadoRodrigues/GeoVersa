@@ -439,8 +439,9 @@ as well as numerical. Red circles in (a) mark the calibration points.}
 \subsection{The data displaces the conventional variogram recipe}
 
 Table~\ref{tab:axes} reports how often the out-of-fold search departs from the
-conventional recipe. In two designs of three it is displaced in a majority of
-repetitions, so the defaults were not innocuous.
+conventional recipe. It is kept in 16, 18 and 19 of the 30 repetitions, so it is
+displaced in a little under half: often enough that the defaults are not
+automatic, but not in a majority.
 
 \begin{table}[!ht]
 \centering
@@ -606,6 +607,47 @@ cost of width.}
 \end{figure}
 
 
+
+\subsection{Where the improvement actually comes from}
+\label{sec:ablation}
+
+The title of this paper would be dishonest if the geostatistical
+hyperparameters turned out not to matter, so we measured their contribution
+directly. Table~\ref{tab:ablation} decomposes the gain under the simple random
+design by running the same procedure with the geostatistical recipe held fixed
+at the conventional values and with it selected.
+
+\begin{table}[!ht]
+\centering
+\caption{Decomposition of the improvement under the simple random design, 30
+repetitions, $n=500$, RMSE in \Mgha{}. The last two rows differ only in whether
+the variogram family, practical range, binning, estimator and anisotropy are
+selected out of fold or fixed at the conventional recipe.}
+\label{tab:ablation}
+\small
+\input{tables/ablation.tex}
+\end{table}
+
+The decomposition is unambiguous. Tuning the base forest is worth $0.022$
+\Mgha{}, the residual correction is worth a further $0.837$, and opening the
+geostatistical hyperparameters is worth $0.017$ more, which a paired test cannot
+distinguish from zero (\(p = 0.295\), 95 per cent confidence interval
+$[-0.050, +0.016]$). Essentially all of the improvement is the residual
+correction itself.
+
+We state the consequence plainly rather than leaving it to the reader. On this
+dataset, selecting the geostatistical hyperparameters does not make the map more
+accurate, and any claim that it does would not survive Table~\ref{tab:ablation}.
+What the selection does deliver is different and, we think, still worth having.
+It changes what the fitted model is, displacing the conventional recipe in 14,
+12 and 11 of 30 repetitions across the three designs. It discriminates according
+to what the sampling design can support, declining an anisotropic geometry in
+every clustered repetition. It costs nothing, because the do-no-harm
+construction of Eq.~(9) bounds the result below by the uncorrected forest. And
+it converts a modelling assumption into a measured statement: we can now say
+that the conventional variogram recipe was adequate for this dataset, which is
+not something one can assert without having tested it.
+
 \subsection{What the simulations show, including where they contradict us}
 \label{sec:sims}
 
@@ -670,7 +712,11 @@ reliably under the design-based yardstick, and it does so without the analyst
 judging a variogram by eye or deciding in advance whether kriging is warranted.
 The RF-tuned control localises the gain in the correction, Eq.~(9) bounds the
 downside by the forest itself, and Table~\ref{tab:axes} shows the freedom is used
-and used discriminatingly.
+and used discriminatingly. What it does not do is make the map more accurate.
+Table~\ref{tab:ablation} puts the selection's contribution at $0.017$ \Mgha{},
+indistinguishable from zero, so we claim no accuracy benefit for it: only that it
+costs nothing, that it changes the fitted model, and that it converts an
+assumption into a measured statement about this dataset.
 
 We are equally clear about the boundary, because overstating it would repeat the
 error \citet{wadoux2021} criticised. The selected corrector is usually a
@@ -691,7 +737,9 @@ spatial-block calibration when clustering is suspected, accepting wider but
 valid intervals.
 
 Several limitations qualify all of this. The point gain is incremental, of order
-0.9 to 1.2 \Mgha{}. Opening the geostatistical hyperparameters leaves accuracy
+0.9 to 1.2 \Mgha{}, and Table~\ref{tab:ablation} attributes almost all of it to
+the residual correction rather than to the geostatistical selection. Opening the
+geostatistical hyperparameters leaves accuracy
 essentially unchanged relative to the fixed recipe, so what is demonstrated is
 that the choices are made on evidence and are shown to matter to the fitted
 model, not that they lower error on these data. Anisotropy is accepted in about
