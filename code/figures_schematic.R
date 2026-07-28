@@ -21,7 +21,7 @@ root <- "/Users/rodrigues.h/Library/CloudStorage/OneDrive-Personal/GeoVersa"
 setwd(root)
 out_png <- "Text/dbtarf_article/figures/fig1_schematic.png"
 
-grDevices::png(out_png, width = 2200, height = 1650, res = 200)
+grDevices::png(out_png, width = 2200, height = 1650, res = 170)
 op <- par(mar = c(0.4, 0.4, 0.4, 0.4))
 plot(NA, xlim = c(0, 100), ylim = c(0, 100), axes = FALSE, xlab = "", ylab = "",
      xaxs = "i", yaxs = "i")
@@ -31,7 +31,7 @@ box_col <- c(step = "#E8E8E8", cross = "#CFEBD8", sel = "#CFE0F5",
 edge <- "#2C3E50"
 
 # helper: rounded-ish box with centred multi-line text
-draw_box <- function(ymid, h, lines, fill, cex_first = 1.02, cex_rest = 0.88,
+draw_box <- function(ymid, h, lines, fill, cex_first = 1.20, cex_rest = 1.04,
                      x0 = 6, x1 = 94) {
   rect(x0, ymid - h / 2, x1, ymid + h / 2, col = fill, border = edge, lwd = 2.1)
   n <- length(lines)
@@ -88,7 +88,7 @@ draw_box(27.5, 13, c(
   "PREDICTION over targets s",
   "y-hat(s)  =  RF_selected(s)  +  lambda*  ·  w(s)  ·  correction(s)",
   "w(s) = exp( - d1(s) / ell ) : spatially-adaptive gate, d1 = distance to nearest",
-  "calibration point — it shrinks the correction under spatial extrapolation"),
+  "calibration point; it shrinks the correction under spatial extrapolation"),
   box_col["pred"])
 
 arrow_down(21, 18.2)
@@ -100,7 +100,7 @@ draw_box(11.5, 12, c(
   box_col["eval"])
 
 text(50, 2.2, "DB-TARF: Design-Based Targeted Adaptive Residual Forest",
-     cex = 1.22, font = 2, col = "#1B5E20")
+     cex = 1.38, font = 2, col = "#1B5E20")
 
 par(op)
 grDevices::dev.off()

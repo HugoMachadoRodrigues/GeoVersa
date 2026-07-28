@@ -67,8 +67,85 @@ for it in zin.infolist():
         if "Range Cattle Research" not in x:
             m=re.search(r'(<w:body>)', x)
             if m: x = x[:m.end()] + block + x[m.end():]
+        # pandoc ignores elsarticle's \sep, so the keyword list arrives as one
+        # run of comma-jammed terms with no label. Rebuild that paragraph.
+        KW=["Digital soil mapping","Design-based inference","Prediction intervals",
+            "Conformal prediction","Variogram","Random forest"]
+        i=x.find("Digital soil mapping")
+        if i>=0:
+            s=x.rfind("<w:p>",0,i); e=x.find("</w:p>",i)+len("</w:p>")
+            kwp=('<w:p><w:r><w:rPr><w:b/></w:rPr>'
+                 '<w:t xml:space="preserve">Keywords: </w:t></w:r>'
+                 '<w:r><w:t xml:space="preserve">' + "; ".join(KW) + '</w:t></w:r></w:p>')
+            x=x[:s]+kwp+x[e:]
+            print("  keyword list rebuilt")
         d=x.encode("utf8")
     zout.writestr(it,d)
 zout.close(); zin.close(); shutil.move(tmp,src)
 print("  affiliation block inserted")
 PYX
+
+# pandoc drops the caption numbering that elsarticle generates, and emits the
+# bibliography with no heading. Number the captions in document order and insert
+# a References heading before the first bibliography entry.
+python3 - <<'PYY'
+import zipfile, re, shutil
+src="manuscript.docx"; tmp="/tmp/_docx_caps.docx"
+zin=zipfile.ZipFile(src); zout=zipfile.ZipFile(tmp,"w",zipfile.ZIP_DEFLATED)
+for it in zin.infolist():
+    d=zin.read(it.filename)
+    if it.filename=="word/document.xml":
+        x=d.decode("utf8")
+        counters={"ImageCaption":[0,"Figure"], "TableCaption":[0,"Table"]}
+        def number(m):
+            sty=m.group(1); head=m.group(0)
+            counters[sty][0]+=1
+            lbl="%s %d. " % (counters[sty][1], counters[sty][0])
+            # prefix the first <w:t> that follows this paragraph properties block
+            return head + '<w:r><w:rPr><w:b/></w:rPr><w:t xml:space="preserve">%s</w:t></w:r>' % lbl
+        x=re.sub(r'<w:pPr>\s*<w:pStyle w:val="(ImageCaption|TableCaption)"\s*/>\s*</w:pPr>',
+                 number, x)
+        # References heading before the first Bibliography paragraph
+        m=re.search(r'<w:p><w:pPr><w:pStyle w:val="Bibliography"', x)
+        if not m: m=re.search(r'<w:pStyle w:val="Bibliography"', x)
+        if m and "References</w:t>" not in x:
+            start=x.rfind("<w:p>", 0, m.start())
+            head=('<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr>'
+                  '<w:r><w:t xml:space="preserve">References</w:t></w:r></w:p>')
+            x=x[:start]+head+x[start:]
+        d=x.encode("utf8")
+    zout.writestr(it,d)
+zout.close(); zin.close(); shutil.move(tmp,src)
+print("  captions numbered, References heading added")
+PYY
+
+# Long tables split across pages. Word cannot keep a whole table together, but it
+# can stop a single row breaking mid-row and repeat the header on the next page,
+# which turns a broken table into a readable one.
+python3 - <<'PYZ'
+import zipfile, re, shutil
+src="manuscript.docx"; tmp="/tmp/_docx_tbl.docx"
+zin=zipfile.ZipFile(src); zout=zipfile.ZipFile(tmp,"w",zipfile.ZIP_DEFLATED)
+for it in zin.infolist():
+    d=zin.read(it.filename)
+    if it.filename=="word/document.xml":
+        x=d.decode("utf8")
+        # no row may split across a page
+        x=x.replace("<w:trPr>", "<w:trPr><w:cantSplit/>")
+        x=re.sub(r'<w:tr>(?!\s*<w:trPr>)', '<w:tr><w:trPr><w:cantSplit/></w:trPr>', x)
+        # repeat the first row of every table as a header
+        def hdr(m):
+            body=m.group(0)
+            i=body.find("<w:tr>")
+            if i<0: return body
+            j=body.find("</w:tr>", i)
+            first=body[i:j]
+            if "<w:tblHeader/>" not in first:
+                first=first.replace("<w:trPr>", "<w:trPr><w:tblHeader/>", 1)
+            return body[:i]+first+body[j:]
+        x=re.sub(r'<w:tbl>.*?</w:tbl>', hdr, x, flags=re.S)
+        d=x.encode("utf8")
+    zout.writestr(it,d)
+zout.close(); zin.close(); shutil.move(tmp,src)
+print("  table rows set to not split; header rows repeat")
+PYZ

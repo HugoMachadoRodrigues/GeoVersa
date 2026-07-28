@@ -61,17 +61,17 @@ message(sprintf("[plot] shared error scale: %+.1f / %+.1f Mg/ha (99th pct)",
 # ---- theme ------------------------------------------------------------------
 
 theme_map <- function() {
-  theme_void(base_size = 11) +
+  theme_void(base_size = 14) +
     theme(
-      plot.title    = element_text(face = "bold", size = 11, hjust = 0,
+      plot.title    = element_text(face = "bold", size = 14, hjust = 0,
                                    margin = margin(b = 2)),
-      plot.subtitle = element_text(size = 9, colour = "grey30", hjust = 0,
+      plot.subtitle = element_text(size = 11, colour = "grey30", hjust = 0,
                                    margin = margin(b = 4)),
       legend.position  = "right",
       legend.key.width = unit(0.32, "cm"),
-      legend.key.height= unit(1.5, "cm"),
-      legend.title     = element_text(size = 9),
-      legend.text      = element_text(size = 8),
+      legend.key.height= unit(1.15, "cm"),
+      legend.title     = element_text(size = 11),
+      legend.text      = element_text(size = 10),
       plot.margin      = margin(4, 6, 4, 6)
     )
 }
@@ -117,7 +117,7 @@ fig <- (p_truth | p_rf | p_db) / (plot_spacer() | p_erf | p_edb) +
   theme(legend.position = "right")
 
 out <- file.path(fig_dir, "fig7_maps.png")
-ggsave(out, fig, width = 13.2, height = 7.4, dpi = 220, bg = "white")
+ggsave(out, fig, width = 13.2, height = 8.0, dpi = 220, bg = "white")
 message(sprintf("[plot] wrote %s", out))
 
 # ---- console: population-level numbers for the caption ----------------------
