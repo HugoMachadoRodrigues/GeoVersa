@@ -25,4 +25,4 @@ For point accuracy the field already settled on a standard: estimate ME, RMSE an
 
 ## Data, tools and outcome
 
-We start from a published benchmark dataset, so results are comparable with existing work, then apply the same procedure to a rangeland soil property of local interest. Computation runs in *edaphos*, an R package we already maintain, keeping the study reproducible from one script. Estimated effort is six months. The output is a short methods paper making one point, that a coverage number without its design is incomplete, plus open code others can reuse. Target journal: *Applied Computing and Geosciences* or *Geoderma*.
+We start from a published benchmark dataset, so results are comparable with existing work, then apply the same procedure to a rangeland soil property of local interest. Computation runs in *GeoVersa*, an R package we already maintain, keeping the study reproducible from one script. Estimated effort is six months. The output is a short methods paper making one point, that a coverage number without its design is incomplete, plus open code others can reuse. Target journal: *Applied Computing and Geosciences* or *Geoderma*.

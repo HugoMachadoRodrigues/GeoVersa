@@ -8,6 +8,9 @@ for it in zin.infolist():
     d = zin.read(it.filename)
     if it.filename == "word/document.xml":
         x = d.decode("utf8")
+        # pandoc turns every heading into a Word bookmark; strip them all.
+        x = re.sub(r'<w:bookmarkStart[^>]*/>', '', x)
+        x = re.sub(r'<w:bookmarkEnd[^>]*/>', '', x)
         x = re.sub(r'<w:pgMar[^/]*/>',
                    '<w:pgMar w:top="1010" w:right="1010" w:bottom="1010" '
                    'w:left="1010" w:header="360" w:footer="360" w:gutter="0"/>', x)
