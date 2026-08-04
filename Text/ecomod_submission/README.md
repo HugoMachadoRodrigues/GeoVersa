@@ -15,8 +15,9 @@ Build:
 | `manuscript.tex` / `manuscript.docx` | the manuscript, 26 pages |
 | `references.bib` | 26 references |
 | `figures/` | four manuscript figures |
+| `tables/` | nine generated tables the manuscript `\input`s |
 | `highlights.md` | required; 5 bullets, each within 85 characters |
-| `figures/graphical_abstract.png` | encouraged; 3984 x 1593 px |
+| `figures/graphical_abstract.png` | encouraged; 3984 x 1592 px |
 
 ## Journal rules this package is built against
 
@@ -25,7 +26,7 @@ Build:
 * Highlights required, 3 to 5 bullets, at most 85 characters each.
 * Graphical abstract encouraged, not required.
 * No word limit and no cap on figures and tables for a regular paper, which is
-  why the procedure appendix and all eight tables sit in the main text. An
+  why the procedure appendix and all nine tables sit in the main text. An
   earlier pass cut them to fit a different journal; that is not needed here.
 * Author-date citations, `elsarticle-harv`.
 
@@ -37,8 +38,11 @@ Build:
 * `maps_compute.R` and `maps_plot.R` whole-grid prediction and the map panel
 * `figures_graphical_abstract.R` the graphical abstract, numbers taken from the
   coverage table
-* `tables_manuscript.R` every table, generated from the result CSVs so no number
-  in the paper can drift from the run that produced it
+* `tables_manuscript.R` every one of the nine tables, generated from the result
+  CSVs so no number in the paper can drift from the run that produced it. The
+  coverage and estimand tables used to be typed by hand and had gone stale
+  against the re-run campaigns; they are generated now, which is what stops that
+  recurring.
 
 ## Left to the corresponding author
 

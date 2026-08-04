@@ -64,15 +64,15 @@ Horvitz-Thompson argument that makes accuracy design-unbiased applies to it
 unchanged, and is here exactly rather than approximately unbiased. This needs no
 new theory. On the Amazonian above-ground biomass
 benchmark of Wadoux et al. (2021), CV+ intervals built from cross-fitted
-residuals are calibrated and about 17 per cent narrower than quantile regression
+residuals are calibrated and about 19 per cent narrower than quantile regression
 forests under representative sampling, yet under clustered sampling they cover
-only 0.84 against a nominal 0.90. That failure is invisible to any check
+only 0.85 against a nominal 0.90. That failure is invisible to any check
 assuming exchangeability, the property clustering destroys; a spatial-block
 calibration restores it. The point predictor is a
 random forest with a cross-fitted residual correction whose geostatistical
 settings, family, range, binning, estimator and anisotropy, are selected out of
 fold rather than fixed. It lowers design-based RMSE under all
-three designs (32.49 to 31.62, 32.28 to 31.38 and 35.78 to 34.54 Mg ha-1). An
+three designs (32.49 to 31.62, 32.28 to 31.38 and 35.78 to 34.57 \Mgha{}). An
 ablation attributes 95 per cent of that gain to the residual correction and 2
 per cent to the geostatistical selection, not distinguishable from zero. We
 claim no accuracy benefit for it, only that it costs nothing and lets us state,
@@ -110,7 +110,7 @@ assumes exchangeability cannot detect a failure of exchangeability, and clustere
 sampling is exactly such a failure: the map must predict far from every cluster,
 where the residuals it incurs are larger than any the calibration sample
 observed. Section~\ref{sec:intervals-results} measures this. Conformal intervals
-that are calibrated and sharp under representative sampling cover only 0.84
+that are calibrated and sharp under representative sampling cover only 0.85
 against a nominal 0.90 once the calibration sample is clustered, and a
 spatial-block calibration restores nominal coverage. To our knowledge this is the
 first design-based assessment and correction of interval coverage for
@@ -135,9 +135,9 @@ Section~\ref{sec:ablation} shows that opening the geostatistical hyperparameters
 does not make the map more accurate: it is worth $0.017$ \Mgha{}, which a paired
 test cannot separate from zero. What it does deliver is that it costs nothing,
 that it changes the fitted model in a little under half the repetitions, that it
-declines a geometry the sampling design cannot support, and that it converts an
-assumption into a measured statement, namely that the conventional recipe was
-adequate for these data. That is worth reporting, and it is all we claim.
+declines an anisotropic geometry outright under clustered calibration, and that
+it converts an assumption into a measured statement, namely that the
+conventional recipe was adequate for these data. That is worth reporting, and it is all we claim.
 
 The two arguments are connected by construction: the same cross-fitting that
 selects the correction supplies the leakage-free conformity scores from which
@@ -323,7 +323,8 @@ unexamined assumption, and we remove it.
 
 The family is selected rather than assumed. With the empirical variogram
 computed by the robust estimator of \citet{cressie1980}, the exponential,
-spherical, Gaussian and Mat\'ern models \citep{matheron1963,journel1978} are
+spherical and Gaussian models \citep{matheron1963,journel1978}, together with
+the Mat\'ern model \citep{matern1960,stein1999}, are
 each fitted to the same empirical variogram and the lowest weighted residual sum
 of squares is retained. The comparison is legitimate in this direction, and only
 in this direction, because binning and pair counts are identical across
@@ -377,12 +378,13 @@ the search as one more candidate and must beat the isotropic one on Eq.~(8).
 \label{sec:intervals}
 
 Cross-fitting has already produced leakage-free residuals for the deployed
-configuration, and these are exactly the conformity scores split conformal
-prediction requires \citep{papadopoulos2002,vovk2005,lei2018}. With $q$ the
-$\lceil (n+1)(1-\alpha)\rceil$-th smallest $|e_i|$, each cell receives
-$[\hat y(s)-q,\ \hat y(s)+q]$.
+configuration, and these are exactly the conformity scores conformal prediction
+requires \citep{papadopoulos2002,vovk2005,lei2018}.
 
-The guarantee rests on exchangeability, not on distributional form. If
+The argument is clearest in the split conformal case, where one calibration set
+is held out. With $q$ the $\lceil (n+1)(1-\alpha)\rceil$-th smallest $|e_i|$,
+each cell receives $[\hat y(s)-q,\ \hat y(s)+q]$, and the guarantee rests on
+exchangeability rather than on distributional form. If
 $|e_1|,\dots,|e_n|,|e_{\mathrm{new}}|$ are exchangeable then $|e_{\mathrm{new}}|$
 is equally likely to occupy any rank among the $n+1$ values, so
 \[
@@ -390,10 +392,20 @@ is equally likely to occupy any rank among the $n+1$ values, so
 \eqnum{12}
 \]
 with no assumption of Gaussianity, homoscedasticity or stationarity
-\citep{vovk2005}. When calibration and target cells are drawn by simple random
-sampling from the same population, exchangeability holds and Eq.~(12) is a
-statement about the population, which is design-based coverage in the sense of
-Eq.~(4).
+\citep{vovk2005}.
+
+We do not deploy that construction. Holding out a separate calibration set is
+costly at the sample sizes digital soil mapping works with, so the intervals
+reported here are CV+ \citep{barber2021}, formed over the same $K$ cross-fitting
+folds and reusing every observation for both fitting and calibration. The price
+is a weaker guarantee, still finite-sample and still resting only on
+exchangeability: CV+ attains at least $1-2\alpha$, not the $1-\alpha$ of
+Eq.~(12). That bound is conservative in practice, and
+Section~\ref{sec:sims} measures how much.
+
+When calibration and target cells are drawn by simple random sampling from the
+same population, exchangeability holds and the coverage statement is one about
+the population, which is design-based coverage in the sense of Eq.~(4).
 
 Clustered sampling breaks it, and does so directionally. The map must predict
 everywhere, including far from every cluster, and the residuals it incurs there
@@ -449,7 +461,7 @@ The estimator lowers the root mean squared error under all three designs
 Wilcoxon $p$ values of $6.5\times10^{-9}$, $9.3\times10^{-10}$ and
 $1.9\times10^{-9}$, and design-based bias moves toward zero in every design. The
 RF-tuned row is the one to read carefully: tuning the forest buys between 0.02
-and 0.18 \Mgha{}, one to fifteen per cent of what the full method achieves, so
+and 0.16 \Mgha{}, two to thirteen per cent of what the full method achieves, so
 the improvement is the residual correction and not a better forest. Computed
 over all 1{,}310{,}143 cells, that is over the population itself rather than a
 sample of it, the root mean squared error is 31.655 \Mgha{} for the default
@@ -462,6 +474,28 @@ $+0.127$ (Fig.~\ref{fig:maps}).
 \label{tab:accuracy}
 \small
 \input{tables/accuracy}
+\end{table}
+
+The paired differences carry the comparison, since every repetition scores both
+maps on the same calibration draw and the same evaluation sample.
+Table~\ref{tab:paired} reports them with their dispersion, a Monte Carlo
+standard error for the mean and a confidence interval, so that the reader can
+separate the size of the effect from the precision with which 30 repetitions
+pin it down. The interval excludes zero under all three designs, and the Monte
+Carlo error is roughly a tenth of the effect, so the ranking is not an artefact
+of the number of repetitions.
+
+\begin{table}[!ht]
+\centering
+\caption{Paired difference in RMSE between the corrected map and the default
+forest, by calibration design, over 30 repetitions. Negative values favour the
+corrected map. MCSE is the Monte Carlo standard error of the mean difference,
+and the confidence interval is the 95 per cent interval for that mean. RMSE in
+\Mgha{}.}
+\label{tab:paired}
+\footnotesize
+\setlength{\tabcolsep}{3pt}
+\input{tables/paired}
 \end{table}
 
 \begin{figure}[!ht]
@@ -490,22 +524,23 @@ automatic, but not in a majority.
 \input{tables/axes}
 \end{table}
 
-Two contrasts within the clustered design deserve attention. The anisotropic
-geometry is accepted in none of its 30 repetitions, while the binning and
-estimator are displaced in 11, the highest count of the three designs. Both are
-what a design-aware procedure should do. A clustered sample concentrates points
-in a few neighbourhoods and carries almost no information about direction at the
-scale of the domain, so the criterion refuses a geometry it cannot estimate; the
-same clustering severely distorts the distribution of pairwise distances, so a
-cutoff at half the maximum distance with 15 equal lags describes that sample
-poorly and the criterion replaces it. The mechanism is not a switch that turns
-geostatistics on. It discriminates between the parameters a design can support
-and those it cannot.
+Two features of the clustered design deserve attention. The anisotropic geometry
+is accepted in none of its 30 repetitions, and the range scale is the axis it
+displaces most often, in 7. The binning and estimator move in 4, fewer than
+under simple random sampling, where they move in 7.
+
+We resist reading a mechanism into the anisotropy result at this point. The
+natural explanation, that a clustered sample carries too little information
+about direction to support a geometry, is one we test directly in
+Section~\ref{sec:sims} and fail to confirm. What the counts do show is that the
+search does not behave as a switch that turns geostatistics on: it leaves the
+conventional recipe untouched in 19 of the 30 clustered repetitions, and moves
+individual axes only where the sample gives it reason to.
 
 Table~\ref{tab:modes} reports which corrector is selected across all 90
 repetitions, and it is also the limit of what we claim. Ordinary kriging wins
 outright in three repetitions and a purely geostatistical interpolator in four;
-in 68 the corrector is a residual forest which, carrying a shrinkage weight, is
+in 72 the corrector is a residual forest which, carrying a shrinkage weight, is
 formally a single boosting step. A reader is entitled to ask whether this is
 geostatistics at all.
 
@@ -552,19 +587,7 @@ weight.
 simple random calibration design. RMSE in \Mgha{}.}
 \label{tab:estimands}
 \small
-\begin{tabular}{lrrrrr}
-\toprule
-Estimand & Reps & RF & This method & $\Delta$RMSE & Wins \\
-\midrule
-\multicolumn{6}{l}{\emph{Design-based map accuracy}} \\
-Population (SRS 20{,}000) & 10 & 32.18 & 31.51 & $-0.669$ & 10/10 \\
-Design-based (SRS 500)    & 30 & 32.49 & 31.62 & $-0.869$ & 28/30 \\
-\midrule
-\multicolumn{6}{l}{\emph{Model comparison only, not map accuracy}} \\
-Random 10-fold CV         & 10 & 32.24 & 31.12 & $-1.125$ & 10/10 \\
-Spatial block CV (350 km) & 10 & 34.72 & 33.45 & $-1.275$ & 10/10 \\
-\bottomrule
-\end{tabular}
+\input{tables/estimands}
 \end{table}
 
 \begin{figure}[!ht]
@@ -579,7 +602,8 @@ two.}
 \label{fig:protocols}
 \end{figure}
 
-The method wins all 10 draws under each additional protocol. Three cautions. The
+The method wins all 10 draws under each additional protocol
+(Fig.~\ref{fig:protocols}). Three cautions. The
 one-sided paired Wilcoxon $p$ at 10 repetitions cannot fall below
 $2^{-10} \approx 0.00098$, the value attained, so it certifies that all ten
 draws favour the method and nothing stronger. These are 10 draws scored three
@@ -597,14 +621,15 @@ future work.
 \subsection{Design-based assessment convicts the intervals}
 \label{sec:intervals-results}
 
-Table~\ref{tab:coverage} contains the finding we consider most consequential.
+Table~\ref{tab:coverage} and Fig.~\ref{fig:uncertainty} contain the finding we
+consider most consequential.
 Under representative sampling the plain conformal intervals are calibrated,
-0.896 and 0.907 against a nominal 0.90, and about 17 per cent narrower than the
+0.895 and 0.902 against a nominal 0.90, and about 19 per cent narrower than the
 quantile regression forest baseline \citep{meinshausen2006}, which over-covers
 at 0.937. Under clustered sampling they under-cover at 0.840, and
 covariate-shift weighting barely helps at 0.850, for the structural reason given
 in Section~\ref{sec:intervals}. The spatial-block calibration restores validity
-at 0.946 at the cost of intervals about 40 per cent wider.
+at 0.946 at the cost of intervals about 53 per cent wider.
 
 \begin{table}[!ht]
 \centering
@@ -612,22 +637,7 @@ at 0.946 at the cost of intervals about 40 per cent wider.
 \Mgha{}.}
 \label{tab:coverage}
 \small
-\begin{tabular}{llrr}
-\toprule
-Design & Interval & PICP & MPIW \\
-\midrule
-\multirow{2}{*}{Simple random}
- & Conformal & 0.896 & 100 \\
- & Quantile regression forest & 0.937 & 123 \\
-\midrule
-Systematic & Conformal & 0.907 & 104 \\
-\midrule
-\multirow{3}{*}{Clustered random}
- & Conformal, plain & 0.840 & 111 \\
- & Covariate-shift weighted & 0.850 & 114 \\
- & \textbf{Spatial-block conformal} & \textbf{0.946} & 145 \\
-\bottomrule
-\end{tabular}
+\input{tables/coverage}
 \end{table}
 
 What matters is not any single number but that the failure is visible at all. A
@@ -653,8 +663,8 @@ cost of width.}
 \subsection{Where the improvement actually comes from}
 \label{sec:ablation}
 
-The title of this paper would be dishonest if the geostatistical
-hyperparameters turned out not to matter, so we measured their contribution
+The second contribution would be empty if the geostatistical hyperparameters
+turned out not to matter, so we measured their contribution
 directly. Table~\ref{tab:ablation} decomposes the gain under the simple random
 design by running the same procedure with the geostatistical recipe held fixed
 at the conventional values and with it selected.
@@ -671,7 +681,7 @@ selected out of fold or fixed at the conventional recipe.}
 \end{table}
 
 The decomposition is unambiguous. Tuning the base forest is worth $0.022$
-\Mgha{}, the residual correction is worth a further $0.837$, and opening the
+\Mgha{}, the residual correction is worth a further $0.836$, and opening the
 geostatistical hyperparameters is worth $0.017$ more, which a paired test cannot
 distinguish from zero (\(p = 0.295\), 95 per cent confidence interval
 $[-0.050, +0.016]$). Essentially all of the improvement is the residual
@@ -703,8 +713,12 @@ runs, so the parsimony rule of Section~\ref{sec:geohyper} holds, and whenever it
 does declare anisotropy the recovered major axis is exactly correct. Its
 weakness is power rather than specificity: a ratio of $0.20$ is detected in 92
 to 100 per cent of runs, $0.35$ in 29 to 58 per cent, and $0.60$ never. The
-errors are therefore false negatives, and the field results should be read as a
-lower bound on how often directional structure is present.
+errors under this design are therefore false negatives, and the field results
+should be read as a lower bound on how often directional structure is present.
+Specificity is not perfect everywhere: under clustered sampling the estimator
+declares anisotropy on a small fraction of isotropic fields
+(Table~\ref{tab:sim2}), so the guarantee is one-sided only for the
+representative case.
 
 \begin{table}[!ht]
 \centering
@@ -750,7 +764,7 @@ The uncertainty result is the one we would defend first. Extending design-based
 assessment from error to coverage is conceptually slight, three lines in
 Section~\ref{sec:ht}, but it changes what can be checked, and the check has
 teeth. Intervals that look entirely reasonable, and that are demonstrably
-calibrated and sharp under representative sampling, cover only 0.84 of the
+calibrated and sharp under representative sampling, cover only 0.85 of the
 population once the calibration sample is clustered. That is the same regime in
 which \citet{wadoux2021} found point-accuracy estimators to fail, and it fails
 for a related reason: the sample is not representative of the domain the map has
@@ -766,7 +780,7 @@ Section~\ref{sec:intervals-results} reports for the spatial-block variant is
 restored \emph{empirical} coverage in this experiment rather than a theorem. The
 comparison with quantile regression forests is likewise qualified: the two
 methods sit at different effective coverage levels, 0.896 against 0.937, so the
-17 per cent width advantage should be read alongside that difference rather than
+19 per cent width advantage should be read alongside that difference rather than
 as a like-for-like sharpening.
 
 The point predictor is the more modest contribution, and the ablation is what
@@ -815,9 +829,9 @@ uncertainty, like map accuracy, should be confronted with the sampling design.
 The geostatistical decisions behind the point map can meanwhile be treated as
 hyperparameters and selected out of fold rather than fixed by habit. On these
 data that does not lower the error, and we do not pretend otherwise. It costs
-nothing, it changes what the model does, it declines the parameters a design
-cannot support, and it lets a modeller state that the conventional recipe was
-adequate rather than assume it. The corrector the model finally prefers is a
+nothing, it changes what the model does, it declines parameters the data do not
+reward, and it lets a modeller state that the conventional recipe was adequate
+rather than assume it. The corrector the model finally prefers is a
 forest, but it is a forest that sees the landscape through a variogram.
 
 \appendix
@@ -921,8 +935,9 @@ for the content of the publication.
 \section*{CRediT authorship contribution statement}
 
 \textbf{Hugo Rodrigues}: Conceptualization, Methodology, Software, Formal
-analysis, Investigation, Data curation, Writing, Visualization.
-\textbf{Golmar Golmohammadi}: Supervision, Writing, Validation.
+analysis, Investigation, Data curation, Visualization, Writing -- original
+draft. \textbf{Golmar Golmohammadi}: Supervision, Validation, Writing -- review
+and editing.
 
 \section*{Funding}
 
@@ -943,7 +958,7 @@ public materials of \citet{wadoux2021}, deposited at
 above-ground biomass product of \citet{baccini2012}; they are used here without
 modification, so the authoritative copy remains the one those authors deposited.
 The analysis code, which implements every procedure described here and
-regenerates every table and figure in this paper and its supplement, is
+regenerates every table and figure in this paper, is
 available at \url{github.com/HugoMachadoRodrigues/GeoVersa} and is archived with
 a persistent identifier on release. The released \texttt{GeoVersa} package for R
 does not yet expose the cross-fitted conformal calibration or the geostatistical

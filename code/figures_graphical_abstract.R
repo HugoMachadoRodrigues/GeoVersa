@@ -7,21 +7,22 @@
 #
 # The panel carries the paper's single message and nothing else: coverage is a
 # design-based quantity, a clustered sample breaks it, and a spatial-block
-# calibration repairs it. Every number is taken from Table 3 of the manuscript.
+# calibration repairs it. Every number matches the generated coverage table,
+# which is built from results/rev1_*_confirm30/dbtarf_uncertainty_summary.csv.
 #
 # Usage:  Rscript code/figures_graphical_abstract.R
 # =============================================================================
 
 root <- "/Users/rodrigues.h/Library/CloudStorage/OneDrive-Personal/GeoVersa"
 setwd(root)
-out_png <- "Text/eti_submission/figures/graphical_abstract.png"
+out_png <- "Text/ecomod_submission/figures/graphical_abstract.png"
 
-# --- the measured numbers (manuscript Table 3) -------------------------------
+# --- the measured numbers, read from the same campaign as the coverage table --
 bars <- data.frame(
   label = c("Simple random\ncalibration",
             "Clustered\ncalibration",
             "Clustered +\nspatial-block\ncalibration"),
-  picp  = c(0.896, 0.840, 0.946),
+  picp  = c(0.895, 0.849, 0.946),
   # brown = broken, green = honest
   fill  = c("#668B5A", "#8C5A24", "#26492F"),
   stringsAsFactors = FALSE
