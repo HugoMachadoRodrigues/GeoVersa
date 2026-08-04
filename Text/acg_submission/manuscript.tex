@@ -11,6 +11,23 @@
 \usepackage[utf8]{inputenc}
 \usepackage[hidelinks,bookmarks=false,pdfpagemode=UseNone]{hyperref}
 \hypersetup{colorlinks=false,pdfborder={0 0 0}}
+\usepackage{orcidlink}
+
+%% Typography. microtype removes almost every overfull line by protrusion and
+%% font expansion alone, without altering a single word. \file wraps a script
+%% name in \path, which may break after its underscores, and \url does the same
+%% for a bare address. Those two, plus the tables below, were the whole problem.
+\usepackage{microtype}
+\usepackage{url}
+\urlstyle{same}
+\def\UrlBreaks{\do\_\do\/\do\.\do\-}
+\newcommand{\file}[1]{\path{#1}}
+
+%% A little extra stretch lets TeX settle the few remaining prose lines instead
+%% of pushing them into the margin, and slightly tighter column gutters keep the
+%% widest tables inside the text block.
+\setlength{\emergencystretch}{3em}
+\setlength{\tabcolsep}{4.5pt}
 
 \journal{Applied Computing and Geosciences}
 
@@ -24,11 +41,18 @@
 \title{Prediction-interval coverage is a design-based quantity, and
 clustered sampling breaks it}
 
-\author[uf]{Hugo Rodrigues}
+\author[uf]{Hugo Rodrigues\,\orcidlink{0000-0002-8070-8126}\corref{cor1}}
+%% elsarticle echoes the whole \author argument in the e-mail footnote, which
+%% would drag the ORCID mark down with it. Hand it just the name.
+\makeatletter\@eadauthor={Hugo Rodrigues}\makeatother
 \ead{rodrigues.machado.hugo@gmail.com}
+
+\author[uf]{Golmar Golmohammadi\,\orcidlink{0000-0001-5532-3892}}
 
 \address[uf]{University of Florida, Range Cattle Research and Education
 Center, 3401 Experiment Station, Ona, FL 33865, USA}
+
+\cortext[cor1]{Corresponding author.}
 
 \begin{abstract}
 Map accuracy must be estimated from a probability sample by design-based
@@ -468,6 +492,7 @@ automatic, but not in a majority.
 \caption{Repetitions, out of 30 per design, in which the out-of-fold search departs from the conventional recipe: an exponential family, a cutoff at half the maximum distance, 15 lags, the robust estimator, a bandwidth of half the practical range, and isotropy.}
 \label{tab:axes}
 \small
+\setlength{\tabcolsep}{3pt}
 \input{tables/axes}
 \end{table}
 
@@ -532,6 +557,7 @@ weight.
 \caption{Comparison against the untuned default forest under four estimands,
 simple random calibration design. RMSE in \Mgha{}.}
 \label{tab:estimands}
+\small
 \begin{tabular}{lrrrrr}
 \toprule
 Estimand & Reps & RF & This method & $\Delta$RMSE & Wins \\
@@ -591,6 +617,7 @@ at 0.946 at the cost of intervals about 40 per cent wider.
 \caption{Design-based interval coverage at a nominal 0.90 level and mean width in
 \Mgha{}.}
 \label{tab:coverage}
+\small
 \begin{tabular}{llrr}
 \toprule
 Design & Interval & PICP & MPIW \\
@@ -814,8 +841,8 @@ narrower grids apply at smaller $n$. Selection minimises Eq.~(8) over the
 correction library crossed with that grid, with $\lambda=0$ included.
 
 \paragraph{Base forest profiles} Six fixed profiles are compared on identical
-folds: \texttt{default\_rf}, \texttt{more\_trees}, \texttt{deeper\_trees},
-\texttt{subsample}, \texttt{wide\_mtry}, \texttt{wide\_deep\_subsample}. Across
+folds: \file{default_rf}, \file{more_trees}, \file{deeper_trees},
+\file{subsample}, \file{wide_mtry}, \file{wide_deep_subsample}. Across
 them the number of trees takes values in $\{500,1000,1500,2000\}$,
 \texttt{mtry} in $\{5,9,14\}$ for $p=28$, minimum node size in $\{1,5\}$ and
 sample fraction in $\{0.632,0.8,1\}$; residual forests use 300 or 500 trees.
@@ -880,39 +907,48 @@ does not alter the user's stream.
 \citep{wright2017}, \texttt{gstat} \citep{pebesma2004}, \texttt{caret},
 \texttt{Cubist} and \texttt{nnet}. The estimator is the \texttt{GeoVersa}
 package. Every table and figure in this paper is produced by
-\texttt{run\_dbtarf\_wadoux\_comparison.R} (accuracy campaigns),
-\texttt{run\_dbtarf\_protocols\_comparison.R} (estimands),
-\texttt{simulations.R} (Section~\ref{sec:sims}), \texttt{tables\_manuscript.R}
-(all tables) and \texttt{maps\_compute.R} with \texttt{maps\_plot.R} (the maps).
+\file{run_dbtarf_wadoux_comparison.R} (accuracy campaigns),
+\file{run_dbtarf_protocols_comparison.R} (estimands),
+\file{simulations.R} (Section~\ref{sec:sims}), \file{tables_manuscript.R}
+(all tables) and \file{maps_compute.R} with \file{maps_plot.R} (the maps).
 
 
 \section*{Declaration of generative AI in the writing process}
 
-During the preparation of this work the author used Grammarly for spelling and
+During the preparation of this work the authors used Grammarly for spelling and
 grammar checking, and an AI assistant (Claude, Anthropic) to draft manuscript
-text, implement analysis code and produce figures, under the author's direction.
+text, implement analysis code and produce figures, under the authors' direction.
 All study design, methodological decisions, interpretation of results and
-verification of the analysis are the author's own. After using these tools the
-author reviewed and edited the content as needed and takes full responsibility
+verification of the analysis are the authors' own. After using these tools the
+authors reviewed and edited the content as needed and take full responsibility
 for the content of the publication.
 
 \section*{CRediT authorship contribution statement}
 
 \textbf{Hugo Rodrigues}: Conceptualization, Methodology, Software, Formal
 analysis, Investigation, Data curation, Writing, Visualization.
+\textbf{Golmar Golmohammadi}: Supervision, Writing, Validation.
+
+\section*{Funding}
+
+This research received no external funding.
 
 \section*{Declaration of competing interest}
 
-The author declares no known competing financial interests or personal
+The authors declare no known competing financial interests or personal
 relationships that could have appeared to influence the work reported in this
 paper.
 
 \section*{Data availability}
 
 The validation data are the public materials of \citet{wadoux2021}, available at
-github.com/AlexandreWadoux/SpatialValidation, and derive from
-\citet{baccini2012}. The estimator is released as the \texttt{GeoVersa} package
-for R on CRAN, and the analysis code is available in the project repository.
+\url{github.com/AlexandreWadoux/SpatialValidation}, and derive from
+\citet{baccini2012}. The analysis code, including the implementation of every
+procedure described here, is available in the project repository at
+\url{github.com/HugoMachadoRodrigues/GeoVersa}. The released \texttt{GeoVersa} package
+for R does not yet expose the cross-fitted conformal calibration or the
+geostatistical hyperparameter search; the version carrying them is in
+preparation.
 
 \bibliographystyle{elsarticle-harv}
 \bibliography{references}

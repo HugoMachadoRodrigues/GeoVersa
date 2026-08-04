@@ -54,10 +54,13 @@ def para(text, italic=False, bold=False):
     rpr = "<w:rPr>" + ("<w:b/>" if bold else "") + ("<w:i/>" if italic else "") + "</w:rPr>"
     return ('<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r>' + rpr +
             '<w:t xml:space="preserve">' + text + '</w:t></w:r></w:p>')
-block = (para("Hugo Rodrigues", bold=True) +
+block = (para("Hugo Rodrigues" + chr(0x1D43) + ", Golmar Golmohammadi", bold=True) +
          para("University of Florida, Range Cattle Research and Education Center, "
               "3401 Experiment Station, Ona, FL 33865, USA", italic=True) +
-         para("rodrigues.machado.hugo@gmail.com", italic=True) +
+         para("ORCID: Hugo Rodrigues 0000-0002-8070-8126, "
+              "Golmar Golmohammadi 0000-0001-5532-3892", italic=True) +
+         para(chr(0x1D43) + " Corresponding author: rodrigues.machado.hugo@gmail.com",
+              italic=True) +
          '<w:p/>')
 zin=zipfile.ZipFile(src); zout=zipfile.ZipFile(tmp,"w",zipfile.ZIP_DEFLATED)
 for it in zin.infolist():
