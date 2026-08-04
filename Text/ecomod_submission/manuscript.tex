@@ -369,9 +369,10 @@ distribution and hence the binning, so the criteria are not comparable. We
 therefore score each candidate geometry by out-of-fold prediction error of a
 kernel smoother on the same held-out points, with bandwidth set as a fraction of
 the median pairwise distance in the transformed space so that the score responds
-to shape and not to rescaling. On simulated fields this returns exact isotropy
-for isotropic fields and the correct angle otherwise, and its errors are false
-negatives. Even then the geometry is not imposed: the anisotropic variant enters
+to shape and not to rescaling. On simulated fields drawn by simple random
+sampling this returns exact isotropy for isotropic fields and the correct angle
+otherwise, and its errors there are false negatives; under clustered sampling
+specificity is high but not perfect (Section~\ref{sec:sims}). Even then the geometry is not imposed: the anisotropic variant enters
 the search as one more candidate and must beat the isotropic one on Eq.~(8).
 
 \section{Conformal intervals, and why clustering breaks them}
@@ -517,7 +518,7 @@ automatic, but not in a majority.
 
 \begin{table}[!ht]
 \centering
-\caption{Repetitions, out of 30 per design, in which the out-of-fold search departs from the conventional recipe: an exponential family, a cutoff at half the maximum distance, 15 lags, the robust estimator, a bandwidth of half the practical range, and isotropy.}
+\caption{Repetitions, out of 30 per design, in which the out-of-fold search departs from the conventional recipe on each of the three axes it is recorded against: the binning and estimator (a cutoff at half the maximum distance, 15 lags, the robust estimator), the range scale (a bandwidth of half the practical range), and isotropy. The selected variogram family is not recorded per repetition and so is not counted here.}
 \label{tab:axes}
 \small
 \setlength{\tabcolsep}{3pt}
@@ -556,8 +557,11 @@ It is, but in the representation rather than in the estimator. The residual
 forest is not fitted on coordinates alone: its features include radial basis
 functions whose centres and bandwidth come from the fitted variogram, and from
 the anisotropic geometry of Eq.~(11) when that is accepted, and its output is
-multiplied by the gate of Eq.~(10) whose length scale is the fitted range.
-Remove the variogram and neither those features nor that gate exist. What
+multiplied, where the search retains it, by the gate of Eq.~(10) whose length
+scale is the fitted range. The search disabled that gate in 82 of the 90
+repetitions, keeping it only under clustered calibration, so the features carry
+the argument here and the gate does not. Remove the variogram and neither
+exists. What
 Table~\ref{tab:modes} shows is that once spatial structure is encoded this way a
 forest exploits it better than a kriging predictor does on these data, which is
 a statement about two learners and not evidence that the geostatistical
@@ -626,9 +630,9 @@ consider most consequential.
 Under representative sampling the plain conformal intervals are calibrated,
 0.895 and 0.902 against a nominal 0.90, and about 19 per cent narrower than the
 quantile regression forest baseline \citep{meinshausen2006}, which over-covers
-at 0.937. Under clustered sampling they under-cover at 0.840, and
-covariate-shift weighting barely helps at 0.850, for the structural reason given
-in Section~\ref{sec:intervals}. The spatial-block calibration restores validity
+at 0.937. Under clustered sampling they under-cover at 0.849, and
+covariate-shift weighting recovers only part of the shortfall, reaching 0.863,
+for the structural reason given in Section~\ref{sec:intervals}. The spatial-block calibration restores validity
 at 0.946 at the cost of intervals about 53 per cent wider.
 
 \begin{table}[!ht]
@@ -692,9 +696,8 @@ dataset, selecting the geostatistical hyperparameters does not make the map more
 accurate, and any claim that it does would not survive Table~\ref{tab:ablation}.
 What the selection does deliver is different and, we think, still worth having.
 It changes what the fitted model is, displacing the conventional recipe in 14,
-12 and 11 of 30 repetitions across the three designs. It discriminates according
-to what the sampling design can support, declining an anisotropic geometry in
-every clustered repetition. It costs nothing, because the do-no-harm
+12 and 11 of 30 repetitions across the three designs. It declines an anisotropic geometry in every clustered repetition, though
+Section~\ref{sec:sims} shows we cannot attribute that refusal to the design. It costs nothing, because the do-no-harm
 construction of Eq.~(9) bounds the result below by the uncorrected forest. And
 it converts a modelling assumption into a measured statement: we can now say
 that the conventional variogram recipe was adequate for this dataset, which is
@@ -756,7 +759,9 @@ Finally, we checked the interval construction itself. Generating one field
 realisation and splitting it into calibration and test sets, CV+ attains
 empirical coverage of $0.916$ under the random design and $0.905$ under the
 clustered design against a nominal $0.90$, comfortably above the
-$1-2\alpha = 0.80$ guarantee and mildly conservative, as the theory predicts.
+$1-2\alpha$ bound of $0.80$, which for $K=5$ and $n=300$ carries a further
+deduction of about $0.026$ under Theorem 4 of \citet{barber2021}, and mildly
+conservative, as the theory predicts.
 
 \section{Discussion}
 
@@ -773,13 +778,14 @@ design-based, and when clustering is suspected use a spatial-block calibration,
 accepting wider but valid intervals.
 
 We are careful about how strong a claim this supports. CV+ carries a
-finite-sample marginal guarantee of at least $1-2\alpha$ under exchangeability
+finite-sample marginal guarantee of $1-2\alpha$ less a term of order $K/n$ under
+exchangeability
 \citep{barber2021}, and our simulations confirm that it is attained. Clustered
 sampling violates exchangeability, so no guarantee survives it, and what
 Section~\ref{sec:intervals-results} reports for the spatial-block variant is
 restored \emph{empirical} coverage in this experiment rather than a theorem. The
 comparison with quantile regression forests is likewise qualified: the two
-methods sit at different effective coverage levels, 0.896 against 0.937, so the
+methods sit at different effective coverage levels, 0.895 against 0.937, so the
 19 per cent width advantage should be read alongside that difference rather than
 as a like-for-like sharpening.
 
@@ -886,9 +892,9 @@ transformed space, and accepted only on an improvement exceeding 3 per cent.
 
 \paragraph{Gate and intervals} The gate length multiplier is chosen by spatially
 blocked cross-validation with four $k$-means blocks, the candidate set including
-the value that disables the gate. Intervals use CV+ with $K=5$ and
-$\alpha=0.10$, on a calibration fold split drawn independently of the selection
-split. The covariate-shift variant estimates density ratios with a forest
+the value that disables the gate. Intervals are formed with $K=5$ and $\alpha=0.10$ over the same fold partition
+used for selection, not an independently drawn one; the reuse is deliberate, and
+Section~\ref{sec:intervals} states what it costs. The covariate-shift variant estimates density ratios with a forest
 classifier separating calibration points from a sample of the population
 covariates, clipping weights at 20; the spatial-block variant refits on five
 $k$-means blocks. The quantile regression forest baseline uses \texttt{ranger}
@@ -907,7 +913,9 @@ untransformed. Rows with non-finite response or coordinates are dropped before
 variogram fitting, and constant or duplicated predictor columns are removed
 before fitting. Every \texttt{ranger} call receives an explicit seed and
 \texttt{ranger} 0.18 and later is reproducible across thread counts; the
-calibration draw for repetition $i$ uses seed $123 + 1000(i-1)$. The internal
+estimand campaign draws repetition $i$ with seed $123 + 1000(i-1)$, while the
+30-repetition campaigns seed the stream once with $123$ and draw the
+repetitions in sequence. The internal
 random state is restored on exit with \texttt{withr}, so calling the estimator
 does not alter the user's stream.
 
@@ -918,7 +926,9 @@ package. Every table and figure in this paper is produced by
 \file{run_dbtarf_wadoux_comparison.R} (accuracy campaigns),
 \file{run_dbtarf_protocols_comparison.R} (estimands),
 \file{simulations.R} (Section~\ref{sec:sims}), \file{tables_manuscript.R}
-(all tables) and \file{maps_compute.R} with \file{maps_plot.R} (the maps).
+(all tables), \file{maps_compute.R} with \file{maps_plot.R} (the maps),
+\file{figures_schematic.R}, \file{figures_protocols.R} and
+\file{figures_uncertainty.R} (the remaining figures).
 
 
 \section*{Declaration of generative AI and AI-assisted technologies in the

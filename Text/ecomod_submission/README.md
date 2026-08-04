@@ -13,8 +13,8 @@ Build:
 | File | Role |
 |---|---|
 | `manuscript.tex` / `manuscript.docx` | the manuscript, 26 pages |
-| `references.bib` | 26 references |
-| `figures/` | four manuscript figures |
+| `references.bib` | 28 references |
+| `figures/` | the four manuscript figures, all script-generated |
 | `tables/` | nine generated tables the manuscript `\input`s |
 | `highlights.md` | required; 5 bullets, each within 85 characters |
 | `figures/graphical_abstract.png` | encouraged; 3984 x 1592 px |
@@ -36,6 +36,8 @@ Build:
   actually implemented in `R/dbtarf.R`
 * `figures_protocols.R` the estimand comparison, read from the result CSVs
 * `maps_compute.R` and `maps_plot.R` whole-grid prediction and the map panel
+* `figures_uncertainty.R` the interval-assessment figure, reading the same
+  campaign CSVs as the coverage table so the two cannot disagree
 * `figures_graphical_abstract.R` the graphical abstract, numbers taken from the
   coverage table
 * `tables_manuscript.R` every one of the nine tables, generated from the result

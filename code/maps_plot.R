@@ -25,7 +25,7 @@ suppressPackageStartupMessages({
 })
 
 in_rds  <- "results/maps_v030/map_predictions.rds"
-fig_dir <- "Text/dbtarf_article/figures"
+fig_dir <- "Text/ecomod_submission/figures"
 stopifnot(file.exists(in_rds))
 obj <- readRDS(in_rds)
 d   <- obj$maps

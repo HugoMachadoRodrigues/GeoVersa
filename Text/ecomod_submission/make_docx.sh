@@ -21,6 +21,7 @@ end
 LUA
 pandoc manuscript.tex \
   --bibliography=references.bib --citeproc \
+  --csl=elsevier-harv-expanded.csl \
   --lua-filter=/tmp/nolinks.lua \
   --resource-path=.:figures \
   -o manuscript.docx

@@ -1,8 +1,7 @@
 # =============================================================================
 # figures_graphical_abstract.R
 #
-# Builds the graphical abstract required by Environmental Technology &
-# Innovation. The journal asks for 531 x 1328 pixels (h x w) or proportionally
+# Builds the graphical abstract required by Ecological Modelling. The journal asks for 531 x 1328 pixels (h x w) or proportionally
 # more, readable at 5 x 13 cm, so this renders at 3x that: 1593 x 3984.
 #
 # The panel carries the paper's single message and nothing else: coverage is a

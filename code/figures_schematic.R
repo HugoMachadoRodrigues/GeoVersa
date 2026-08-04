@@ -1,7 +1,7 @@
 # =============================================================================
 # figures_schematic.R
 #
-# Regenerates Text/dbtarf_article/figures/fig1_schematic.png — the DB-TARF
+# Regenerates Text/ecomod_submission/figures/fig1_schematic.png — the DB-TARF
 # pipeline diagram — so it stays in step with R/dbtarf.R.
 #
 # The correction library drawn here is the one actually implemented in
@@ -19,7 +19,7 @@
 
 root <- "/Users/rodrigues.h/Library/CloudStorage/OneDrive-Personal/GeoVersa"
 setwd(root)
-out_png <- "Text/dbtarf_article/figures/fig1_schematic.png"
+out_png <- "Text/ecomod_submission/figures/fig1_schematic.png"
 
 grDevices::png(out_png, width = 2200, height = 1650, res = 170)
 op <- par(mar = c(0.4, 0.4, 0.4, 0.4))

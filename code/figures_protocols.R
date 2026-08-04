@@ -1,11 +1,13 @@
 # =============================================================================
 # figures_protocols.R
 #
-# Regenerates Text/dbtarf_article/figures/fig4_protocols.png from the canonical
+# Regenerates Text/ecomod_submission/figures/fig4_protocols.png from the canonical
 # v0.3.0 result directories, so the figure cannot drift from the tables again.
 #
 # Reads:
-#   results/canon_v030_full_random_confirm30/      (DesignBased, 30 reps)
+#   results/rev1_random_confirm30/                 (DesignBased, 30 reps; the
+#                                                  same campaign the estimand
+#                                                  table reads, so the two agree)
 #   results/canon_v030_protocols_confirm10/        (Population / RandomKFold /
 #                                                   SpatialKFold, 10 reps each)
 #
@@ -15,11 +17,11 @@
 root <- "/Users/rodrigues.h/Library/CloudStorage/OneDrive-Personal/GeoVersa"
 setwd(root)
 
-out_png <- "Text/dbtarf_article/figures/fig4_protocols.png"
+out_png <- "Text/ecomod_submission/figures/fig4_protocols.png"
 
 # ---- DesignBased (random design, 30 reps) -----------------------------------
 
-db <- read.csv("results/canon_v030_full_random_confirm30/dbtarf_summary_by_protocol.csv",
+db <- read.csv("results/rev1_random_confirm30/dbtarf_summary_by_protocol.csv",
                stringsAsFactors = FALSE)
 get_db <- function(m) db$RMSE_mean[db$model == m][1]
 

@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<style xmlns="http://purl.org/net/xbiblio/csl" class="in-text" version="1.0"
+       page-range-format="expanded" demote-non-dropping-particle="never">
+  <info><title>Elsevier Harvard (expanded page ranges)</title><id>elsevier-harv-expanded</id>
+    <updated>2026-08-04T00:00:00Z</updated></info>
+  <macro name="author"><names variable="author">
+    <name and="text" delimiter-precedes-last="always" initialize-with="." name-as-sort-order="all" sort-separator=", "/>
+  </names></macro>
+  <macro name="year"><date variable="issued"><date-part name="year"/></date></macro>
+  <citation et-al-min="3" et-al-use-first="1" disambiguate-add-year-suffix="true">
+    <sort><key macro="author"/><key macro="year"/></sort>
+    <layout prefix="(" suffix=")" delimiter="; ">
+      <names variable="author"><name form="short" and="text" delimiter=", "/></names>
+      <text macro="year" prefix=", "/>
+    </layout>
+  </citation>
+  <bibliography hanging-indent="true" et-al-min="7" et-al-use-first="6">
+    <sort><key macro="author"/><key macro="year"/></sort>
+    <layout suffix=".">
+      <text macro="author" suffix=", "/>
+      <text macro="year" suffix=". "/>
+      <text variable="title" suffix=". "/>
+      <group delimiter=" ">
+        <text variable="container-title" form="short" suffix=" "/>
+        <text variable="volume"/>
+        <text variable="page" prefix=", "/>
+      </group>
+      <text variable="publisher" prefix=" " suffix=""/>
+    </layout>
+  </bibliography>
+</style>
