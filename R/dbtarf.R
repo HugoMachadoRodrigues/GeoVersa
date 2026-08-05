@@ -1423,6 +1423,13 @@
     coord_names <- character(0)
   }
 
+  # geo_basis = FALSE strips the variogram-derived information from the residual
+  # learner: no radial basis, no kriging, no kernel smoother. The plain
+  # coordinates installed just above are deliberately kept, so the ablation
+  # isolates what the variogram adds over coordinates alone rather than removing
+  # spatial information wholesale.
+  use_spatial <- use_spatial && isTRUE(geo_basis)
+
   n <- nrow(train_df)
   if (is.null(n_folds)) n_folds <- .dbt_auto_folds(n)
   n_folds <- as.integer(max(2L, min(n_folds, n)))
@@ -2026,7 +2033,7 @@ train_dbtarf_one_fold <- function(train_df,
   attach_intervals <- function(out) {
     if (!isTRUE(compute_intervals) || is.null(out)) return(out)
     targs <- list(n_folds = n_folds, lambda_grid = lambda_grid,
-      n_basis = n_basis, bandwidth = bandwidth,
+      n_basis = n_basis, bandwidth = bandwidth, geo_basis = geo_basis,
       min_oof_improvement = min_oof_improvement, rf_tune = rf_tune,
       rf_tune_method = rf_tune_method,
       rf_tune_inner_folds = rf_tune_inner_folds,
@@ -2096,6 +2103,7 @@ train_dbtarf_one_fold <- function(train_df,
       lambda_grid = lambda_grid,
       n_basis = n_basis,
       bandwidth = bandwidth,
+      geo_basis = geo_basis,
       use_aniso = isTRUE(spec$use_aniso),
       bw_mult = if (is.null(spec$bw_mult) || !is.finite(spec$bw_mult)) 0.5 else spec$bw_mult,
       vg_cutoff = if (is.null(spec$vg_cutoff)) 0.50 else spec$vg_cutoff,
@@ -2302,6 +2310,7 @@ train_dbtarf_one_fold <- function(train_df,
     lambda_grid = lambda_grid,
     n_basis = n_basis,
     bandwidth = bandwidth,
+    geo_basis = geo_basis,
     min_oof_improvement = min_oof_improvement,
     train_seed = train_seed,
     rf_tune = rf_tune,
