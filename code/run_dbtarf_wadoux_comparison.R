@@ -267,7 +267,18 @@ eval_uncertainty_dbt <- function(obs, dbt_out, pred_dbt, valuetable, test_df,
   if (!is.null(dbt_out) && !is.null(dbt_out$pi_q90) &&
       is.finite(dbt_out$pi_q90) && !is.null(pred_dbt)) {
     q <- dbt_out$pi_q90
-    rows[[length(rows) + 1L]] <- wrow("DBTARF", pred_dbt - q, pred_dbt + q)
+    # The plain interval is CV+ (Barber et al. 2021), which is what the paper
+    # claims and what carries a finite-sample bound. The pooled out-of-fold
+    # half-width centred on the full-sample refit is kept alongside it, under
+    # its own name, because the two are worth comparing and the older result
+    # should stay visible rather than disappear.
+    if (!is.null(dbt_out$pi_lo90) && !is.null(dbt_out$pi_hi90) &&
+        length(dbt_out$pi_lo90) == length(pred_dbt)) {
+      rows[[length(rows) + 1L]] <- wrow("DBTARF", dbt_out$pi_lo90, dbt_out$pi_hi90)
+      rows[[length(rows) + 1L]] <- wrow("DBTARF_oofq", pred_dbt - q, pred_dbt + q)
+    } else {
+      rows[[length(rows) + 1L]] <- wrow("DBTARF", pred_dbt - q, pred_dbt + q)
+    }
     # Design-aware (density-ratio weighted) conformal: restores coverage under
     # clustered sampling where plain conformal under-covers.
     if (!is.null(dbt_out$pi_q90_w) && is.finite(dbt_out$pi_q90_w)) {

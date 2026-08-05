@@ -64,9 +64,9 @@ Horvitz-Thompson argument that makes accuracy design-unbiased applies to it
 unchanged, and is here exactly rather than approximately unbiased. This needs no
 new theory. On the Amazonian above-ground biomass
 benchmark of Wadoux et al. (2021), CV+ intervals built from cross-fitted
-residuals are calibrated and about 19 per cent narrower than quantile regression
-forests under representative sampling, yet under clustered sampling they cover
-only 0.85 against a nominal 0.90. That failure is invisible to any check
+residuals are mildly conservative at 0.907 and about 16 per cent narrower than
+quantile regression forests under representative sampling, yet under clustered
+sampling they cover only 0.86 against a nominal 0.90. That failure is invisible to any check
 assuming exchangeability, the property clustering destroys; a spatial-block
 calibration restores it. The point predictor is a
 random forest with a cross-fitted residual correction whose geostatistical
@@ -110,7 +110,7 @@ assumes exchangeability cannot detect a failure of exchangeability, and clustere
 sampling is exactly such a failure: the map must predict far from every cluster,
 where the residuals it incurs are larger than any the calibration sample
 observed. Section~\ref{sec:intervals-results} measures this. Conformal intervals
-that are calibrated and sharp under representative sampling cover only 0.85
+that are well behaved and sharp under representative sampling cover only 0.86
 against a nominal 0.90 once the calibration sample is clustered, and a
 spatial-block calibration restores nominal coverage. To our knowledge this is the
 first design-based assessment and correction of interval coverage for
@@ -628,17 +628,26 @@ future work.
 Table~\ref{tab:coverage} and Fig.~\ref{fig:uncertainty} contain the finding we
 consider most consequential.
 Under representative sampling the plain conformal intervals are calibrated,
-0.895 and 0.902 against a nominal 0.90, and about 19 per cent narrower than the
-quantile regression forest baseline \citep{meinshausen2006}, which over-covers
-at 0.937. Under clustered sampling they under-cover at 0.849, and
-covariate-shift weighting recovers only part of the shortfall, reaching 0.863,
-for the structural reason given in Section~\ref{sec:intervals}. The spatial-block calibration restores validity
-at 0.946 at the cost of intervals about 53 per cent wider.
+0.907 and 0.912 against a nominal 0.90, mildly conservative in the direction
+CV+ predicts, and about 16 per cent narrower than the quantile regression forest
+baseline \citep{meinshausen2006}, which over-covers at 0.937. Under clustered
+sampling they under-cover at 0.861. Covariate-shift weighting does not repair
+this: at 0.863 it is indistinguishable from the unweighted interval, which is
+what the structural argument of Section~\ref{sec:intervals} predicts, since
+reweighting redistributes mass over residuals the calibration sample never
+observed. The spatial-block calibration does restore validity, reaching 0.946 at
+the cost of intervals about 48 per cent wider.
 
 \begin{table}[!ht]
 \centering
 \caption{Design-based interval coverage at a nominal 0.90 level and mean width in
-\Mgha{}.}
+\Mgha{}. The rows are not all the same construction, and the comparison is
+empirical rather than like-for-like. CV+ is the deployed interval and the only
+row carrying a finite-sample bound. The pooled out-of-fold quantile centres a
+single half-width on the full-sample refit and is reported because it is what a
+natural reading of cross-fitted residuals produces, not because it is valid. The
+covariate-shift and spatial-block rows modify that pooled calibration, by
+reweighting and by rescoring on held-out blocks respectively.}
 \label{tab:coverage}
 \small
 \input{tables/coverage}
@@ -769,7 +778,7 @@ The uncertainty result is the one we would defend first. Extending design-based
 assessment from error to coverage is conceptually slight, three lines in
 Section~\ref{sec:ht}, but it changes what can be checked, and the check has
 teeth. Intervals that look entirely reasonable, and that are demonstrably
-calibrated and sharp under representative sampling, cover only 0.85 of the
+well behaved and sharp under representative sampling, cover only 0.86 of the
 population once the calibration sample is clustered. That is the same regime in
 which \citet{wadoux2021} found point-accuracy estimators to fail, and it fails
 for a related reason: the sample is not representative of the domain the map has
@@ -785,8 +794,8 @@ sampling violates exchangeability, so no guarantee survives it, and what
 Section~\ref{sec:intervals-results} reports for the spatial-block variant is
 restored \emph{empirical} coverage in this experiment rather than a theorem. The
 comparison with quantile regression forests is likewise qualified: the two
-methods sit at different effective coverage levels, 0.895 against 0.937, so the
-19 per cent width advantage should be read alongside that difference rather than
+methods sit at different effective coverage levels, 0.907 against 0.937, so the
+16 per cent width advantage should be read alongside that difference rather than
 as a like-for-like sharpening.
 
 The point predictor is the more modest contribution, and the ablation is what

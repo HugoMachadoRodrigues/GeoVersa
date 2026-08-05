@@ -15,13 +15,13 @@ setwd(root)
 suppressPackageStartupMessages({ library(ggplot2); library(patchwork) })
 
 out_png <- "Text/ecomod_submission/figures/fig6_uncertainty.png"
-dir_for <- function(sc) sprintf("results/rev1_%s_confirm30", sc)
+dir_for <- function(sc) sprintf("results/cvplus_%s_confirm30", sc)
 
 DESIGNS <- c(random = "Simple random", regular_grid = "Systematic",
              clustered_random = "Clustered")
-LABELS  <- c(DBTARF = "Conformal", DBTARF_dbcal = "Covariate-shift weighted",
+LABELS  <- c(DBTARF = "CV+", DBTARF_dbcal = "Covariate-shift weighted",
              DBTARF_spcal = "Spatial-block", RF_quantile = "Quantile RF")
-PAL <- c("Conformal" = "#668B5A", "Covariate-shift weighted" = "#BE9058",
+PAL <- c("CV+" = "#668B5A", "Covariate-shift weighted" = "#BE9058",
          "Spatial-block" = "#26492F", "Quantile RF" = "#8C5A24")
 
 d <- do.call(rbind, lapply(names(DESIGNS), function(sc) {

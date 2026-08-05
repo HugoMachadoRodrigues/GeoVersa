@@ -26,7 +26,7 @@ dir.create(out, recursive = TRUE, showWarnings = FALSE)
 DESIGNS <- c(random = "Simple random",
              regular_grid = "Systematic",
              clustered_random = "Clustered random")
-dir_for <- function(sc) sprintf("results/rev1_%s_confirm30", sc)
+dir_for <- function(sc) sprintf("results/cvplus_%s_confirm30", sc)
 
 sm <- function(sc) read.csv(file.path(dir_for(sc), "dbtarf_summary_by_protocol.csv"))
 pd <- function(sc) read.csv(file.path(dir_for(sc), "dbtarf_paired_deltas_vs_RF.csv"))
@@ -188,12 +188,14 @@ pick <- function(u, m, col) {
 }
 
 rows <- list(
-  list("\\multirow{2}{*}{Simple random}", "Conformal",                  "random",           "DBTARF",       FALSE),
+  list("\\multirow{3}{*}{Simple random}", "CV+",                       "random",           "DBTARF",       FALSE),
+  list("",                                "Pooled out-of-fold quantile", "random",          "DBTARF_oofq",  FALSE),
   list("",                                "Quantile regression forest", "random",           "RF_quantile",  FALSE),
   list("MID",                             NA, NA, NA, NA),
-  list("Systematic",                      "Conformal",                  "regular_grid",     "DBTARF",       FALSE),
+  list("Systematic",                      "CV+",                        "regular_grid",     "DBTARF",       FALSE),
   list("MID",                             NA, NA, NA, NA),
-  list("\\multirow{3}{*}{Clustered random}", "Conformal, plain",        "clustered_random", "DBTARF",       FALSE),
+  list("\\multirow{4}{*}{Clustered random}", "CV+",                     "clustered_random", "DBTARF",       FALSE),
+  list("",                                "Pooled out-of-fold quantile", "clustered_random","DBTARF_oofq",  FALSE),
   list("",                                "Covariate-shift weighted",   "clustered_random", "DBTARF_dbcal", FALSE),
   list("",                                "Spatial-block conformal",    "clustered_random", "DBTARF_spcal", TRUE)
 )

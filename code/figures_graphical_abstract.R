@@ -16,12 +16,20 @@ root <- "/Users/rodrigues.h/Library/CloudStorage/OneDrive-Personal/GeoVersa"
 setwd(root)
 out_png <- "Text/ecomod_submission/figures/graphical_abstract.png"
 
-# --- the measured numbers, read from the same campaign as the coverage table --
+# --- the measured numbers, read from the same campaign the coverage table reads
+# so this panel cannot drift from the paper the way the earlier hand-typed
+# version did ----------------------------------------------------------------
+uq <- function(sc, m, col) {
+  u <- read.csv(sprintf("results/cvplus_%s_confirm30/dbtarf_uncertainty_summary.csv", sc))
+  u[[col]][u$model == m][1]
+}
 bars <- data.frame(
   label = c("Simple random\ncalibration",
             "Clustered\ncalibration",
             "Clustered +\nspatial-block\ncalibration"),
-  picp  = c(0.895, 0.849, 0.946),
+  picp  = c(uq("random", "DBTARF", "PICP90_mean"),
+            uq("clustered_random", "DBTARF", "PICP90_mean"),
+            uq("clustered_random", "DBTARF_spcal", "PICP90_mean")),
   # brown = broken, green = honest
   fill  = c("#668B5A", "#8C5A24", "#26492F"),
   stringsAsFactors = FALSE

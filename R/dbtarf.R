@@ -1845,8 +1845,25 @@
     }
   }
 
+  # CV+ intervals for the deployed configuration. The quantiles above centre a
+  # single half-width on the full-sample refit, which is neither split conformal
+  # nor CV+ and carries no finite-sample guarantee. CV+ combines each fold's
+  # prediction at the target with that fold's residuals, so the interval it
+  # returns is the one Barber et al. (2021) prove a bound for. It is per-target
+  # and asymmetric, hence returned as bounds rather than a half-width.
+  cvp90 <- tryCatch(
+    .dbt_cvplus(train_df, test_df, response_name, predictor_names, coord_names,
+                mode, lambda, rf_full_fit$params, n_basis, bandwidth,
+                use_spatial, k = 5L, seed = train_seed + 7777L, alpha = 0.10),
+    error = function(e) NULL)
+  # Only the 90 per cent level is reported, and the cost of CV+ is the fold
+  # refitting rather than the final order statistic, so it is computed once.
+
   list(
     pred_test = as.numeric(pred_test),
+    pi_lo90 = if (is.null(cvp90)) NULL else as.numeric(cvp90$lower),
+    pi_hi90 = if (is.null(cvp90)) NULL else as.numeric(cvp90$upper),
+    pi_cvplus_n = if (is.null(cvp90)) NA_integer_ else as.integer(cvp90$n_used),
     pred_test_base = as.numeric(base_test),
     pred_test_cubist = as.numeric(cubist_test),
     correction_test = as.numeric(selected_correction_test),
