@@ -17,8 +17,15 @@
 # Usage:  Rscript code/figures_schematic.R
 # =============================================================================
 
-root <- "/Users/rodrigues.h/Library/CloudStorage/OneDrive-Personal/GeoVersa"
-setwd(root)
+# Portable root resolution; see code/project_paths.R. Works whether the script
+# is run from the repository root or from inside code/.
+local({
+  cands <- c("code/project_paths.R", "project_paths.R", "../code/project_paths.R")
+  hit <- cands[file.exists(cands)]
+  if (!length(hit)) stop("project_paths.R not found; run from the repo root")
+  source(hit[1L])
+})
+setwd(gv_root())
 out_png <- "Text/ecomod_submission/figures/fig1_schematic.png"
 
 grDevices::png(out_png, width = 2200, height = 1650, res = 170)

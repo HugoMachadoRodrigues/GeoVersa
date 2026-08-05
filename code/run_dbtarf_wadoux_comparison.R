@@ -33,6 +33,7 @@
 #   DBT_RESID_RF_MIN_NODE_SIZE   optional comma list
 #   DBT_RESID_RF_SAMPLE_FRACTION optional comma list
 #   DBT_FAIR_PROFILE_SEARCH      TRUE/FALSE, default TRUE
+#   DBT_GEO_BASIS                variogram-derived basis features, default TRUE
 #   DBT_VG_SEARCH                select variogram binning/estimator, default TRUE
 #   DBT_BW_SEARCH                select the range multiplier, default TRUE
 #   DBT_ANISO_SEARCH             offer anisotropic geometry, default TRUE
@@ -154,6 +155,7 @@ dbtarf_params <- modifyList(
     bw_search = parse_bool_dbt("DBT_BW_SEARCH", TRUE),
     aniso_search = parse_bool_dbt("DBT_ANISO_SEARCH", TRUE),
     fair_profile_max = as.integer(parse_num_dbt("DBT_FAIR_PROFILE_MAX", 6L)),
+    geo_basis = parse_bool_dbt("DBT_GEO_BASIS", TRUE),
     ensemble_top_k = as.integer(parse_num_dbt("DBT_ENSEMBLE_TOP_K", 3L)),
     ensemble_weighting = dbt_ensemble_weighting,
     ensemble_temperature = parse_num_dbt("DBT_ENSEMBLE_TEMPERATURE", 0.75)

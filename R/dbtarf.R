@@ -1127,6 +1127,7 @@
 .dbt_block_base_corr <- function(tr, va, response_name, predictor_names, coord_names,
                                  mode, base_params, n_basis, bandwidth,
                                  use_spatial, seed,
+                                 geo_basis = TRUE,
                                  use_aniso = FALSE, bw_mult = 0.5,
                                  vg_cutoff = 0.50, vg_lags = 15L,
                                  vg_cressie = TRUE) {
@@ -1146,6 +1147,7 @@
     return(list(base = base_va, corr = cb_va - base_va))
   }
   basis <- NULL; coords_tr <- coords_va <- NULL
+  use_spatial <- use_spatial && isTRUE(geo_basis)
   if (use_spatial) {
     coords_tr <- as.matrix(tr[, coord_names, drop = FALSE])
     coords_va <- as.matrix(va[, coord_names, drop = FALSE])
@@ -1345,6 +1347,7 @@
                                       lambda_grid = NULL,
                                       n_basis = NULL,
                                       bandwidth = NULL,
+                                      geo_basis = TRUE,
                                       use_aniso = FALSE,
                                       bw_mult = 0.5,
                                       vg_cutoff = 0.50,
@@ -2015,6 +2018,7 @@ train_dbtarf_one_fold <- function(train_df,
                                   ensemble_weighting = "softmax",
                                   ensemble_temperature = 0.75,
                                   compute_intervals = TRUE,
+                                  geo_basis = TRUE,
                                   ...) {
   # Nested CV+ runs after selection, on whichever configuration selection
   # produced, and re-derives that configuration inside every outer fold. It is

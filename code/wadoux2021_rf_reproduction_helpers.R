@@ -1,27 +1,26 @@
 source("./code/geospatial_env_setup.R", local = TRUE)
 
-project_root_wadoux <- if (
-  file.exists("C:/Users/rodrigues.h/OneDrive/Deep Kriging")
-) {
-  "C:/Users/rodrigues.h/OneDrive/Deep Kriging"
-} else {
-  normalizePath(
-    file.path(Sys.getenv("HOME"),
-              "Library/CloudStorage/OneDrive-Personal/Deep Kriging"),
-    mustWork = FALSE
-  )
-}
-external_root_wadoux <- file.path(project_root_wadoux, "external", "SpatialValidation")
+# Paths resolve through code/project_paths.R rather than being hardcoded to one
+# machine. The benchmark data is gitignored, so GEOVERSA_DATA lets a reader
+# point at wherever they cloned it; see data/README.md.
+local({
+  cands <- c("code/project_paths.R", "project_paths.R", "../code/project_paths.R")
+  hit <- cands[file.exists(cands)]
+  if (!length(hit)) stop("project_paths.R not found; run from the repo root")
+  source(hit[1L])
+})
+external_root_wadoux <- gv_data_root(required = FALSE)
+project_root_wadoux <- if (is.na(external_root_wadoux)) gv_root() else
+  dirname(dirname(external_root_wadoux))
 
 # Algorithm source code may live in the current working repo even when the DATA
 # lives under project_root_wadoux (e.g. after the project folder was renamed
 # from "Deep Kriging" to "GeoVersa"). Resolve the code root to wherever the
 # algorithm sources actually exist, preferring the current repo.
 code_root_wadoux <- local({
-  cands <- c(file.path(getwd(), "code"),
-             file.path(project_root_wadoux, "code"))
+  cands <- c(gv_path("code"), file.path(project_root_wadoux, "code"))
   hit <- cands[file.exists(file.path(cands, "ConvKrigingNet2D.R"))]
-  if (length(hit) > 0L) hit[1L] else file.path(getwd(), "code")
+  if (length(hit) > 0L) hit[1L] else gv_path("code")
 })
 
 # ---- Spatial-block CV utilities (shared across models; "#5") ----------------
