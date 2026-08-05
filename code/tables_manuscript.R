@@ -43,7 +43,7 @@ lines <- c(
 for (sc in names(DESIGNS)) {
   s <- sm(sc)
   models <- c("RF", "RF_tuned", "Cubist", "DBTARF")
-  labels <- c("RF (default)", "RF-tuned", "Cubist", "This method")
+  labels <- c("RF (default)", "RF-tuned", "Cubist", "TARF")
   for (j in seq_along(models)) {
     m <- models[j]
     lab <- DESIGNS[[sc]]
@@ -229,7 +229,7 @@ fmt_row <- function(label, n, rf, db, d, w) sprintf(
 
 p_pop <- prow("Population"); p_rkf <- prow("RandomKFold"); p_skf <- prow("SpatialKFold")
 lines <- c("\\begin{tabular}{lrrrrr}", "\\toprule",
-  "Estimand & Reps & RF & This method & $\\Delta$RMSE & Wins \\\\", "\\midrule",
+  "Estimand & Reps & RF & TARF & $\\Delta$RMSE & Wins \\\\", "\\midrule",
   "\\multicolumn{6}{l}{\\emph{Design-based map accuracy}} \\\\",
   fmt_row("Population (SRS 20{,}000)", p_pop$n_iter, p_pop$RMSE_RF, p_pop$RMSE_DBTARF,
           p_pop$mean_delta_RMSE, sprintf("%d/%d", p_pop$wins_DBTARF, p_pop$n_iter)),

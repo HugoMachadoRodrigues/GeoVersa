@@ -1,7 +1,7 @@
 # =============================================================================
 # figures_schematic.R
 #
-# Regenerates Text/ecomod_submission/figures/fig1_schematic.png — the DB-TARF
+# Regenerates Text/ecomod_submission/figures/fig1_schematic.png — the TARF
 # pipeline diagram — so it stays in step with R/dbtarf.R.
 #
 # The correction library drawn here is the one actually implemented in
@@ -99,7 +99,7 @@ draw_box(11.5, 12, c(
   "interval accuracy: PICP, MPIW                (this paper's extension)"),
   box_col["eval"])
 
-text(50, 2.2, "DB-TARF: Design-Based Targeted Adaptive Residual Forest",
+text(50, 2.2, "TARF: Targeted Adaptive Residual Forest",
      cex = 1.38, font = 2, col = "#1B5E20")
 
 par(op)

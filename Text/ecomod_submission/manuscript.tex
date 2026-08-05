@@ -64,9 +64,10 @@ Horvitz-Thompson argument that makes accuracy design-unbiased applies to it
 unchanged, and is here exactly rather than approximately unbiased. This needs no
 new theory. On the Amazonian above-ground biomass
 benchmark of Wadoux et al. (2021), CV+ intervals built from cross-fitted
-residuals are mildly conservative at 0.907 and about 16 per cent narrower than
-quantile regression forests under representative sampling, yet under clustered
-sampling they cover only 0.86 against a nominal 0.90. That failure is invisible to any check
+residuals are mildly conservative at 0.907 under representative sampling and
+about 16 per cent narrower than quantile regression forests, which sit at 0.937,
+so the widths are not compared at matched coverage. Under clustered sampling
+they cover only 0.86 against a nominal 0.90. That failure is invisible to any check
 assuming exchangeability, the property clustering destroys; a spatial-block
 calibration restores it. The point predictor is a
 random forest with a cross-fitted residual correction whose geostatistical
@@ -151,6 +152,66 @@ the intervals are built.
 
 \section{Coverage is a population parameter, exactly as accuracy is}
 \label{sec:ht}
+
+Three distinct sampling mechanisms appear in what follows, and the argument
+depends on keeping them apart. Table~\ref{tab:designs} names them. We write
+\emph{calibration design} for the first and \emph{validation design} for the
+third throughout, and reserve the unqualified word ``design'' for neither.
+
+\begin{table}[!ht]
+\centering
+\caption{The three sampling mechanisms and what each one has to satisfy. Only
+the third carries the design-based estimation argument; only the first bears on
+whether the conformal guarantee applies.}
+\label{tab:designs}
+\small
+\begin{tabular}{p{0.24\textwidth}p{0.32\textwidth}p{0.34\textwidth}}
+\toprule
+Component & Role & Condition it must meet \\
+\midrule
+Calibration sample & Fits the model and builds the intervals &
+Exchangeability with the target population, for the conformal guarantee to
+transfer \\
+Cross-fitting folds & Produce leakage-free out-of-fold residuals and, here,
+the conformity scores & Must match the interval construction they feed; see
+Section~\ref{sec:intervals} \\
+Validation probability sample & Estimates RMSE and population coverage &
+Known, positive inclusion probabilities \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Conditional and repeated-sampling targets}
+\label{sec:targets}
+
+Four quantities in this area are easy to conflate, and the contribution here
+concerns only the last of them.
+
+The first is the coverage of a realised interval map. Fix the fitted model and
+the intervals it produced from one calibration sample; the proportion of the $N$
+population cells whose true value falls inside its own interval is then a fixed
+number, a property of that map and not of the procedure that made it.
+
+The second averages that number over repeated calibration samples, which is a
+property of the procedure.
+
+The third is conformal marginal coverage, which is a probability over the joint
+draw of the calibration sample and a new point, and is what
+\citet{barber2021} bound.
+
+The fourth is design-unbiased estimation of the first. This is the one we claim.
+Conditional on the fitted map and its intervals, Eq.~(4) is exactly unbiased for
+the realised coverage provided the validation sample is drawn independently of
+the calibration sample and follows a probability design with known, positive
+inclusion probabilities. It says nothing about whether the conformal guarantee
+holds; it measures what the intervals did, whatever produced them.
+
+The distinction matters because the two can disagree, and Section~\ref{sec:results}
+is where they do: the conformal construction carries a marginal guarantee under
+exchangeability, and the design-based estimate of realised coverage shows that
+guarantee failing to transfer once the calibration sample is clustered.
+
+
 
 Let the domain be a finite population of $N$ cells, $U=\{1,\dots,N\}$, with true
 values $z(s_i)$, and let the map be a function $\hat z: U \rightarrow
@@ -404,6 +465,44 @@ is equally likely to occupy any rank among the $n+1$ values, so
 with no assumption of Gaussianity, homoscedasticity or stationarity
 \citep{vovk2005}.
 
+The construction is worth stating step by step, because the words
+``cross-fitted residuals'' cover several inequivalent procedures. Write
+$\mathcal{S}$ for the calibration sample, partitioned into $K$ folds
+$\mathcal{S}_1,\dots,\mathcal{S}_K$.
+
+\begin{enumerate}\itemsep2pt
+\item For each fold $k$, run the \emph{entire} selection, the profile search,
+the correction mode, the shrinkage $\lambda$, the gate and the variogram
+recipe, using only $\mathcal{S}\setminus\mathcal{S}_k$. Call the resulting
+fitted predictor $\hat f^{-k}$.
+\item For every calibration point $i\in\mathcal{S}_k$ compute
+$r_i = |y_i - \hat f^{-k}(x_i)|$.
+\item For every target cell $s$ compute $\hat f^{-k}(s)$, using the same
+fold-$k$ model.
+\item Form the $n$ candidate lower bounds $\hat f^{-k(i)}(s) - r_i$ and the $n$
+candidate upper bounds $\hat f^{-k(i)}(s) + r_i$, where $k(i)$ is the fold
+containing $i$.
+\item Take the $\lfloor \alpha(n+1)\rfloor$-th smallest lower bound and the
+$\lceil (1-\alpha)(n+1)\rceil$-th smallest upper bound
+\citep{barber2021}.
+\end{enumerate}
+
+Two features distinguish this from the alternatives. The interval is not
+centred on a single prediction: it aggregates bounds from $K$ different models,
+so it is asymmetric in general. And the selection is repeated inside every fold
+rather than performed once on all of $\mathcal{S}$. The second point is not
+cosmetic. Choosing the configuration on the same out-of-fold residuals that
+later serve as conformity scores would let a configuration be selected
+\emph{because} its residuals were small, and those residuals would then no
+longer be exchangeable with a fresh one. That is the selection-induced optimism
+we acknowledge for risk estimation in Section~\ref{sec:ablation}, and it applies
+to calibration too. Nesting the selection costs $K$ times the search, and it is
+what makes the bound in Eq.~(12) applicable to the interval we actually report.
+
+The point map is a separate object. It comes from the configuration selected on
+all of $\mathcal{S}$ and refitted there, as Fig.~\ref{fig:schematic} shows. The
+interval is not a band around that map.
+
 We do not deploy that construction. Holding out a separate calibration set is
 costly at the sample sizes digital soil mapping works with, so the intervals
 reported here are CV+ \citep{barber2021}, formed over the same $K$ cross-fitting
@@ -416,6 +515,17 @@ Section~\ref{sec:sims} measures how much.
 When calibration and target cells are drawn by simple random sampling from the
 same population, exchangeability holds and the coverage statement is one about
 the population, which is design-based coverage in the sense of Eq.~(4).
+
+Simple random sampling of the calibration points makes them exchangeable with a
+uniformly drawn target cell in the sense the guarantee needs: sampling without
+replacement from a finite population gives symmetry under permutation, not
+independence, and permutation symmetry is what the rank argument uses. Our
+systematic design does not have that property. It draws a randomly located
+regular grid, so the design is probabilistic and the validation estimator is
+unbiased, but the calibration points are not exchangeable with an arbitrary
+target and Eq.~(12) does not transfer to it. The coverage we report for the
+systematic design is therefore an empirical finding, not a guarantee attained.
+
 
 Clustered sampling breaks it, and does so directionally. The map must predict
 everywhere, including far from every cluster, and the residuals it incurs there
@@ -431,7 +541,7 @@ instead changes what the scores are, refitting on spatial blocks and scoring eac
 held-out block \citep{roberts2017}, so that every residual is generated in an
 extrapolation regime resembling the one the map faces.
 
-\section{Case study}
+\section{Experimental design}
 \label{sec:case}
 
 We use the public materials of \citet{wadoux2021}: above-ground live woody
@@ -451,7 +561,11 @@ which separates the effect of tuning the forest from the effect of the
 correction. Forests use \texttt{ranger} \citep{wright2017} and all variogram
 work uses \texttt{gstat} \citep{pebesma2004}; every forest receives an explicit
 seed. The estimator is released as the \texttt{GeoVersa} package for R.
-Fig.~\ref{fig:schematic} summarises the procedure.
+Fig.~\ref{fig:schematic} summarises the procedure. We refer to the predictor
+as TARF, a targeted adaptive residual forest, and deliberately keep
+``design-based'' out of that name: the learner is fitted by ordinary means,
+with no Horvitz-Thompson estimator and no design-weighted objective. What is
+design-based here is the assessment protocol, not the model.
 
 \begin{figure}[!ht]
 \centering
@@ -463,6 +577,9 @@ only if they beat the RF-only baseline; the winners are refitted on the full
 sample and the map is scored on an independent probability sample.}
 \label{fig:schematic}
 \end{figure}
+
+\section{Results}
+\label{sec:results}
 
 \subsection{The correction improves the map, and the tuning does not}
 
@@ -639,7 +756,11 @@ consider most consequential.
 Under representative sampling the plain conformal intervals are calibrated,
 0.907 and 0.912 against a nominal 0.90, mildly conservative in the direction
 CV+ predicts, and about 16 per cent narrower than the quantile regression forest
-baseline \citep{meinshausen2006}, which over-covers at 0.937. Under clustered
+baseline \citep{meinshausen2006}. That baseline over-covers at 0.937, so the two
+are not compared at the same empirical coverage and the width difference is
+descriptive: a method that covers less will generally be narrower. A comparison
+at matched coverage would need both recalibrated to a common level, which we did
+not do. Under clustered
 sampling they under-cover at 0.861. Covariate-shift weighting does not repair
 this: at 0.863 it is indistinguishable from the unweighted interval, which is
 what the structural argument of Section~\ref{sec:intervals} predicts, since
@@ -845,6 +966,32 @@ as a finite population, so conclusions concern reconstructing that benchmark
 rather than agreement with field measurements. And all results come from a
 single dataset at one sample size.
 
+\section{Limitations}
+\label{sec:limits}
+
+Four limits bound what the results above support.
+
+The evidence comes from one surface. The benchmark of \citet{baccini2012} is a
+remote-sensing product with its own error, treated here as a finite population
+because \citet{wadoux2021} treated it that way and comparability matters more
+than realism for this purpose. Nothing in the experiment speaks to how the
+undercoverage would scale on a different variable, region or resolution.
+
+Almost every number comes from $n = 500$. The magnitude of the clustered
+shortfall, the width of the spatial-block repair and the frequency with which
+the search declines an anisotropic geometry could all move with sample size, and
+we did not vary it.
+
+The two repairs are compared empirically, not like for like. The CV+ row is a
+different construction from the covariate-shift and spatial-block rows, which
+modify a pooled calibration, and only CV+ carries a finite-sample bound. Their
+coverage figures are therefore descriptive.
+
+The spatial-block result is a repair that worked here. It reached $0.946$
+against a nominal $0.90$ with intervals about half as wide again, which is
+conservative rather than calibrated, and we have no theorem that says it will
+recover coverage on another dataset.
+
 \section{Conclusion}
 
 Coverage is a population parameter of the same kind as the mean squared error,
@@ -865,8 +1012,7 @@ rather than assume it. The corrector the model finally prefers is a
 forest, but it is a forest that sees the landscape through a variogram.
 
 \appendix
-
-\section{Full specification of the procedure}
+\section{Full computational specification}
 \label{app:spec}
 
 Every setting needed to reproduce the experiments is stated here; all values are
