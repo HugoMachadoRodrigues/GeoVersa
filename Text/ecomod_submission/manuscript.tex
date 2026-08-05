@@ -919,6 +919,24 @@ $1-2\alpha$ bound of $0.80$, which for $K=5$ and $n=300$ carries a further
 deduction of about $0.026$ under Theorem 4 of \citet{barber2021}, and mildly
 conservative, as the theory predicts.
 
+That last number deserves emphasis rather than a footnote, because it
+constrains the explanation. Under clustered calibration the simulation holds
+coverage at $0.905$, while the biomass surface loses it, at $0.861$. Clustering
+alone is therefore not sufficient to produce the failure. The simulated field is
+stationary and isotropic by construction, so a clustered sample of it is
+geometrically unrepresentative but statistically representative: the residual
+distribution far from the clusters is the same one the calibration points
+sampled. The biomass surface is not stationary. Its error distribution changes
+with location, so a clustered sample there is unrepresentative in the way that
+matters, and the conformity scores understate the errors the map incurs where it
+has no support.
+
+We therefore state the mechanism as a shift between the calibration and target
+error distributions, driven here by clustering acting on a non-stationary
+surface, rather than as a property of clustered designs as such. A clustered
+design on a stationary field need not undercover, and an unclustered design on a
+strongly non-stationary one might.
+
 \section{Discussion}
 
 The uncertainty result is the one we would defend first. Extending design-based
@@ -1031,8 +1049,14 @@ forest, but it is a forest that sees the landscape through a variogram.
 Every setting needed to reproduce the experiments is stated here; all values are
 the defaults in the released code unless noted.
 
-\paragraph{Cross-fitting and selection} $K=5$ folds assigned by
-\texttt{caret::createFolds} on the response. The shrinkage grid is
+\paragraph{Cross-fitting and selection} Two fold partitions are used and they
+are not the same. The selection folds are $K=5$ assigned by
+\texttt{caret::createFolds}, which stratifies on the response; fold membership
+there depends on $y_i$, which is acceptable because those folds only rank
+candidate configurations. The calibration partition used by the nested CV+ of
+Section~\ref{sec:intervals} is a plain random permutation into $K=5$ blocks,
+drawn independently of the response, because the exchangeability the bound needs
+would not survive response-stratified assignment. The shrinkage grid is
 $\lambda \in [-0.25, 0.60]$ in steps of $0.05$, 18 values, for $n \ge 300$;
 narrower grids apply at smaller $n$. Selection minimises Eq.~(8) over the
 correction library crossed with that grid, with $\lambda=0$ included.
