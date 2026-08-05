@@ -1078,7 +1078,9 @@
 .dbt_cvplus <- function(train_df, test_df, response_name, predictor_names,
                         coord_names, mode, lambda, base_params, n_basis,
                         bandwidth, use_spatial, k = 5L, seed = 1L,
-                        alpha = 0.10, max_test = 20000L) {
+                        alpha = 0.10, max_test = 20000L,
+                        use_aniso = FALSE, bw_mult = 0.5, vg_cutoff = 0.50,
+                        vg_lags = 15L, vg_cressie = TRUE) {
   n <- nrow(train_df); n_test <- nrow(test_df)
   if (n < 20L || n_test < 1L) return(NULL)
   # the dense n x n_test construction is only affordable for moderate test sets
@@ -1098,7 +1100,9 @@
     bc <- tryCatch(.dbt_block_base_corr(
       train_df[tr, , drop = FALSE], va, response_name, predictor_names,
       coord_names, mode, base_params, n_basis, bandwidth, use_spatial,
-      seed + kk), error = function(e) NULL)
+      seed + kk, use_aniso = use_aniso, bw_mult = bw_mult,
+      vg_cutoff = vg_cutoff, vg_lags = vg_lags,
+      vg_cressie = vg_cressie), error = function(e) NULL)
     if (is.null(bc)) next
     pred <- bc$base + lam * bc$corr
     n_te <- length(te)
@@ -1186,7 +1190,10 @@
 .dbt_select_gate_spatial <- function(train_df, response_name, predictor_names,
                                      coord_names, mode, lambda, base_params,
                                      n_basis, bandwidth, gate_rho,
-                                     k_blocks = 4L, seed = 1L) {
+                                     k_blocks = 4L, seed = 1L,
+                                     use_aniso = FALSE, bw_mult = 0.5,
+                                     vg_cutoff = 0.50, vg_lags = 15L,
+                                     vg_cressie = TRUE) {
   if (!is.finite(gate_rho) || gate_rho <= 0 || !is.finite(lambda)) {
     return(list(gate_c = Inf, gate_length = Inf))
   }
@@ -1210,7 +1217,9 @@
     bc <- tryCatch(.dbt_block_base_corr(
       train_df[tr_idx, , drop = FALSE], train_df[te_idx, , drop = FALSE],
       response_name, predictor_names, coord_names, mode, base_params,
-      n_basis, bandwidth, TRUE, seed + b), error = function(e) NULL)
+      n_basis, bandwidth, TRUE, seed + b, use_aniso = use_aniso,
+      bw_mult = bw_mult, vg_cutoff = vg_cutoff, vg_lags = vg_lags,
+      vg_cressie = vg_cressie), error = function(e) NULL)
     if (is.null(bc)) next
     base_sp[te_idx] <- bc$base; corr_sp[te_idx] <- bc$corr
     d1[te_idx] <- .dbt_nn_dist(coords[te_idx, , drop = FALSE],
@@ -1774,7 +1783,9 @@
           train_df, response_name, predictor_names, coord_names,
           best_mode_chr, lambda, base_params = rf_full_fit$params,
           n_basis = n_basis, bandwidth = bandwidth, gate_rho = gate_rho,
-          k_blocks = 4L, seed = train_seed + 7L)
+          k_blocks = 4L, seed = train_seed + 7L,
+          use_aniso = use_aniso, bw_mult = bw_mult, vg_cutoff = vg_cutoff,
+          vg_lags = vg_lags, vg_cressie = vg_cressie)
         gate_c <- gsel$gate_c; gate_length <- gsel$gate_length
       }
     }
@@ -1854,7 +1865,10 @@
   cvp90 <- tryCatch(
     .dbt_cvplus(train_df, test_df, response_name, predictor_names, coord_names,
                 mode, lambda, rf_full_fit$params, n_basis, bandwidth,
-                use_spatial, k = 5L, seed = train_seed + 7777L, alpha = 0.10),
+                use_spatial, k = 5L, seed = train_seed + 7777L, alpha = 0.10,
+                use_aniso = use_aniso, bw_mult = bw_mult,
+                vg_cutoff = vg_cutoff, vg_lags = vg_lags,
+                vg_cressie = vg_cressie),
     error = function(e) NULL)
   # Only the 90 per cent level is reported, and the cost of CV+ is the fold
   # refitting rather than the final order statistic, so it is computed once.
