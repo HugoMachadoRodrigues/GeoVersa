@@ -1856,28 +1856,8 @@
     }
   }
 
-  # CV+ intervals for the deployed configuration. The quantiles above centre a
-  # single half-width on the full-sample refit, which is neither split conformal
-  # nor CV+ and carries no finite-sample guarantee. CV+ combines each fold's
-  # prediction at the target with that fold's residuals, so the interval it
-  # returns is the one Barber et al. (2021) prove a bound for. It is per-target
-  # and asymmetric, hence returned as bounds rather than a half-width.
-  cvp90 <- tryCatch(
-    .dbt_cvplus(train_df, test_df, response_name, predictor_names, coord_names,
-                mode, lambda, rf_full_fit$params, n_basis, bandwidth,
-                use_spatial, k = 5L, seed = train_seed + 7777L, alpha = 0.10,
-                use_aniso = use_aniso, bw_mult = bw_mult,
-                vg_cutoff = vg_cutoff, vg_lags = vg_lags,
-                vg_cressie = vg_cressie),
-    error = function(e) NULL)
-  # Only the 90 per cent level is reported, and the cost of CV+ is the fold
-  # refitting rather than the final order statistic, so it is computed once.
-
   list(
     pred_test = as.numeric(pred_test),
-    pi_lo90 = if (is.null(cvp90)) NULL else as.numeric(cvp90$lower),
-    pi_hi90 = if (is.null(cvp90)) NULL else as.numeric(cvp90$upper),
-    pi_cvplus_n = if (is.null(cvp90)) NA_integer_ else as.integer(cvp90$n_used),
     pred_test_base = as.numeric(base_test),
     pred_test_cubist = as.numeric(cubist_test),
     correction_test = as.numeric(selected_correction_test),
@@ -1942,6 +1922,65 @@
   )
 }
 
+# Nested CV+ intervals.
+#
+# The flat construction reused one fold partition for two jobs: choosing the
+# configuration and calibrating the interval. The CV+ theorem of Barber et al.
+# (2021) assumes the algorithm is fixed, so residuals that were small enough to
+# win a selection cannot also serve as unbiased conformity scores. Peer review
+# raised exactly this, and the fix is to nest.
+#
+# For each outer fold k the ENTIRE selection is re-run on the other K-1 folds
+# (profile search, correction mode, shrinkage, gate, variogram recipe), the
+# resulting model scores the held-out fold, and that same fold-specific model
+# predicts every target cell. Fold k therefore contributes residuals from a
+# model that never saw it and never was chosen because of it.
+#
+# The cost is real: selection runs K times per repetition rather than once.
+.dbt_cvplus_nested <- function(train_df, test_df, response_name, predictor_names,
+                               coord_names, k = 5L, seed = 1L, alpha = 0.10,
+                               max_test = 20000L, train_args = list()) {
+  n <- nrow(train_df); n_test <- nrow(test_df)
+  if (n < 40L || n_test < 1L || n_test > max_test) return(NULL)
+
+  withr::local_preserve_seed()
+  set.seed(as.integer(seed))
+  fold <- sample(rep_len(seq_len(k), n))
+  y <- as.numeric(train_df[[response_name]])
+  R <- rep(NA_real_, n)
+  P <- matrix(NA_real_, nrow = n, ncol = n_test)
+
+  keep <- intersect(names(train_df), names(test_df))
+  for (kk in seq_len(k)) {
+    te <- which(fold == kk); tr <- which(fold != kk)
+    if (length(tr) < 30L || length(te) < 1L) next
+    va <- rbind(train_df[te, keep, drop = FALSE], test_df[, keep, drop = FALSE])
+    args <- utils::modifyList(train_args, list(
+      train_df = train_df[tr, , drop = FALSE], test_df = va,
+      response_name = response_name, predictor_names = predictor_names,
+      coord_names = coord_names, compute_intervals = FALSE,
+      train_seed = as.integer(seed) + 100L * kk))
+    out <- tryCatch(do.call(train_dbtarf_one_fold, args), error = function(e) NULL)
+    if (is.null(out) || is.null(out$pred_test)) next
+    pred <- as.numeric(out$pred_test)
+    n_te <- length(te)
+    R[te] <- abs(y[te] - pred[seq_len(n_te)])
+    P[te, ] <- matrix(pred[-seq_len(n_te)], nrow = n_te, ncol = n_test,
+                      byrow = TRUE)
+  }
+
+  ok <- is.finite(R) & stats::complete.cases(P)
+  m <- sum(ok)
+  if (m < 10L) return(NULL)
+  lo_i <- max(1L, floor(alpha * (m + 1)))
+  hi_i <- min(m, ceiling((1 - alpha) * (m + 1)))
+  Lo <- P[ok, , drop = FALSE] - R[ok]
+  Hi <- P[ok, , drop = FALSE] + R[ok]
+  list(lower = apply(Lo, 2L, function(v) sort(v)[lo_i]),
+       upper = apply(Hi, 2L, function(v) sort(v)[hi_i]),
+       n_used = m, alpha = alpha, folds = k)
+}
+
 train_dbtarf_one_fold <- function(train_df,
                                   test_df,
                                   response_name,
@@ -1975,7 +2014,36 @@ train_dbtarf_one_fold <- function(train_df,
                                   ensemble_top_k = 1L,
                                   ensemble_weighting = "softmax",
                                   ensemble_temperature = 0.75,
+                                  compute_intervals = TRUE,
                                   ...) {
+  # Nested CV+ runs after selection, on whichever configuration selection
+  # produced, and re-derives that configuration inside every outer fold. It is
+  # skipped when this call is itself an inner fold of a nested run.
+  attach_intervals <- function(out) {
+    if (!isTRUE(compute_intervals) || is.null(out)) return(out)
+    targs <- list(n_folds = n_folds, lambda_grid = lambda_grid,
+      n_basis = n_basis, bandwidth = bandwidth,
+      min_oof_improvement = min_oof_improvement, rf_tune = rf_tune,
+      rf_tune_method = rf_tune_method,
+      rf_tune_inner_folds = rf_tune_inner_folds,
+      rf_tune_max_grid = rf_tune_max_grid, resid_rf_tune = resid_rf_tune,
+      resid_rf_tune_max_grid = resid_rf_tune_max_grid,
+      fair_profile_search = fair_profile_search, aniso_search = aniso_search,
+      bw_search = bw_search, vg_search = vg_search,
+      fair_profile_max = fair_profile_max, ensemble_top_k = ensemble_top_k,
+      ensemble_weighting = ensemble_weighting,
+      ensemble_temperature = ensemble_temperature)
+    cv <- tryCatch(.dbt_cvplus_nested(train_df, test_df, response_name,
+      predictor_names, coord_names, k = 5L, seed = train_seed + 7777L,
+      alpha = 0.10, train_args = targs), error = function(e) NULL)
+    out$pi_lo90 <- if (is.null(cv)) NULL else as.numeric(cv$lower)
+    out$pi_hi90 <- if (is.null(cv)) NULL else as.numeric(cv$upper)
+    out$diagnostics$cvplus_nested <- !is.null(cv)
+    out$diagnostics$cvplus_n_used <- if (is.null(cv)) NA_integer_ else
+      as.integer(cv$n_used)
+    out
+  }
+
   tag_profile <- function(out, label) {
     out$diagnostics$selected_profile <- label
     out$candidate_table <- cbind(profile = label, out$candidate_table)
@@ -2211,7 +2279,7 @@ train_dbtarf_one_fold <- function(train_df,
     selected$candidate_table$ensemble_weight <- as.numeric(
       weight_map[selected$candidate_table$profile])
     selected$rf_tuning_table <- do.call(rbind, lapply(profile_out, `[[`, "rf_tuning_table"))
-    return(selected)
+    return(attach_intervals(selected))
   }
 
   use_aniso_requested <- FALSE
@@ -2280,7 +2348,7 @@ train_dbtarf_one_fold <- function(train_df,
   requested$diagnostics$ensemble_profile_oof_rmse <- sprintf(
     "%.8f", suppressWarnings(as.numeric(requested$diagnostics$selected_oof_rmse)))
   requested$diagnostics$ensemble_weights <- "1.00000000"
-  requested
+  attach_intervals(requested)
 }
 
 dbtarf_default_params <- list(
