@@ -915,31 +915,29 @@ geometry is held fixed and only the sampling design changes.}
 \input{tables/sim_s2.tex}
 \end{table}
 
-Finally, we checked the interval construction itself. Generating one field
-realisation and splitting it into calibration and test sets, CV+ attains
-empirical coverage of $0.916$ under the random design and $0.905$ under the
-clustered design against a nominal $0.90$, comfortably above the
-$1-2\alpha$ bound of $0.80$, which for $K=5$ and $n=300$ carries a further
-deduction of about $0.026$ under Theorem 4 of \citet{barber2021}, and mildly
-conservative, as the theory predicts.
+Finally, we checked the interval construction itself, and this is where the
+simulations earn their place. One field realisation is generated over the whole
+domain; the target points are always uniform over it and only the calibration
+design changes. The field is stationary and isotropic by construction, so
+anything the contrast produces is attributable to the geometry of the
+calibration sample and to nothing else.
 
-That last number deserves emphasis rather than a footnote, because it
-constrains the explanation. Under clustered calibration the simulation holds
-coverage at $0.905$, while the biomass surface loses it, at $0.861$. Clustering
-alone is therefore not sufficient to produce the failure. The simulated field is
-stationary and isotropic by construction, so a clustered sample of it is
-geometrically unrepresentative but statistically representative: the residual
-distribution far from the clusters is the same one the calibration points
-sampled. The biomass surface is not stationary. Its error distribution changes
-with location, so a clustered sample there is unrepresentative in the way that
-matters, and the conformity scores understate the errors the map incurs where it
-has no support.
+Under simple random calibration CV+ attains empirical coverage of $0.912$
+against a nominal $0.90$, comfortably above the $1-2\alpha$ bound of $0.80$,
+which for $K=5$ and $n=300$ carries a further deduction of about $0.026$ under
+Theorem 4 of \citet{barber2021}, and mildly conservative, as the theory
+predicts. Under clustered calibration it falls to $0.811$.
 
-We therefore state the mechanism as a shift between the calibration and target
-error distributions, driven here by clustering acting on a non-stationary
-surface, rather than as a property of clustered designs as such. A clustered
-design on a stationary field need not undercover, and an unclustered design on a
-strongly non-stationary one might.
+The clustered figure is the informative one. A stationary field is enough: no
+non-stationarity, no covariate shift beyond what the geometry itself induces,
+and coverage still fails. The mechanism is spatial extrapolation. Calibration
+residuals are collected where the model interpolates between nearby points,
+while the target population includes locations far from every cluster, where it
+must extrapolate and where its errors are larger than any the conformity scores
+saw. The simulation undercovers more than the biomass surface does, at $0.811$
+against $0.861$, which is consistent with the simulated clusters occupying a
+smaller share of their domain than the field sample does of the Amazon
+rectangle.
 
 \section{Discussion}
 
