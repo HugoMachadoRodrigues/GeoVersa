@@ -19,7 +19,24 @@ function Header(el)
   return el
 end
 LUA
-pandoc manuscript.tex \
+# pandoc does not know the macros this document defines, and silently drops
+# their contents: \file{} emptied every script name and every profile label,
+# turning a list of six profiles into ", , , , , .". The \@eadauthor line, which
+# exists to keep the ORCID mark out of the PDF's e-mail footnote, leaked into the
+# Word text as "=Hugo Rodrigues". Both are handled by rewriting a copy of the
+# source before conversion; the PDF still builds from the untouched original.
+python3 - <<'PYPRE'
+import re
+s = open("manuscript.tex").read()
+s = re.sub(r'\\makeatletter\\@eadauthor=\{[^}]*\}\\makeatother\s*', '', s)
+def esc(m):
+    return "\\texttt{" + m.group(1).replace("_", "\\_") + "}"
+s = re.sub(r'\\file\{([^}]*)\}', esc, s)
+open("/tmp/manuscript_docx.tex", "w").write(s)
+print("  source pre-processed for pandoc")
+PYPRE
+cp -f references.bib elsevier-harv-expanded.csl /tmp/ 2>/dev/null
+pandoc /tmp/manuscript_docx.tex \
   --bibliography=references.bib --citeproc \
   --csl=elsevier-harv-expanded.csl \
   --lua-filter=/tmp/nolinks.lua \
@@ -68,14 +85,21 @@ for it in zin.infolist():
     d=zin.read(it.filename)
     if it.filename=="word/document.xml":
         x=d.decode("utf8")
+        # pandoc renders the \author macros itself now that the \makeatletter
+        # line is pre-processed away, so its bare Author paragraphs would sit
+        # alongside the formatted block below. Drop them and keep ours, which
+        # carries the affiliation, both ORCIDs and the corresponding author.
+        x = re.sub(r'<w:p>\s*<w:pPr>\s*<w:pStyle w:val="Author"\s*/>\s*</w:pPr>.*?</w:p>',
+                   '', x, flags=re.S)
         if "Range Cattle Research" not in x:
             m=re.search(r'(<w:body>)', x)
             if m: x = x[:m.end()] + block + x[m.end():]
         # pandoc ignores elsarticle's \sep, so the keyword list arrives as one
         # run of comma-jammed terms with no label. Rebuild that paragraph.
-        KW=["Digital soil mapping","Design-based inference","Prediction intervals",
-            "Conformal prediction","Variogram","Random forest"]
-        i=x.find("Digital soil mapping")
+        tex=open("manuscript.tex").read()
+        kwblock=re.search(r'\\begin\{keyword\}(.*?)\\end\{keyword\}', tex, re.S)
+        KW=[k.strip() for k in kwblock.group(1).replace("\n"," ").split("\\sep") if k.strip()]
+        i=x.find(KW[0])
         if i>=0:
             s=x.rfind("<w:p>",0,i); e=x.find("</w:p>",i)+len("</w:p>")
             kwp=('<w:p><w:r><w:rPr><w:b/></w:rPr>'

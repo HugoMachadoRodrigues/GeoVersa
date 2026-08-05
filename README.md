@@ -6,7 +6,6 @@
 
 ### *Deep Learning + Geostatistics for Spatial Prediction*
 
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.15139517.svg)](https://doi.org/10.5281/zenodo.15139517)
 [![CRAN status](https://www.r-pkg.org/badges/version/GeoVersa)](https://CRAN.R-project.org/package=GeoVersa)
 [![R >= 4.2](https://img.shields.io/badge/R-%E2%89%A54.2-276DC3?logo=r&logoColor=white)](https://cran.r-project.org/)
 [![torch](https://img.shields.io/badge/torch-lantern-EE4C2C?logo=pytorch&logoColor=white)](https://torch.mlverse.org/)
@@ -826,7 +825,6 @@ results/
   author = {Rodrigues, Hugo},
   title  = {{GeoVersa}: Deep Learning + Geostatistics for Spatial Prediction},
   year   = {2026},
-  doi    = {10.5281/zenodo.15139517},
   url    = {https://github.com/HugoMachadoRodrigues/GeoVersa}
 }
 ```

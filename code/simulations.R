@@ -35,19 +35,29 @@ dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 # ---- field simulator --------------------------------------------------------
 # Gaussian field with exponential covariance on an anisotropic geometry.
 sim_field <- function(n, ratio, angle, rng = 25, snr = 4, seed = 1,
-                      design = c("random", "clustered"), extent = 100) {
+                      design = c("random", "clustered"), extent = 100,
+                      calib_n = NULL) {
   design <- match.arg(design)
   set.seed(seed)
-  if (design == "random") {
-    xy <- cbind(runif(n, 0, extent), runif(n, 0, extent))
-  } else {
-    # two-stage cluster sample: a few primary units, points around each
-    n_psu <- max(2L, round(n / 25))
-    ctr <- cbind(runif(n_psu, 0, extent), runif(n_psu, 0, extent))
-    idx <- sample(seq_len(n_psu), n, replace = TRUE)
-    xy <- cbind(pmin(pmax(ctr[idx, 1] + rnorm(n, 0, extent * 0.03), 0), extent),
-                pmin(pmax(ctr[idx, 2] + rnorm(n, 0, extent * 0.03), 0), extent))
+  # calib_n, when given, splits the draw: the first calib_n points follow the
+  # named design and the remainder are uniform over the domain, standing in for
+  # the target population the map has to cover.
+  n_design <- if (is.null(calib_n)) n else min(calib_n, n)
+  place <- function(m) {
+    if (design == "random" || m == 0L) {
+      cbind(runif(m, 0, extent), runif(m, 0, extent))
+    } else {
+      n_psu <- max(2L, round(m / 25))
+      ctr <- cbind(runif(n_psu, 0, extent), runif(n_psu, 0, extent))
+      idx <- sample(seq_len(n_psu), m, replace = TRUE)
+      cbind(pmin(pmax(ctr[idx, 1] + rnorm(m, 0, extent * 0.03), 0), extent),
+            pmin(pmax(ctr[idx, 2] + rnorm(m, 0, extent * 0.03), 0), extent))
+    }
   }
+  xy <- rbind(place(n_design),
+              if (n > n_design)
+                cbind(runif(n - n_design, 0, extent),
+                      runif(n - n_design, 0, extent)) else NULL)
   z <- .dbt_aniso_transform(xy, angle, ratio)
   S <- exp(-as.matrix(dist(z)) / rng)
   L <- chol(S + diag(1e-6, n))
@@ -130,11 +140,20 @@ for (design in c("random", "clustered")) {
   for (rep in 1:10) {
     k <- k + 1L
     n <- 300; nt <- 400
-    f <- sim_field(n + nt, 0.5, 45, snr = 4, seed = 9000 + k, design = design)
+    # The earlier version drew n + nt points under the design and split them at
+    # random. Under the clustered design that made the test set a second sample
+    # of the same clustered cloud, so calibration and test were exchangeable by
+    # construction and the run could not detect the failure it was meant to
+    # probe. Audit of 2026-08-05 caught this.
+    #
+    # The target population is now uniform over the domain in both arms, and only
+    # the calibration design changes. That is the contrast the manuscript argues
+    # about: a clustered calibration sample predicting a domain it does not cover.
+    f <- sim_field(n + nt, 0.5, 45, snr = 4, seed = 9000 + k, design = design,
+                   calib_n = n)
     dat <- data.frame(y = f$y, a = rnorm(n + nt), b = rnorm(n + nt),
                       x = f$xy[, 1], yy = f$xy[, 2])
-    idx <- sample(seq_len(n + nt))
-    tr <- dat[idx[seq_len(n)], ]; te <- dat[idx[(n + 1):(n + nt)], ]
+    tr <- dat[seq_len(n), ]; te <- dat[(n + 1):(n + nt), ]
     bp <- .dbt_rf_default_params(p = 2, n = n, role = "base")
     cv <- tryCatch(.dbt_cvplus(tr, te, "y", c("a", "b"), c("x", "yy"),
                                "resid_rf", 0.5, bp, NULL, NULL, TRUE,

@@ -70,16 +70,11 @@ about 16 per cent narrower than quantile regression forests, which sit at 0.937,
 so the widths are not compared at matched coverage. Under clustered sampling
 they cover only 0.86 against a nominal 0.90. That failure is invisible to any check
 assuming exchangeability, the property clustering destroys; a spatial-block
-calibration restores it. The point predictor is a
-random forest with a cross-fitted residual correction whose geostatistical
-settings, family, range, binning, estimator and anisotropy, are selected out of
-fold rather than fixed. It lowers design-based RMSE under all
-three designs (32.49 to 31.62, 32.28 to 31.38 and 35.78 to 34.57 \Mgha{}). An
-ablation attributes 95 per cent of that gain to the residual correction and 2
-per cent to the geostatistical selection, not distinguishable from zero. We
-claim no accuracy benefit for it, only that it was not selected against on the
-internal criterion and that it lets us state, rather than assume, that the
-conventional recipe was adequate.
+calibration restores it. The point predictor is a random forest with a cross-fitted residual correction
+whose geostatistical settings are selected out of fold rather than fixed. It
+lowers design-based RMSE under all three designs, by 0.9 to 1.2 \Mgha{}, and an
+ablation attributes almost all of that to the residual correction and a share
+indistinguishable from zero to the geostatistical selection.
 \end{abstract}
 
 \begin{keyword}
@@ -101,7 +96,8 @@ and that is where this paper begins.
 Prediction intervals in environmental mapping are routinely obtained from
 kriging variances or from quantile heuristics, and we are not aware of studies
 that confront their coverage with the sampling design. Our first and principal
-argument is that this is unnecessary, because coverage is a population parameter
+argument is that no new theory is needed to do so, because coverage is a
+population parameter
 of exactly the same kind as the mean squared error. Section~\ref{sec:ht} shows
 that the Horvitz-Thompson estimator applies to any cell-level function, so the
 apparatus \citet{wadoux2021} established for accuracy carries over to coverage
@@ -117,10 +113,9 @@ residuals it incurs are larger than any the calibration sample observed. An
 external probability sample is under no such handicap, which is the whole point. Section~\ref{sec:intervals-results} measures this. Conformal intervals
 that are well behaved and sharp under representative sampling cover only 0.86
 against a nominal 0.90 once the calibration sample is clustered, and a
-spatial-block calibration restored nominal coverage in this experiment. To our
-knowledge this is the
-first design-based assessment and correction of interval coverage for
-large-scale environmental mapping.
+spatial-block calibration restored nominal coverage in this experiment. We are not aware of an earlier
+design-based assessment of interval coverage at this scale, though we make that
+statement as a reading of the literature rather than as a claim of priority.
 
 The second argument concerns the point predictor those intervals are attached
 to, and we present it as the more modest of the two. Spatial predictive mapping,
@@ -315,8 +310,8 @@ minimised at
 - \frac{\mathbb{E}[r\hat g]^2}{\mathbb{E}[\hat g^2]} \le \mathcal{R}(0).
 \eqnum{6}
 \]
-Three things follow. At the optimum the correction cannot lower the out-of-fold
-criterion the selection is run on, and helps in
+Three things follow. At the optimum the correction cannot raise the out-of-fold
+criterion the selection is run on, and lowers it in
 proportion to how well $\hat g$ correlates with the residual. Adding the raw
 prediction, $\lambda = 1$, is optimal only if $\hat g$ is perfectly calibrated;
 a noisy $\hat g$ inflates $\mathbb{E}[\hat g^2]$ and pushes $\lambda^\star$
@@ -564,7 +559,8 @@ used: simple random, systematic on a randomly located grid, and two-stage
 clustered random, the last drawing 20 primary units and 25 points within each so
 that the sample covers a small fraction of the domain and most of the map is an
 extrapolation. Each map is evaluated on an independent simple random validation
-sample of 500 cells, disjoint from the calibration sample, with 30 repetitions
+sample of 500 cells, drawn independently of the calibration sample, with 30
+repetitions
 per design and a fixed seed. Calibration and validation sizes are therefore both
 $n = 500$. Comparators are the untuned default
 forest exactly as in the reference study, a default Cubist, and a transparency
@@ -574,7 +570,8 @@ correction. Forests use \texttt{ranger} \citep{wright2017} and all variogram
 work uses \texttt{gstat} \citep{pebesma2004}; every forest receives an explicit
 seed. The estimator is released as the \texttt{GeoVersa} package for R.
 Fig.~\ref{fig:schematic} summarises the procedure. We refer to the predictor
-as TARF, a targeted adaptive residual forest, and deliberately keep
+as TARF, a targeted adaptive residual forest, the estimator the \texttt{GeoVersa}
+package names DB-TARF, and deliberately keep
 ``design-based'' out of that name: the learner is fitted by ordinary means,
 with no Horvitz-Thompson estimator and no design-weighted objective. What is
 design-based here is the assessment protocol, not the model.
@@ -994,7 +991,7 @@ holds the true geometry fixed and varies only the design, finding no detectable
 difference in recovery, so the refusal cannot be attributed to the design in the
 way we first supposed.
 
-\paragraph{Limitations} The point gain is incremental, of order 0.9 to 1.2
+\paragraph{What the correction does not fix} The point gain is incremental, of order 0.9 to 1.2
 \Mgha{}. The anisotropy model is geometric and global, one angle and ratio for
 the whole domain, and the geometry estimator has limited power against mild
 anisotropy. The covariate-shift calibration helps only marginally, for the
@@ -1115,9 +1112,10 @@ isotropic fits.
 
 \paragraph{Gate and intervals} The gate length multiplier is chosen by spatially
 blocked cross-validation with four $k$-means blocks, the candidate set including
-the value that disables the gate. Intervals are formed with $K=5$ and $\alpha=0.10$ over the same fold partition
-used for selection, not an independently drawn one; the reuse is deliberate, and
-Section~\ref{sec:intervals} states what it costs. The covariate-shift variant estimates density ratios with a forest
+the value that disables the gate. Intervals are formed with $K=5$ and $\alpha=0.10$ over the calibration partition
+described above, which is drawn independently of the selection folds and of the
+response; the selection is re-run inside each of those folds, as
+Section~\ref{sec:intervals} sets out. The covariate-shift variant estimates density ratios with a forest
 classifier separating calibration points from a sample of the population
 covariates, clipping weights at 20; the spatial-block variant refits on five
 $k$-means blocks. The quantile regression forest baseline uses \texttt{ranger}
@@ -1194,8 +1192,10 @@ The analysis code, which implements every procedure described here and
 regenerates every table and figure in this paper, is
 available at \url{github.com/HugoMachadoRodrigues/GeoVersa} and is archived with
 a persistent identifier on release. The released \texttt{GeoVersa} package for R
-does not yet expose the cross-fitted conformal calibration or the geostatistical
-hyperparameter search; the version carrying them is in preparation.
+at version 0.3.0 exposes the earlier pooled cross-fitted conformal calibration.
+The nested CV+ of Section~\ref{sec:intervals} and the geostatistical
+hyperparameter search are implemented in the development version, which will be
+archived with this article.
 
 \bibliographystyle{elsarticle-harv}
 \bibliography{references}
