@@ -38,7 +38,7 @@
 
 \begin{frontmatter}
 
-\title{Prediction-interval coverage in digital soil mapping: design-based
+\title{Prediction-interval coverage in spatial predictive mapping: design-based
 assessment and correction under clustered calibration}
 
 \author[uf]{Hugo Rodrigues\,\orcidlink{0000-0002-8070-8126}\corref{cor1}}
@@ -55,8 +55,9 @@ Center, 3401 Experiment Station, Ona, FL 33865, USA}
 \cortext[cor1]{Corresponding author.}
 
 \begin{abstract}
-Environmental maps of soil and vegetation increasingly carry a prediction
-interval alongside each value, and those intervals now inform carbon accounting. Map accuracy must be estimated from a probability sample by
+Spatial predictive maps of environmental variables increasingly carry a
+prediction interval alongside each value, and those intervals now inform carbon
+accounting. Map accuracy must be estimated from a probability sample by
 design-based inference, yet interval coverage is rarely confronted with the
 sampling design at all. We show that coverage is a
 population parameter of the same kind as the mean squared error, so the
@@ -82,7 +83,7 @@ conventional recipe was adequate.
 \end{abstract}
 
 \begin{keyword}
-Digital soil mapping\sep Design-based inference\sep Prediction intervals\sep
+Spatial prediction\sep Design-based inference\sep Prediction intervals\sep
 Conformal prediction\sep Variogram\sep Random forest
 \end{keyword}
 
@@ -97,7 +98,7 @@ point map and its accuracy. It leaves open what should be done about the other
 half of a map's quality statement, the uncertainty attached to each prediction,
 and that is where this paper begins.
 
-Prediction intervals in soil and ecological mapping are routinely obtained from
+Prediction intervals in environmental mapping are routinely obtained from
 kriging variances or from quantile heuristics, and we are not aware of studies
 that confront their coverage with the sampling design. Our first and principal
 argument is that this is unnecessary, because coverage is a population parameter
@@ -119,12 +120,12 @@ against a nominal 0.90 once the calibration sample is clustered, and a
 spatial-block calibration restored nominal coverage in this experiment. To our
 knowledge this is the
 first design-based assessment and correction of interval coverage for
-large-scale digital soil mapping.
+large-scale environmental mapping.
 
 The second argument concerns the point predictor those intervals are attached
-to, and we present it as the more modest of the two. Digital soil mapping has
-increasingly favoured machine learning over geostatistics for the prediction
-step \citep{mcbratney2003},
+to, and we present it as the more modest of the two. Spatial predictive mapping,
+in soil science \citep{mcbratney2003} as in ecology, has increasingly favoured
+machine learning over geostatistics for the prediction step,
 and where geostatistics survives it usually enters by assumption: the analyst
 decides residuals should be kriged, picks a variogram family by eye, fixes a
 binning and an estimator. We instead place those decisions in the hyperparameter
@@ -505,7 +506,8 @@ all of $\mathcal{S}$ and refitted there, as Fig.~\ref{fig:schematic} shows. The
 interval is not a band around that map.
 
 We do not deploy that construction. Holding out a separate calibration set is
-costly at the sample sizes digital soil mapping works with, so the intervals
+costly at the sample sizes environmental mapping campaigns work with, so the
+intervals
 reported here are CV+ \citep{barber2021}, formed over the same $K$ cross-fitting
 folds and reusing every observation for both fitting and calibration. The price
 is a weaker guarantee, still finite-sample and still resting only on
@@ -549,7 +551,12 @@ We use the public materials of \citet{wadoux2021}: above-ground live woody
 biomass surface of \citet{baccini2012} over a 928 by 1642 km Amazonian rectangle at 1 km
 resolution, 1{,}310{,}143 cells, with 28 covariates known over the whole grid.
 Following \citet{wadoux2021} we treat that surface as the finite population for
-the numerical experiment. It is itself a remote-sensing estimate carrying its own
+the numerical experiment. We frame the paper as spatial predictive mapping
+rather than digital soil mapping specifically: the argument is about how any
+map built from a point sample of a spatial variable should have its intervals
+assessed, and the benchmark is above-ground biomass rather than a soil
+property. Nothing in the derivation is particular to soil, but neither have we
+demonstrated it on a pedological survey, and Section~\ref{sec:limits} says so. It is itself a remote-sensing estimate carrying its own
 error rather than field-measured biomass, so the results below concern how well a
 mapping procedure reconstructs this benchmark pseudo-population.
 Calibration samples of $n = 500$ are drawn under the same three designs they
@@ -1002,7 +1009,12 @@ single dataset at one sample size.
 
 Four limits bound what the results above support.
 
-The evidence comes from one surface. The benchmark of \citet{baccini2012} is a
+The evidence comes from one surface, and it is not a soil survey. The
+benchmark is above-ground biomass, so the paper is framed as spatial
+predictive mapping rather than digital soil mapping. The derivation applies to
+any map of a spatial variable built from a point sample, and soil properties
+are an obvious case, but a pedological campaign brings its own sampling
+traditions and covariate structure and we have not tested one. The benchmark of \citet{baccini2012} is a
 remote-sensing product with its own error, treated here as a finite population
 because \citet{wadoux2021} treated it that way and comparability matters more
 than realism for this purpose. Nothing in the experiment speaks to how the
