@@ -10,8 +10,12 @@
   <citation et-al-min="3" et-al-use-first="1" disambiguate-add-year-suffix="true">
     <sort><key macro="author"/><key macro="year"/></sort>
     <layout prefix="(" suffix=")" delimiter="; ">
-      <names variable="author"><name form="short" and="text" delimiter=", "/></names>
-      <text macro="year" prefix=", "/>
+      <!-- the group collapses its delimiter when the author is suppressed, which
+           is what \citet produces; without it the citation renders as "(, 2021)" -->
+      <group delimiter=", ">
+        <names variable="author"><name form="short" and="text" delimiter=", "/></names>
+        <text macro="year"/>
+      </group>
     </layout>
   </citation>
   <bibliography hanging-indent="true" et-al-min="7" et-al-use-first="6">

@@ -46,12 +46,12 @@ for (sc in names(DESIGNS)) {
   labels <- c("RF (default)", "RF-tuned", "Cubist", "This method")
   for (j in seq_along(models)) {
     m <- models[j]
-    lab <- if (j == 1) sprintf("\\multirow{4}{*}{%s}", DESIGNS[[sc]]) else ""
+    lab <- DESIGNS[[sc]]
     bold <- m == "DBTARF"
     wrap <- function(z) if (bold) sprintf("\\textbf{%s}", z) else z
     lines <- c(lines, sprintf("%s & %s & %s & %s & %s & %s \\\\",
       lab, wrap(labels[j]),
-      wrap(sprintf("$%+.3f$", val(s, m, "ME_mean"))),
+      wrap(sprintf("%+.3f", val(s, m, "ME_mean"))),
       wrap(fmt(val(s, m, "RMSE_mean"))),
       wrap(fmt(val(s, m, "RMSE_sd"))),
       wrap(fmt(val(s, m, "MEC_mean")))))
@@ -129,13 +129,13 @@ if (file.exists(file.path(abl, "dbtarf_summary_by_protocol.csv"))) {
   dr <- pd("random")
   dla <- da$RMSE_DBTARF - da$RMSE_RF; dlr <- dr$RMSE_DBTARF - dr$RMSE_RF
   rows <- list(
-    c("Default random forest", fmt(val(sr, "RF", "RMSE_mean")), "", ""),
-    c("Tuned base forest, no correction", fmt(val(sr, "RF_tuned", "RMSE_mean")), "", ""),
+    c("Default random forest", fmt(val(sr, "RF", "RMSE_mean")), "n/a", "n/a"),
+    c("Tuned base forest, no correction", fmt(val(sr, "RF_tuned", "RMSE_mean")), "n/a", "n/a"),
     c("Correction, fixed variogram recipe", fmt(val(sa, "DBTARF", "RMSE_mean")),
-      sprintf("$%+.3f$", mean(dla)), sprintf("%d/%d", sum(dla < 0), sum(dla != 0))),
+      sprintf("%+.3f", mean(dla)), sprintf("%d/%d", sum(dla < 0), sum(dla != 0))),
     c("Correction, selected geostatistical hyperparameters",
       fmt(val(sr, "DBTARF", "RMSE_mean")),
-      sprintf("$%+.3f$", mean(dlr)), sprintf("%d/%d", sum(dlr < 0), sum(dlr != 0))))
+      sprintf("%+.3f", mean(dlr)), sprintf("%d/%d", sum(dlr < 0), sum(dlr != 0))))
   lines <- c("\\begin{tabular}{lrrr}", "\\toprule",
              "Configuration & RMSE & $\\Delta$ vs RF & Wins \\\\", "\\midrule")
   for (r in rows) lines <- c(lines, sprintf("%s & %s & %s & %s \\\\", r[1], r[2], r[3], r[4]))
@@ -188,16 +188,16 @@ pick <- function(u, m, col) {
 }
 
 rows <- list(
-  list("\\multirow{3}{*}{Simple random}", "CV+",                       "random",           "DBTARF",       FALSE),
-  list("",                                "Pooled out-of-fold quantile", "random",          "DBTARF_oofq",  FALSE),
-  list("",                                "Quantile regression forest", "random",           "RF_quantile",  FALSE),
+  list("Simple random", "CV+",                       "random",           "DBTARF",       FALSE),
+  list("Simple random",                   "Pooled out-of-fold quantile", "random",          "DBTARF_oofq",  FALSE),
+  list("Simple random",                   "Quantile regression forest", "random",           "RF_quantile",  FALSE),
   list("MID",                             NA, NA, NA, NA),
   list("Systematic",                      "CV+",                        "regular_grid",     "DBTARF",       FALSE),
   list("MID",                             NA, NA, NA, NA),
-  list("\\multirow{4}{*}{Clustered random}", "CV+",                     "clustered_random", "DBTARF",       FALSE),
-  list("",                                "Pooled out-of-fold quantile", "clustered_random","DBTARF_oofq",  FALSE),
-  list("",                                "Covariate-shift weighted",   "clustered_random", "DBTARF_dbcal", FALSE),
-  list("",                                "Spatial-block conformal",    "clustered_random", "DBTARF_spcal", TRUE)
+  list("Clustered random", "CV+",                     "clustered_random", "DBTARF",       FALSE),
+  list("Clustered random",                "Pooled out-of-fold quantile", "clustered_random","DBTARF_oofq",  FALSE),
+  list("Clustered random",                "Covariate-shift weighted",   "clustered_random", "DBTARF_dbcal", FALSE),
+  list("Clustered random",                "Spatial-block conformal",    "clustered_random", "DBTARF_spcal", TRUE)
 )
 
 lines <- c("\\begin{tabular}{llrr}", "\\toprule",
@@ -225,7 +225,7 @@ dr <- pd("random"); dld <- dr$RMSE_DBTARF - dr$RMSE_RF
 sr <- sm("random")
 
 fmt_row <- function(label, n, rf, db, d, w) sprintf(
-  "%s & %d & %.2f & %.2f & $%+.3f$ & %s \\\\", label, n, rf, db, d, w)
+  "%s & %d & %.2f & %.2f & %+.3f & %s \\\\", label, n, rf, db, d, w)
 
 p_pop <- prow("Population"); p_rkf <- prow("RandomKFold"); p_skf <- prow("SpatialKFold")
 lines <- c("\\begin{tabular}{lrrrrr}", "\\toprule",
