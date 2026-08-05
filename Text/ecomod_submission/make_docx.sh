@@ -110,10 +110,13 @@ for it in zin.infolist():
         x=re.sub(r'<w:pPr>\s*<w:pStyle w:val="(ImageCaption|TableCaption)"\s*/>\s*</w:pPr>',
                  number, x)
         # References heading before the first Bibliography paragraph
-        m=re.search(r'<w:p><w:pPr><w:pStyle w:val="Bibliography"', x)
-        if not m: m=re.search(r'<w:pStyle w:val="Bibliography"', x)
-        if m and "References</w:t>" not in x:
-            start=x.rfind("<w:p>", 0, m.start())
+        # The first paragraph carrying the Bibliography style IS the insertion
+        # point. The earlier version searched backwards from it for another
+        # "<w:p>", which landed one paragraph too early and dropped the heading
+        # into the middle of the data-availability statement.
+        bi = x.find('w:pStyle w:val="Bibliography"')
+        start = x.rfind("<w:p>", 0, bi) if bi > 0 else -1
+        if start >= 0 and "References</w:t>" not in x:
             head=('<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr>'
                   '<w:r><w:t xml:space="preserve">References</w:t></w:r></w:p>')
             x=x[:start]+head+x[start:]
