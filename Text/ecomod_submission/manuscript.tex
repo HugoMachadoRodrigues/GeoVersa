@@ -39,7 +39,7 @@
 \begin{frontmatter}
 
 \title{Prediction-interval coverage in digital soil mapping: design-based
-assessment and correction under clustered sampling}
+assessment and correction under clustered calibration}
 
 \author[uf]{Hugo Rodrigues\,\orcidlink{0000-0002-8070-8126}\corref{cor1}}
 %% elsarticle echoes the whole \author argument in the e-mail footnote, which
@@ -75,8 +75,9 @@ fold rather than fixed. It lowers design-based RMSE under all
 three designs (32.49 to 31.62, 32.28 to 31.38 and 35.78 to 34.57 \Mgha{}). An
 ablation attributes 95 per cent of that gain to the residual correction and 2
 per cent to the geostatistical selection, not distinguishable from zero. We
-claim no accuracy benefit for it, only that it costs nothing and lets us state,
-rather than assume, that the conventional recipe was adequate.
+claim no accuracy benefit for it, only that it was not selected against on the
+internal criterion and that it lets us state, rather than assume, that the
+conventional recipe was adequate.
 \end{abstract}
 
 \begin{keyword}
@@ -105,14 +106,17 @@ apparatus \citet{wadoux2021} established for accuracy carries over to coverage
 without a single new assumption, and in the case of coverage the estimator is
 exactly rather than approximately unbiased. The derivation takes three lines.
 
-The payoff is not the derivation but what it lets us see. A coverage check that
-assumes exchangeability cannot detect a failure of exchangeability, and clustered
-sampling is exactly such a failure: the map must predict far from every cluster,
-where the residuals it incurs are larger than any the calibration sample
-observed. Section~\ref{sec:intervals-results} measures this. Conformal intervals
+The payoff is not the derivation but what it lets us see. An internal
+calibration diagnostic resting on the same exchangeability assumption as the
+interval cannot establish coverage when the calibration sample is not
+exchangeable with the target population, and a clustered calibration sample is
+exactly that case: the map must predict far from every cluster, where the
+residuals it incurs are larger than any the calibration sample observed. An
+external probability sample is under no such handicap, which is the whole point. Section~\ref{sec:intervals-results} measures this. Conformal intervals
 that are well behaved and sharp under representative sampling cover only 0.86
 against a nominal 0.90 once the calibration sample is clustered, and a
-spatial-block calibration restores nominal coverage. To our knowledge this is the
+spatial-block calibration restored nominal coverage in this experiment. To our
+knowledge this is the
 first design-based assessment and correction of interval coverage for
 large-scale digital soil mapping.
 
@@ -133,7 +137,9 @@ idea of \citet{hengl2018}. Regression kriging and the super learner
 \citep{wolpert1992,vanderlaan2007} are equally established. More to the point,
 Section~\ref{sec:ablation} shows that opening the geostatistical hyperparameters
 does not make the map more accurate: it is worth $0.017$ \Mgha{}, which a paired
-test cannot separate from zero. What it does deliver is that it costs nothing,
+test cannot separate from zero. What it does deliver is that the null
+correction is in the candidate library, so the selection never returns something
+worse on its own out-of-fold criterion,
 that it changes the fitted model in a little under half the repetitions, that it
 declines an anisotropic geometry outright under clustered calibration, and that
 it converts an assumption into a measured statement, namely that the
@@ -218,7 +224,8 @@ read together.
 
 We stress how little this required. No new theory was needed, only the
 observation that coverage is a population mean. The consequence is nonetheless
-substantial: coverage estimated this way is model-free and can therefore convict
+substantial: coverage estimated this way is model-free and can therefore
+identify undercoverage in
 an interval method without sharing any of its assumptions.
 
 \section{A correction should enter only on out-of-fold evidence}
@@ -245,7 +252,8 @@ minimised at
 - \frac{\mathbb{E}[r\hat g]^2}{\mathbb{E}[\hat g^2]} \le \mathcal{R}(0).
 \eqnum{6}
 \]
-Three things follow. At the optimum the correction cannot hurt, and helps in
+Three things follow. At the optimum the correction cannot lower the out-of-fold
+criterion the selection is run on, and helps in
 proportion to how well $\hat g$ correlates with the residual. Adding the raw
 prediction, $\lambda = 1$, is optimal only if $\hat g$ is perfectly calibrated;
 a noisy $\hat g$ inflates $\mathbb{E}[\hat g^2]$ and pushes $\lambda^\star$
@@ -287,7 +295,8 @@ reproduces the base forest, so
 \widehat{\mathcal{R}}(c^\star,\lambda^\star) \le \widehat{\mathcal{R}}(\cdot\,,0)
 \eqnum{9}
 \]
-by construction: the method cannot select something worse than the plain forest
+by construction, on the criterion the selection uses: the method cannot select
+something that scores worse out of fold than the plain forest
 on the out-of-fold criterion, and a correction is deployed only after showing an
 improvement on data it did not see. This is why the estimator degrades to a
 random forest, rather than to something worse, when there is nothing to recover.
@@ -542,7 +551,7 @@ Table~\ref{tab:modes} reports which corrector is selected across all 90
 repetitions, and it is also the limit of what we claim. Ordinary kriging wins
 outright in three repetitions and a purely geostatistical interpolator in four;
 in 72 the corrector is a residual forest which, carrying a shrinkage weight, is
-formally a single boosting step. A reader is entitled to ask whether this is
+formally a single boosting step. It is fair to ask whether this is
 geostatistics at all.
 
 \begin{table}[!ht]
@@ -622,7 +631,7 @@ cross-validation was not run, requiring of order $10^3$ sequential fits per
 repetition; it would be the most adversarial estimand available and is left to
 future work.
 
-\subsection{Design-based assessment convicts the intervals}
+\subsection{Design-based assessment identifies the undercoverage}
 \label{sec:intervals-results}
 
 Table~\ref{tab:coverage} and Fig.~\ref{fig:uncertainty} contain the finding we
@@ -635,7 +644,8 @@ sampling they under-cover at 0.861. Covariate-shift weighting does not repair
 this: at 0.863 it is indistinguishable from the unweighted interval, which is
 what the structural argument of Section~\ref{sec:intervals} predicts, since
 reweighting redistributes mass over residuals the calibration sample never
-observed. The spatial-block calibration does restore validity, reaching 0.946 at
+observed. The spatial-block calibration recovered conservative empirical
+coverage in this experiment, reaching 0.946, above the nominal 0.90, at
 the cost of intervals about 48 per cent wider.
 
 \begin{table}[!ht]
@@ -657,7 +667,7 @@ What matters is not any single number but that the failure is visible at all. A
 model-based coverage check would have relied on the same exchangeability that
 clustering breaks, and would have reported these intervals as adequate.
 Estimating coverage as a population parameter on a probability sample is what
-convicts them, and it does so without sharing any assumption with the method
+identifies it, and it does so without sharing any assumption with the method
 under test.
 
 \begin{figure}[!ht]
@@ -666,7 +676,8 @@ under test.
 \caption{Design-based interval assessment. Left, coverage with the nominal 0.90
 level marked; right, mean interval width. The plain conformal calibration is
 valid and sharpest under representative sampling but under-covers under
-clustering, and only the spatial-block calibration restores coverage, at the
+clustering, and only the spatial-block calibration recovered nominal coverage
+in this experiment, at the
 cost of width.}
 \label{fig:uncertainty}
 \end{figure}
@@ -706,8 +717,10 @@ accurate, and any claim that it does would not survive Table~\ref{tab:ablation}.
 What the selection does deliver is different and, we think, still worth having.
 It changes what the fitted model is, displacing the conventional recipe in 14,
 12 and 11 of 30 repetitions across the three designs. It declines an anisotropic geometry in every clustered repetition, though
-Section~\ref{sec:sims} shows we cannot attribute that refusal to the design. It costs nothing, because the do-no-harm
-construction of Eq.~(9) bounds the result below by the uncorrected forest. And
+Section~\ref{sec:sims} shows we cannot attribute that refusal to the design. It is not selected against, because the
+null correction of Eq.~(9) bounds the out-of-fold criterion below by the
+uncorrected forest. That is a statement about the selection criterion, not a
+guarantee of non-inferiority on an independent population. And
 it converts a modelling assumption into a measured statement: we can now say
 that the conventional variogram recipe was adequate for this dataset, which is
 not something one can assert without having tested it.
@@ -804,7 +817,8 @@ improvement to the residual correction, 2 per cent to tuning the forest and 2
 per cent, indistinguishable from zero, to selecting the geostatistical
 hyperparameters. We therefore do not argue that moving the variogram into the
 hyperparameter space makes maps better. We argue something narrower: that it can
-be done at no cost, since Eq.~(9) bounds the result below by the uncorrected
+be done without penalty on the selection criterion, since Eq.~(9) bounds it
+below by the uncorrected
 forest; that it changes the fitted model, displacing the conventional recipe in
 14, 12 and 11 of 30 repetitions; that it declines an anisotropic geometry in
 every clustered repetition; and that it replaces an assumption with a
@@ -834,7 +848,8 @@ single dataset at one sample size.
 \section{Conclusion}
 
 Coverage is a population parameter of the same kind as the mean squared error,
-and it inherits the same design-unbiased estimator. Saying so costs nothing and
+and it inherits the same design-unbiased estimator. Saying so requires no new
+theory and
 reveals something: cross-fitted conformal intervals that are calibrated and
 sharp under representative sampling under-cover badly once the calibration
 sample is clustered, a failure no exchangeability-assuming check can detect, and
@@ -843,7 +858,7 @@ uncertainty, like map accuracy, should be confronted with the sampling design.
 
 The geostatistical decisions behind the point map can meanwhile be treated as
 hyperparameters and selected out of fold rather than fixed by habit. On these
-data that does not lower the error, and we do not pretend otherwise. It costs
+data that does not lower the error. It costs
 nothing, it changes what the model does, it declines parameters the data do not
 reward, and it lets a modeller state that the conventional recipe was adequate
 rather than assume it. The corrector the model finally prefers is a
