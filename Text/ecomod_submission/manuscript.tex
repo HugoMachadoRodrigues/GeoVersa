@@ -918,9 +918,9 @@ geometry is held fixed and only the sampling design changes.}
 Finally, we checked the interval construction itself, and this is where the
 simulations earn their place. One field realisation is generated over the whole
 domain; the target points are always uniform over it and only the calibration
-design changes. The field is stationary and isotropic by construction, so
-anything the contrast produces is attributable to the geometry of the
-calibration sample and to nothing else.
+design changes. The field is stationary by construction, with one fixed anisotropic geometry
+shared by both arms, so anything the contrast produces is attributable to the
+geometry of the calibration sample and to nothing else.
 
 Under simple random calibration CV+ attains empirical coverage of $0.912$
 against a nominal $0.90$, comfortably above the $1-2\alpha$ bound of $0.80$,
@@ -929,8 +929,8 @@ Theorem 4 of \citet{barber2021}, and mildly conservative, as the theory
 predicts. Under clustered calibration it falls to $0.811$.
 
 The clustered figure is the informative one. A stationary field is enough: no
-non-stationarity, no covariate shift beyond what the geometry itself induces,
-and coverage still fails. The mechanism is spatial extrapolation. Calibration
+non-stationarity, no covariate shift beyond what the sampling geometry itself
+induces, and coverage still fails. The mechanism is spatial extrapolation. Calibration
 residuals are collected where the model interpolates between nearby points,
 while the target population includes locations far from every cluster, where it
 must extrapolate and where its errors are larger than any the conformity scores

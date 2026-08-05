@@ -38,7 +38,7 @@
 #   DBT_BW_SEARCH                select the range multiplier, default TRUE
 #   DBT_ANISO_SEARCH             offer anisotropic geometry, default TRUE
 #   DBT_FAIR_PROFILE_MAX         default 6
-#   DBT_ENSEMBLE_TOP_K           top-k profile ensemble, default 3 (1 = off)
+#   DBT_ENSEMBLE_TOP_K           top-k profile ensemble, default 1 (off)
 #   DBT_ENSEMBLE_WEIGHTING       softmax | inverse | uniform, default softmax
 #   DBT_ENSEMBLE_TEMPERATURE     default 0.75
 #   DBT_TRAIN_SEED          default 123
@@ -156,7 +156,10 @@ dbtarf_params <- modifyList(
     aniso_search = parse_bool_dbt("DBT_ANISO_SEARCH", TRUE),
     fair_profile_max = as.integer(parse_num_dbt("DBT_FAIR_PROFILE_MAX", 6L)),
     geo_basis = parse_bool_dbt("DBT_GEO_BASIS", TRUE),
-    ensemble_top_k = as.integer(parse_num_dbt("DBT_ENSEMBLE_TOP_K", 3L)),
+    # Default 1, matching the package default and what the manuscript
+    # describes. A blend would make the reported map and the reported
+    # interval come from different estimators.
+    ensemble_top_k = as.integer(parse_num_dbt("DBT_ENSEMBLE_TOP_K", 1L)),
     ensemble_weighting = dbt_ensemble_weighting,
     ensemble_temperature = parse_num_dbt("DBT_ENSEMBLE_TEMPERATURE", 0.75)
   )
@@ -556,7 +559,26 @@ write.csv(
              fair_profile_max = dbtarf_params$fair_profile_max,
              val_dist_km = val_dist_km, fold_cores = fold_cores,
              pop_sample = pop_sample,
-             train_seed = train_seed, stringsAsFactors = FALSE),
+             train_seed = train_seed,
+             # Provenance. Without these the CSVs cannot be traced to the run
+             # that produced them, which is how a set of results outlived the
+             # code that made it once already.
+             ensemble_top_k = dbtarf_params$ensemble_top_k,
+             ensemble_weighting = dbtarf_params$ensemble_weighting,
+             ensemble_temperature = dbtarf_params$ensemble_temperature,
+             geo_basis = dbtarf_params$geo_basis,
+             vg_search = dbtarf_params$vg_search,
+             bw_search = dbtarf_params$bw_search,
+             aniso_search = dbtarf_params$aniso_search,
+             git_commit = tryCatch(
+               system2("git", c("rev-parse", "HEAD"), stdout = TRUE)[1L],
+               error = function(e) NA_character_),
+             git_dirty = tryCatch(
+               length(system2("git", c("status", "--porcelain"), stdout = TRUE)) > 0L,
+               error = function(e) NA),
+             r_version = paste(R.version$major, R.version$minor, sep = "."),
+             run_started = format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
+             stringsAsFactors = FALSE),
   file.path(results_dir, "dbtarf_config.csv"), row.names = FALSE)
 
 all_metric_rows <- list()
