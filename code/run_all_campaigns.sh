@@ -10,8 +10,26 @@ cd "$(dirname "$0")/.."
 EXT="$HOME/geoversa_results"
 COMMIT=$(git rev-parse --short HEAD)
 
-run() {                       # run <dir> <extra env assignments...>
-  local dir="$1"; shift
+# A campaign counts as done only if it has the full row count AND its config
+# records a commit, which is what distinguishes this code from the attempts that
+# predate the provenance fields. Anything else is set aside, never written into.
+is_complete() {
+  local dir="$1" want="$2"
+  local f="results/$dir/dbtarf_all_results.csv"
+  local c="results/$dir/dbtarf_config.csv"
+  [ -f "$f" ] && [ -f "$c" ] || return 1
+  local n=$(tail -n +2 "$f" 2>/dev/null | wc -l | tr -d ' ')
+  [ "${n:-0}" -ge "$want" ] || return 1
+  head -1 "$c" | grep -q 'git_commit' || return 1
+  return 0
+}
+
+run() {                       # run <dir> <rows> <extra env assignments...>
+  local dir="$1" want="$2"; shift 2
+  if is_complete "$dir" "$want"; then
+    echo "===== $dir  JA COMPLETO, pulando ($want linhas, config com commit) ====="
+    return 0
+  fi
   # A directory left over from an aborted attempt would be written into rather
   # than replaced, mixing two campaigns under one name. Anything already there
   # is set aside before the run starts, never silently reused.
@@ -35,17 +53,17 @@ echo "########## CAMPANHAS | commit $COMMIT | $(date '+%m-%d %H:%M') ##########"
 
 # --- principais: o que as tabelas do manuscrito consomem
 for SC in random regular_grid clustered_random; do
-  run "final_${SC}_confirm30" "${BASE[@]}" DBT_SCENARIO=$SC DBT_SAMPLE_SIZE=500
+  run "final_${SC}_confirm30" 120 "${BASE[@]}" DBT_SCENARIO=$SC DBT_SAMPLE_SIZE=500
 done
 
 # --- ablacao: o que o variograma acrescenta sobre coordenadas simples
-run "abl_nogeo_random" "${BASE[@]}" DBT_SCENARIO=random DBT_SAMPLE_SIZE=500 \
+run "abl_nogeo_random" 90 "${BASE[@]}" DBT_SCENARIO=random DBT_SAMPLE_SIZE=500 \
     DBT_GEO_BASIS=FALSE
 
 # --- sensibilidade ao tamanho amostral, nos dois desenhos que carregam a tese
 for N in 200 800; do
   for SC in random clustered_random; do
-    run "size_n${N}_${SC}" "${BASE[@]}" DBT_SCENARIO=$SC DBT_SAMPLE_SIZE=$N
+    run "size_n${N}_${SC}" 120 "${BASE[@]}" DBT_SCENARIO=$SC DBT_SAMPLE_SIZE=$N
   done
 done
 
