@@ -12,8 +12,15 @@ COMMIT=$(git rev-parse --short HEAD)
 
 run() {                       # run <dir> <extra env assignments...>
   local dir="$1"; shift
+  # A directory left over from an aborted attempt would be written into rather
+  # than replaced, mixing two campaigns under one name. Anything already there
+  # is set aside before the run starts, never silently reused.
+  if [ -d "$EXT/$dir" ] && [ -n "$(ls -A "$EXT/$dir" 2>/dev/null)" ]; then
+    mv "$EXT/$dir" "$EXT/STALE_${dir}_$(date '+%Y%m%d_%H%M%S')"
+    echo "  (dados anteriores de $dir movidos para STALE_*)"
+  fi
   mkdir -p "$EXT/$dir"
-  [ -L "results/$dir" ] || ln -sfn "$EXT/$dir" "results/$dir"
+  ln -sfn "$EXT/$dir" "results/$dir"
   echo "===== $dir  $(date '+%m-%d %H:%M') ====="
   env "$@" DBT_RESULTS_DIR="results/$dir" \
     Rscript code/run_dbtarf_wadoux_comparison.R 2>&1 | grep -E 'Done|Error' | tail -2
