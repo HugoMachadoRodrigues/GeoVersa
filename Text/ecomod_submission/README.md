@@ -12,7 +12,7 @@ Build:
 
 | File | Role |
 |---|---|
-| `manuscript.tex` / `manuscript.docx` | the manuscript, 26 pages |
+| `manuscript.tex` / `manuscript.docx` | the manuscript, 31 pages |
 | `references.bib` | 28 references |
 | `figures/` | the four manuscript figures, all script-generated |
 | `tables/` | nine generated tables the manuscript `\input`s |
@@ -48,10 +48,8 @@ Build:
 
 ## Left to the corresponding author
 
-1. The data statement says the code is "archived with a persistent identifier on
-   release". Mint the Zenodo DOI before submitting, or soften that sentence.
-2. The declaration of generative AI describes the tools actually used. Review it
-   and decide what you are willing to sign.
-3. Author order and the CRediT roles for both authors are set as agreed; confirm
+1. Author order is Hugo Rodrigues then Golmar Golmohammadi, with Hugo Rodrigues
+   as corresponding author. This journal does not permit authorship changes
+   after acceptance, so confirm
    with the co-author before submission, since this journal does not permit
    authorship changes after acceptance.
