@@ -57,7 +57,7 @@ for SC in random regular_grid clustered_random; do
 done
 
 # --- ablacao: o que o variograma acrescenta sobre coordenadas simples
-run "abl_nogeo_random" 90 "${BASE[@]}" DBT_SCENARIO=random DBT_SAMPLE_SIZE=500 \
+run "abl_nogeo_random" 120 "${BASE[@]}" DBT_SCENARIO=random DBT_SAMPLE_SIZE=500 \
     DBT_GEO_BASIS=FALSE
 
 # --- sensibilidade ao tamanho amostral, nos dois desenhos que carregam a tese

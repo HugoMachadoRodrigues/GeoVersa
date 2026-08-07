@@ -128,30 +128,60 @@ writeLines(lines, file.path(out, "modes.tex"))
 
 # ---- Table: ablation, if the fixed-recipe run is available ------------------
 
-abl <- "results/abl_fixedrecipe_random"
-if (file.exists(file.path(abl, "dbtarf_summary_by_protocol.csv"))) {
-  sa <- read.csv(file.path(abl, "dbtarf_summary_by_protocol.csv"))
-  sr <- sm("random")
-  da <- read.csv(file.path(abl, "dbtarf_paired_deltas_vs_RF.csv"))
-  dr <- pd("random")
-  dla <- da$RMSE_DBTARF - da$RMSE_RF; dlr <- dr$RMSE_DBTARF - dr$RMSE_RF
-  rows <- list(
-    c("Default random forest", fmt(val(sr, "RF", "RMSE_mean")), "n/a", "n/a"),
-    c("Tuned base forest, no correction", fmt(val(sr, "RF_tuned", "RMSE_mean")), "n/a", "n/a"),
-    c("Correction, fixed variogram recipe", fmt(val(sa, "DBTARF", "RMSE_mean")),
-      sprintf("%+.3f", mean(dla)), sprintf("%d/%d", sum(dla < 0), sum(dla != 0))),
-    c("Correction, selected geostatistical hyperparameters",
-      fmt(val(sr, "DBTARF", "RMSE_mean")),
-      sprintf("%+.3f", mean(dlr)), sprintf("%d/%d", sum(dlr < 0), sum(dlr != 0))))
-  lines <- c("\\begin{tabular}{lrrr}", "\\toprule",
-             "Configuration & RMSE & $\\Delta$ vs RF & Wins \\\\", "\\midrule")
-  for (r in rows) lines <- c(lines, sprintf("%s & %s & %s & %s \\\\", r[1], r[2], r[3], r[4]))
-  lines <- c(lines, "\\bottomrule", "\\end{tabular}")
-  writeLines(lines, file.path(out, "ablation.tex"))
-  message("[tables] ablation table written")
-} else {
-  message("[tables] ablation run not found; skipping ablation.tex")
+# ---- Table: ablation ---------------------------------------------------------
+# Decomposes the gain under simple random calibration. Two contrasts, and they
+# answer different questions: whether the variogram-derived representation helps
+# at all (geo_basis FALSE), and whether tuning its parameters helps on top of
+# that (fixed recipe versus selected). Only arms whose config records a commit
+# are admitted, so an arm produced by superseded code cannot sit beside the rest.
+
+has_prov <- function(d) {
+  f <- file.path(d, "dbtarf_config.csv")
+  file.exists(f) && "git_commit" %in% names(read.csv(f))
 }
+per_iter <- function(d, model = "DBTARF") {
+  x <- read.csv(file.path(d, "dbtarf_all_results.csv"))
+  x <- x[x$model == model, ]
+  stats::setNames(x$RMSE, x$iteration)
+}
+
+main <- dir_for("random")
+sr <- sm("random")
+rf_mean <- val(sr, "RF", "RMSE_mean")
+a_main <- per_iter(main)
+rf_iter <- per_iter(main, "RF")
+
+rows <- list(
+  c("Default random forest", fmt(rf_mean), "n/a", "n/a"),
+  c("Tuned base forest, no correction", fmt(val(sr, "RF_tuned", "RMSE_mean")), "n/a", "n/a"))
+
+add_arm <- function(rows, label, dir) {
+  if (!dir.exists(dir) || !has_prov(dir)) {
+    message("[tables] arm omitted, no provenance: ", dir); return(rows)
+  }
+  b <- per_iter(dir)
+  it <- intersect(names(a_main), names(b))
+  d_rf <- b[it] - rf_iter[it]
+  append(rows, list(c(label, fmt(mean(b[it])),
+                      sprintf("%+.3f", mean(d_rf)),
+                      sprintf("%d/%d", sum(d_rf < 0), length(it)))))
+}
+rows <- add_arm(rows, "Correction, no variogram-derived features",
+                "results/abl_nogeo_random")
+rows <- add_arm(rows, "Correction, fixed variogram recipe",
+                "results/abl_fixedrecipe_random")
+
+d_sel <- a_main - rf_iter[names(a_main)]
+rows <- append(rows, list(c("Correction, selected geostatistical hyperparameters",
+                            fmt(mean(a_main)), sprintf("%+.3f", mean(d_sel)),
+                            sprintf("%d/%d", sum(d_sel < 0), length(a_main)))))
+
+lines <- c("\\begin{tabular}{lrrr}", "\\toprule",
+           "Configuration & RMSE & $\\Delta$ vs RF & Wins \\\\", "\\midrule")
+for (r in rows) lines <- c(lines, sprintf("%s & %s & %s & %s \\\\", r[1], r[2], r[3], r[4]))
+lines <- c(lines, "\\bottomrule", "\\end{tabular}")
+writeLines(lines, file.path(out, "ablation.tex"))
+message("[tables] ablation table written")
 
 # ---- Table: simulations -----------------------------------------------------
 

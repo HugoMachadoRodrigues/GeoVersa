@@ -73,8 +73,9 @@ assuming exchangeability, the property clustering destroys; a spatial-block
 calibration restores it. The point predictor is a random forest with a cross-fitted residual correction
 whose geostatistical settings are selected out of fold rather than fixed. It
 lowers design-based RMSE under all three designs, by 0.85 to 1.10 \Mgha{}, and an
-ablation attributes almost all of that to the residual correction and a share
-indistinguishable from zero to the geostatistical selection.
+ablation separates the variogram-derived representation, which is worth $0.180$
+\Mgha{}, from the selection of its parameters, which is worth $0.017$ and is
+not distinguishable from zero.
 \end{abstract}
 
 \begin{keyword}
@@ -133,9 +134,11 @@ long-standing practice and has been automated before \citep{li2014}, and letting
 a forest represent spatial structure through distance-based features is the RFsp
 idea of \citet{hengl2018}. Regression kriging and the super learner
 \citep{wolpert1992,vanderlaan2007} are equally established. More to the point,
-Section~\ref{sec:ablation} shows that opening the geostatistical hyperparameters
-does not make the map more accurate: it is worth $0.017$ \Mgha{}, which a paired
-test cannot separate from zero. What it does deliver is that the null
+Section~\ref{sec:ablation} separates two things the phrase runs together. The
+variogram-derived representation does help: removing it costs $0.180$ \Mgha{},
+a fifth of the correction's benefit, in 27 of 30 repetitions. Selecting the
+variogram's parameters rather than fixing them does not: it is worth $0.017$
+\Mgha{}, which a paired test cannot separate from zero. What it does deliver is that the null
 correction is in the candidate library, so the selection never returns something
 worse on its own out-of-fold criterion,
 that it changes the fitted model in a little under half the repetitions, that it
@@ -825,18 +828,41 @@ cost of width.}
 \subsection{Where the improvement actually comes from}
 \label{sec:ablation}
 
-The second contribution would be empty if the geostatistical hyperparameters
-turned out not to matter, so we measured their contribution
-directly. Table~\ref{tab:ablation} decomposes the gain under the simple random
-design by running the same procedure with the geostatistical recipe held fixed
-at the conventional values and with it selected.
+Two questions hide inside the phrase ``the geostatistical part''. Does the
+variogram-derived representation help at all, and does tuning its parameters
+help on top of that? Table~\ref{tab:ablation} separates them under the simple
+random design, with everything else held fixed.
+
+The first answer is yes. Removing the variogram-derived features, so that the
+residual learner keeps the plain coordinates but loses the radial basis, the
+kriging learner and the kernel smoother, costs $0.180$ \Mgha{}: the correction
+still helps, at $-0.670$ against the uncorrected forest rather than $-0.849$,
+but a fifth of its benefit is gone. Paired across the 30 repetitions the
+representation helps in 27 of them, with a standard error of $0.047$, so the
+contrast is comfortably separated from zero.
+
+The second answer is no. Selecting the family, practical range, binning,
+estimator and anisotropy rather than fixing them at the conventional values is
+worth $0.017$ \Mgha{}, which a paired test cannot separate from zero.
+
+The two together are the honest description of what the geostatistics does
+here. Encoding spatial structure through a variogram earns its place in the
+model. Choosing the variogram's parameters from the data does not earn its
+place in the accuracy, and we do not claim it does. What that selection buys is
+stated in Section~\ref{sec:results}: it costs nothing on the criterion it is
+run against, it changes the fitted model in a little under half the
+repetitions, and it lets us report that the conventional recipe was adequate
+for these data rather than assume it.
 
 \begin{table}[!ht]
 \centering
 \caption{Decomposition of the improvement under the simple random design, 30
-repetitions, $n=500$, RMSE in \Mgha{}. The last two rows differ only in whether
-the variogram family, practical range, binning, estimator and anisotropy are
-selected out of fold or fixed at the conventional recipe.}
+repetitions, $n=500$, RMSE in \Mgha{}. The third row removes the
+variogram-derived features from the residual learner while keeping the plain
+coordinates, isolating what the variogram representation contributes. The
+fourth selects the variogram family, practical range, binning, estimator and
+anisotropy out of fold. Wins count repetitions in which that configuration
+beats the uncorrected forest.}
 \label{tab:ablation}
 \small
 \input{tables/ablation.tex}
