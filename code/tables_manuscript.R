@@ -33,7 +33,7 @@ dir.create(out, recursive = TRUE, showWarnings = FALSE)
 DESIGNS <- c(random = "Simple random",
              regular_grid = "Systematic",
              clustered_random = "Clustered random")
-dir_for <- function(sc) sprintf("results/cvplus_%s_confirm30", sc)
+dir_for <- function(sc) sprintf("results/final_%s_confirm30", sc)
 
 sm <- function(sc) read.csv(file.path(dir_for(sc), "dbtarf_summary_by_protocol.csv"))
 pd <- function(sc) read.csv(file.path(dir_for(sc), "dbtarf_paired_deltas_vs_RF.csv"))

@@ -67,12 +67,12 @@ new theory. On the Amazonian above-ground biomass
 benchmark of Wadoux et al. (2021), CV+ intervals built from cross-fitted
 residuals are mildly conservative at 0.907 under representative sampling and
 about 16 per cent narrower than quantile regression forests, which sit at 0.937,
-so the widths are not compared at matched coverage. Under clustered sampling
-they cover only 0.86 against a nominal 0.90. That failure is invisible to any check
+so the widths are not compared at matched coverage. Under clustered calibration
+they cover only 0.861 against a nominal 0.90. That failure is invisible to any check
 assuming exchangeability, the property clustering destroys; a spatial-block
 calibration restores it. The point predictor is a random forest with a cross-fitted residual correction
 whose geostatistical settings are selected out of fold rather than fixed. It
-lowers design-based RMSE under all three designs, by 0.9 to 1.2 \Mgha{}, and an
+lowers design-based RMSE under all three designs, by 0.85 to 1.10 \Mgha{}, and an
 ablation attributes almost all of that to the residual correction and a share
 indistinguishable from zero to the geostatistical selection.
 \end{abstract}
@@ -111,7 +111,7 @@ exchangeable with the target population, and a clustered calibration sample is
 exactly that case: the map must predict far from every cluster, where the
 residuals it incurs are larger than any the calibration sample observed. An
 external probability sample is under no such handicap, which is the whole point. Section~\ref{sec:intervals-results} measures this. Conformal intervals
-that are well behaved and sharp under representative sampling cover only 0.86
+that are well behaved and sharp under representative sampling cover only 0.861
 against a nominal 0.90 once the calibration sample is clustered, and a
 spatial-block calibration restored nominal coverage in this experiment. We are not aware of an earlier
 design-based assessment of interval coverage at this scale, though we make that
@@ -771,15 +771,15 @@ future work.
 Table~\ref{tab:coverage} and Fig.~\ref{fig:uncertainty} contain the finding we
 consider most consequential.
 Under representative sampling the plain conformal intervals are calibrated,
-0.907 and 0.912 against a nominal 0.90, mildly conservative in the direction
+0.907 and 0.913 against a nominal 0.90, mildly conservative in the direction
 CV+ predicts, and about 16 per cent narrower than the quantile regression forest
 baseline \citep{meinshausen2006}. That baseline over-covers at 0.937, so the two
 are not compared at the same empirical coverage and the width difference is
 descriptive: a method that covers less will generally be narrower. A comparison
 at matched coverage would need both recalibrated to a common level, which we did
 not do. Under clustered
-sampling they under-cover at 0.861. Covariate-shift weighting does not repair
-this: at 0.863 it is indistinguishable from the unweighted interval, which is
+calibration they under-cover at 0.861. Covariate-shift weighting does not repair
+this: at 0.862 it is indistinguishable from the unweighted interval, which is
 what the structural argument of Section~\ref{sec:intervals} predicts, since
 reweighting redistributes mass over residuals the calibration sample never
 observed. The spatial-block calibration recovered conservative empirical
@@ -945,7 +945,7 @@ The uncertainty result is the one we would defend first. Extending design-based
 assessment from error to coverage is conceptually slight, three lines in
 Section~\ref{sec:ht}, but it changes what can be checked, and the check has
 teeth. Intervals that look entirely reasonable, and that are demonstrably
-well behaved and sharp under representative sampling, cover only 0.86 of the
+well behaved and sharp under representative sampling, cover only 0.861 of the
 population once the calibration sample is clustered. That is the same regime in
 which \citet{wadoux2021} found point-accuracy estimators to fail, and it fails
 for a related reason: the sample is not representative of the domain the map has
