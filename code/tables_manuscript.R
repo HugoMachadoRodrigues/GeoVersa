@@ -226,27 +226,46 @@ pick <- function(u, m, col) {
 
 rows <- list(
   list("Simple random", "CV+",                       "random",           "DBTARF",       FALSE),
-  list("Simple random",                   "Pooled out-of-fold quantile", "random",          "DBTARF_oofq",  FALSE),
-  list("Simple random",                   "Quantile regression forest", "random",           "RF_quantile",  FALSE),
+  list("Simple random",                   "Pooled OOF quantile", "random",          "DBTARF_oofq",  FALSE),
+  list("Simple random",                   "Quantile RF", "random",           "RF_quantile",  FALSE),
   list("MID",                             NA, NA, NA, NA),
   list("Systematic",                      "CV+",                        "regular_grid",     "DBTARF",       FALSE),
   list("MID",                             NA, NA, NA, NA),
   list("Clustered random", "CV+",                     "clustered_random", "DBTARF",       FALSE),
-  list("Clustered random",                "Pooled out-of-fold quantile", "clustered_random","DBTARF_oofq",  FALSE),
+  list("Clustered random",                "Pooled OOF quantile", "clustered_random","DBTARF_oofq",  FALSE),
   list("Clustered random",                "Covariate-shift weighted",   "clustered_random", "DBTARF_dbcal", FALSE),
-  list("Clustered random",                "Spatial-block conformal",    "clustered_random", "DBTARF_spcal", TRUE)
+  list("Clustered random",                "Spatial-block",    "clustered_random", "DBTARF_spcal", TRUE)
 )
 
-lines <- c("\\begin{tabular}{llrr}", "\\toprule",
-           "Design & Interval & PICP & MPIW \\\\", "\\midrule")
+# Review asked for dispersion, not just means: a mean of 0.861 could hide wide
+# heterogeneity, and the reader cannot tell from a point estimate whether the
+# shortfall is systematic or an artefact of a few repetitions.
+picp_stats <- function(sc, model) {
+  x <- read.csv(file.path(dir_for(sc), "dbtarf_uncertainty.csv"))
+  v <- x$PICP90[x$model == model]
+  n <- length(v); mu <- mean(v); sd <- stats::sd(v); se <- sd / sqrt(n)
+  list(mu = mu, sd = sd, lo = mu - 1.96 * se, hi = mu + 1.96 * se,
+       below = sum(v < 0.90), n = n)
+}
+
+lines <- c("\\begin{tabular}{llrrrrr}", "\\toprule",
+           paste("Design & Interval & PICP & SD & 95\\% CI & MPIW &",
+                 "Below 0.90 \\\\"), "\\midrule")
 for (r in rows) {
   if (identical(r[[1]], "MID")) { lines <- c(lines, "\\midrule"); next }
-  u <- uq(r[[3]])
-  picp <- pick(u, r[[4]], "PICP90_mean"); mpiw <- pick(u, r[[4]], "MPIW90_mean")
+  u <- uq(r[[3]]); st <- picp_stats(r[[3]], r[[4]])
+  mpiw <- pick(u, r[[4]], "MPIW90_mean")
   b <- isTRUE(r[[5]])
   wrap <- function(z) if (b) sprintf("\\textbf{%s}", z) else z
-  lines <- c(lines, sprintf("%s & %s & %s & %s \\\\", r[[1]], wrap(r[[2]]),
-                            wrap(sprintf("%.3f", picp)), wrap(sprintf("%.0f", mpiw))))
+  lines <- c(lines, sprintf("%s & %s & %s & %s & %s & %s & %s \\\\",
+    r[[1]], wrap(r[[2]]),
+    # leading zeros dropped: these are bounded by 1 and the column is tight
+    wrap(sub("^0", "", sprintf("%.3f", st$mu))),
+    wrap(sub("^0", "", sprintf("%.3f", st$sd))),
+    wrap(sprintf("[%s,%s]", sub("^0", "", sprintf("%.3f", st$lo)),
+                            sub("^0", "", sprintf("%.3f", st$hi)))),
+    wrap(sprintf("%.0f", mpiw)),
+    wrap(sprintf("%d/%d", st$below, st$n))))
 }
 lines <- c(lines, "\\bottomrule", "\\end{tabular}")
 writeLines(lines, file.path(out, "coverage.tex"))

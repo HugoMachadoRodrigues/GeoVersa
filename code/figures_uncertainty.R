@@ -31,16 +31,18 @@ LABELS  <- c(DBTARF = "CV+", DBTARF_dbcal = "Covariate-shift weighted",
 PAL <- c("CV+" = "#668B5A", "Covariate-shift weighted" = "#BE9058",
          "Spatial-block" = "#26492F", "Quantile RF" = "#8C5A24")
 
+# Per-repetition values, not campaign means. The review asked for the spread:
+# a mean of 0.861 says nothing about whether the shortfall is systematic or
+# driven by a handful of repetitions, and the answer turns out to matter, since
+# clustering roughly doubles the between-repetition standard deviation.
 d <- do.call(rbind, lapply(names(DESIGNS), function(sc) {
-  u <- read.csv(file.path(dir_for(sc), "dbtarf_uncertainty_summary.csv"))
+  u <- read.csv(file.path(dir_for(sc), "dbtarf_uncertainty.csv"))
   u <- u[u$model %in% names(LABELS), ]
   data.frame(design = factor(DESIGNS[[sc]], levels = unname(DESIGNS)),
              interval = factor(LABELS[u$model], levels = unname(LABELS)),
-             picp = u$PICP90_mean, mpiw = u$MPIW90_mean,
+             picp = u$PICP90, mpiw = u$MPIW90,
              stringsAsFactors = FALSE)
 }))
-
-message(sprintf("[uq] %d rows from %s", nrow(d), paste(dir_for(names(DESIGNS)), collapse = ", ")))
 
 theme_uq <- function() {
   theme_minimal(base_size = 12) +
@@ -52,25 +54,23 @@ theme_uq <- function() {
 }
 
 p_cov <- ggplot(d, aes(design, picp, fill = interval)) +
-  geom_col(position = position_dodge(0.8), width = 0.72) +
+  geom_boxplot(position = position_dodge(0.8), width = 0.68, outlier.size = 0.7,
+               linewidth = 0.35) +
   geom_hline(yintercept = 0.90, linetype = "dashed", colour = "#B03A2E",
              linewidth = 0.7) +
-  geom_text(aes(label = sprintf("%.3f", picp)),
-            position = position_dodge(0.8), vjust = -0.5, size = 2.7) +
   annotate("text", x = 0.5, y = 0.988, label = "dashed line: nominal 0.90",
            hjust = 0, size = 3, colour = "#B03A2E", fontface = "bold") +
   scale_fill_manual(values = PAL) +
-  coord_cartesian(ylim = c(0.78, 1.0)) +
-  labs(title = "a  Coverage", x = NULL, y = "PICP") +
+  coord_cartesian(ylim = c(0.74, 1.0)) +
+  labs(title = "a  Coverage, one box per 30 repetitions", x = NULL, y = "PICP") +
   theme_uq()
 
 p_wid <- ggplot(d, aes(design, mpiw, fill = interval)) +
-  geom_col(position = position_dodge(0.8), width = 0.72) +
-  geom_text(aes(label = sprintf("%.0f", mpiw)),
-            position = position_dodge(0.8), vjust = -0.5, size = 2.7) +
+  geom_boxplot(position = position_dodge(0.8), width = 0.68, outlier.size = 0.7,
+               linewidth = 0.35) +
   scale_fill_manual(values = PAL) +
-  coord_cartesian(ylim = c(0, max(d$mpiw) * 1.15)) +
-  labs(title = "b  Mean interval width", x = NULL,
+  coord_cartesian(ylim = c(0, max(d$mpiw) * 1.05)) +
+  labs(title = "b  Interval width", x = NULL,
        y = expression("MPIW (Mg ha"^-1 * ")")) +
   theme_uq()
 

@@ -647,7 +647,7 @@ and the confidence interval is the 95 per cent interval for that mean. RMSE in
 \Mgha{}.}
 \label{tab:paired}
 \footnotesize
-\setlength{\tabcolsep}{3pt}
+\setlength{\tabcolsep}{2pt}
 \input{tables/paired}
 \end{table}
 
@@ -673,7 +673,7 @@ automatic, but not in a majority.
 \caption{Repetitions, out of 30 per design, in which the out-of-fold search departs from the conventional recipe on each of the three axes it is recorded against: the binning and estimator (a cutoff at half the maximum distance, 15 lags, the robust estimator), the range scale (a bandwidth of half the practical range), and isotropy. The selected variogram family is not recorded per repetition and so is not counted here.}
 \label{tab:axes}
 \small
-\setlength{\tabcolsep}{3pt}
+\setlength{\tabcolsep}{2pt}
 \input{tables/axes}
 \end{table}
 
@@ -789,8 +789,21 @@ are not compared at the same empirical coverage and the width difference is
 descriptive: a method that covers less will generally be narrower. A comparison
 at matched coverage would need both recalibrated to a common level, which we did
 not do. Under clustered
-calibration they under-cover at 0.861. Covariate-shift weighting does not repair
-this: at 0.862 it is indistinguishable from the unweighted interval, which is
+calibration they under-cover at 0.861, with a 95 per cent confidence interval
+for the mean of $[0.846, 0.875]$ that excludes the nominal level, and 25 of the
+30 repetitions falling below it individually.
+
+Two features of that failure are worth separating, and they are visible in
+Fig.~\ref{fig:uncertainty} rather than in any mean. The first is the shift: the
+whole distribution moves down, so this is not a handful of bad repetitions
+dragging an otherwise sound average. The second is the spread. The
+between-repetition standard deviation roughly doubles under clustering, from
+$0.019$ to $0.040$, so a clustered calibration sample makes coverage both lower
+and less predictable. A practitioner drawing one such sample cannot tell from
+the sample itself which end of that distribution they landed on.
+
+Covariate-shift weighting does not repair this: at 0.862, with 26 of 30
+repetitions below nominal, it is indistinguishable from the unweighted interval, which is
 what the structural argument of Section~\ref{sec:intervals} predicts, since
 reweighting redistributes mass over residuals the calibration sample never
 observed. The spatial-block calibration recovered conservative empirical
@@ -800,7 +813,12 @@ the cost of intervals about 48 per cent wider.
 \begin{table}[!ht]
 \centering
 \caption{Design-based interval coverage at a nominal 0.90 level and mean width in
-\Mgha{}. The rows are not all the same construction, and the comparison is
+\Mgha{}. PICP and MPIW are means over 30 repetitions, with leading zeros dropped on
+the bounded columns; SD is the standard
+deviation of PICP across them and the interval is a 95 per cent confidence
+interval for that mean, from the Monte Carlo standard error. The last column
+counts repetitions whose own coverage fell below nominal. OOF is out of fold
+and RF is random forest. The rows are not all the same construction, and the comparison is
 empirical rather than like-for-like. CV+ is the deployed interval and the only
 row carrying a finite-sample bound. The pooled out-of-fold quantile centres a
 single half-width on the full-sample refit and is reported because it is what a
@@ -808,7 +826,8 @@ natural reading of cross-fitted residuals produces, not because it is valid. The
 covariate-shift and spatial-block rows modify that pooled calibration, by
 reweighting and by rescoring on held-out blocks respectively.}
 \label{tab:coverage}
-\small
+\footnotesize
+\setlength{\tabcolsep}{2pt}
 \input{tables/coverage}
 \end{table}
 
