@@ -169,7 +169,7 @@ add_arm <- function(rows, label, dir) {
 rows <- add_arm(rows, "Correction, no variogram-derived features",
                 gv_results("abl_nogeo_random"))
 rows <- add_arm(rows, "Correction, fixed variogram recipe",
-                "results/abl_fixedrecipe_random")
+                gv_results("abl_fixedrecipe_random"))
 
 d_sel <- a_main - rf_iter[names(a_main)]
 rows <- append(rows, list(c("Correction, selected geostatistical hyperparameters",

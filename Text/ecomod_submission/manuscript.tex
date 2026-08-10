@@ -73,9 +73,9 @@ assuming exchangeability, the property clustering destroys; a spatial-block
 calibration restores it. The point predictor is a random forest with a cross-fitted residual correction
 whose geostatistical settings are selected out of fold rather than fixed. It
 lowers design-based RMSE under all three designs, by 0.85 to 1.10 \Mgha{}, and an
-ablation separates the variogram-derived representation, which is worth $0.180$
-\Mgha{}, from the selection of its parameters, which is worth $0.017$ and is
-not distinguishable from zero.
+ablation separates the variogram-derived representation, worth $0.172$ \Mgha{},
+from the selection of its parameters, worth $0.008$ and not distinguishable
+from zero.
 \end{abstract}
 
 \begin{keyword}
@@ -143,10 +143,11 @@ a forest represent spatial structure through distance-based features is the RFsp
 idea of \citet{hengl2018}. Regression kriging and the super learner
 \citep{wolpert1992,vanderlaan2007} are equally established. More to the point,
 Section~\ref{sec:ablation} separates two things the phrase runs together. The
-variogram-derived representation does help: removing it costs $0.180$ \Mgha{},
-a fifth of the correction's benefit, in 27 of 30 repetitions. Selecting the
-variogram's parameters rather than fixing them does not: it is worth $0.017$
-\Mgha{}, which a paired test cannot separate from zero. What it does deliver is that the null
+variogram-derived representation does help: removing it costs $0.172$ \Mgha{},
+a fifth of the total gain, in 26 of 30 repetitions. Selecting the
+variogram's parameters rather than fixing them does not: it is worth $0.008$
+\Mgha{}, with a paired 95 per cent interval of $[-0.038, +0.023]$ that contains
+zero, and it wins in only 8 of 30 repetitions. What it does deliver is that the null
 correction is in the candidate library, so the selection never returns something
 worse on its own out-of-fold criterion,
 that it changes the fitted model in a little under half the repetitions, that it
@@ -864,13 +865,19 @@ The first answer is yes. Removing the variogram-derived features, so that the
 residual learner keeps the plain coordinates but loses the radial basis, the
 kriging learner and the kernel smoother, costs $0.180$ \Mgha{}: the correction
 still helps, at $-0.670$ against the uncorrected forest rather than $-0.849$,
-but a fifth of its benefit is gone. Paired across the 30 repetitions the
-representation helps in 27 of them, with a standard error of $0.047$, so the
-contrast is comfortably separated from zero.
+but a fifth of the total gain is gone. Paired across the 30 repetitions the
+variogram-derived information helps in 27 of them, with a 95 per cent interval
+of $[+0.087, +0.273]$ that excludes zero. Table~\ref{tab:ablation} splits that
+$0.180$ further: $0.172$ is the representation itself and $0.008$ is the
+selection of its parameters.
 
 The second answer is no. Selecting the family, practical range, binning,
 estimator and anisotropy rather than fixing them at the conventional values is
-worth $0.017$ \Mgha{}, which a paired test cannot separate from zero.
+worth $0.008$ \Mgha{}. The paired 95 per cent interval, $[-0.038, +0.023]$,
+contains zero, and the selected recipe wins in only 8 of the 30 repetitions:
+when it wins it wins by more than it loses by, which is how a mean this small
+survives a minority of wins, but nothing here separates it from the conventional
+values.
 
 The two together are the honest description of what the geostatistics does
 here. Encoding spatial structure through a variogram earns its place in the
@@ -895,12 +902,20 @@ beats the uncorrected forest.}
 \input{tables/ablation.tex}
 \end{table}
 
-The decomposition is unambiguous. Tuning the base forest is worth $0.022$
-\Mgha{}, the residual correction is worth a further $0.836$, and opening the
-geostatistical hyperparameters is worth $0.017$ more, which a paired test cannot
-distinguish from zero (\(p = 0.295\), 95 per cent confidence interval
-$[-0.050, +0.016]$). Essentially all of the improvement is the residual
-correction itself.
+The decomposition is in four parts and they sum exactly to the $0.849$ \Mgha{}
+that separates the default forest from the deployed map. Two of the four are
+real and two are not. Tuning the base forest is worth $0.027$, with a paired 95
+per cent interval of $[-0.018, +0.073]$ that contains zero and wins in 18 of 30
+repetitions, so it is not separable from doing nothing. The residual correction,
+stripped of any variogram-derived information, is worth $0.642$,
+$[+0.456, +0.828]$, in 25 of 30. The variogram-derived representation adds
+$0.172$, $[+0.072, +0.272]$, in 26 of 30. Selecting the variogram's parameters
+rather than fixing them adds $0.008$, $[-0.023, +0.038]$, in 8 of 30.
+
+Three quarters of the gain is therefore the residual correction, a fifth is the
+variogram-derived representation of space, and the two parameter-choosing steps,
+the forest tuning and the geostatistical search, contribute nothing that a
+paired interval can distinguish from zero.
 
 We state the consequence plainly rather than leaving it to the reader. On this
 dataset, selecting the geostatistical hyperparameters does not make the map more
@@ -1019,10 +1034,10 @@ methods sit at different effective coverage levels, 0.907 against 0.937, so the
 as a like-for-like sharpening.
 
 The point predictor is the more modest contribution, and the ablation is what
-disciplines the claim. Table~\ref{tab:ablation} attributes 95 per cent of the
-improvement to the residual correction, 2 per cent to tuning the forest and 2
-per cent, indistinguishable from zero, to selecting the geostatistical
-hyperparameters. We therefore do not argue that moving the variogram into the
+disciplines the claim. Table~\ref{tab:ablation} attributes three quarters of
+the gain to the residual correction and a fifth to the variogram-derived
+representation, leaving the two parameter-choosing steps with nothing a paired
+interval separates from zero. We therefore do not argue that moving the variogram into the
 hyperparameter space makes maps better. We argue something narrower: that it can
 be done without penalty on the selection criterion, since Eq.~(9) bounds it
 below by the uncorrected
