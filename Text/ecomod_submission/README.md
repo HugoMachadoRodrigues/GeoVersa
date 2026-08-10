@@ -12,44 +12,55 @@ Build:
 
 | File | Role |
 |---|---|
-| `manuscript.tex` / `manuscript.docx` | the manuscript, 31 pages |
-| `references.bib` | 28 references |
+| `manuscript.tex` / `manuscript.docx` | the manuscript, 33 pages |
+| `references.bib` | 30 references |
 | `figures/` | the four manuscript figures, all script-generated |
 | `tables/` | nine generated tables the manuscript `\input`s |
 | `highlights.md` | required; 5 bullets, each within 85 characters |
 | `figures/graphical_abstract.png` | encouraged; 3984 x 1592 px |
+| `elsevier-harv-expanded.csl` | needed by `make_docx.sh`, not uploaded |
+
+The manuscript carries ten tables: the nine generated ones plus a descriptive
+table of the three sampling mechanisms, which contains no data and is written
+inline.
 
 ## Journal rules this package is built against
 
-* Abstract at most 250 words. Currently 248.
+* Abstract at most 250 words. Currently 223.
 * Keywords 1 to 7. Currently 6.
 * Highlights required, 3 to 5 bullets, at most 85 characters each.
 * Graphical abstract encouraged, not required.
 * No word limit and no cap on figures and tables for a regular paper, which is
-  why the procedure appendix and all nine tables sit in the main text. An
-  earlier pass cut them to fit a different journal; that is not needed here.
+  why the procedure appendix and every table sit in the main text.
 * Author-date citations, `elsarticle-harv`.
 
-## Reproducible figure scripts, in the repository root `code/`
+## Reproducible scripts, in the repository root `code/`
 
+* `project_paths.R` resolves the repository, the benchmark data and the campaign
+  outputs without any absolute path. Every other script bootstraps it.
+* `tables_manuscript.R` all nine generated tables, built from the campaign CSVs
+  so no number in the paper can drift from the run that produced it.
 * `figures_schematic.R` the pipeline diagram, drawn from the correction library
   actually implemented in `R/dbtarf.R`
-* `figures_protocols.R` the estimand comparison, read from the result CSVs
-* `maps_compute.R` and `maps_plot.R` whole-grid prediction and the map panel
+* `figures_protocols.R` the estimand comparison
 * `figures_uncertainty.R` the interval-assessment figure, reading the same
   campaign CSVs as the coverage table so the two cannot disagree
-* `figures_graphical_abstract.R` the graphical abstract, numbers taken from the
-  coverage table
-* `tables_manuscript.R` every one of the nine tables, generated from the result
-  CSVs so no number in the paper can drift from the run that produced it. The
-  coverage and estimand tables used to be typed by hand and had gone stale
-  against the re-run campaigns; they are generated now, which is what stops that
-  recurring.
+* `figures_graphical_abstract.R` the graphical abstract, also from those CSVs
+* `maps_compute.R` and `maps_plot.R` whole-grid prediction and the map panel
+* `run_all_campaigns.sh` the campaign set; `freeze_check.sh` the pre-flight that
+  gates it
+
+Campaign outputs live outside the synced folder, resolved through
+`GEOVERSA_RESULTS` or `~/geoversa_results`. Every results directory records the
+git commit, whether the tree was dirty, the R version and a timestamp, and the
+table generator refuses any arm whose config lacks a commit.
 
 ## Left to the corresponding author
 
-1. Author order is Hugo Rodrigues then Golmar Golmohammadi, with Hugo Rodrigues
-   as corresponding author. This journal does not permit authorship changes
-   after acceptance, so confirm
-   with the co-author before submission, since this journal does not permit
-   authorship changes after acceptance.
+1. **Author order** is Hugo Rodrigues then Golmar Golmohammadi, with Hugo
+   Rodrigues as corresponding author. This journal does not permit authorship
+   changes after acceptance, so confirm with the co-author before submitting.
+2. **The generative-AI declaration** is the one section whose wording is still
+   open. It currently describes the tools actually used.
+3. **Sample-size sensitivity** was authorised and not run. The manuscript
+   declares in Limitations that almost every number comes from n = 500.
