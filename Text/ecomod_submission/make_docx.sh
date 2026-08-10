@@ -180,3 +180,39 @@ for it in zin.infolist():
 zout.close(); zin.close(); shutil.move(tmp,src)
 print("  table rows set to not split; header rows repeat")
 PYZ
+
+# Word refuses the whole package when a custom document property exceeds the
+# 255-character limit of vt:lpwstr. pandoc turns the LaTeX abstract into exactly
+# such a property, at 1548 characters, which is why the file opened everywhere
+# except in Word. The body was never the problem.
+#
+# The same pass drops the duplicate w:tblHeader this script used to add on top of
+# the one pandoc already emits for header rows.
+python3 - <<'PYW'
+import zipfile, re, shutil
+src="manuscript.docx"; tmp="/tmp/_docx_props.docx"
+LIMIT = 255
+zin=zipfile.ZipFile(src); zout=zipfile.ZipFile(tmp,"w",zipfile.ZIP_DEFLATED)
+for it in zin.infolist():
+    d=zin.read(it.filename)
+    if it.filename=="docProps/custom.xml":
+        x=d.decode("utf8")
+        def trim(m):
+            head, typ, val, tail = m.group(1), m.group(2), m.group(3), m.group(4)
+            if typ=="lpwstr" and len(val)>LIMIT:
+                val = val[:LIMIT-1].rsplit(" ",1)[0] + "\u2026"
+            return head+val+tail
+        x=re.sub(r'(<vt:(lpwstr)>)(.*?)(</vt:lpwstr>)',
+                 lambda m: trim(re.match(r'(<vt:(lpwstr)>)(.*?)(</vt:lpwstr>)', m.group(0), re.S)),
+                 x, flags=re.S)
+        over=[len(v) for v in re.findall(r'<vt:lpwstr>(.*?)</vt:lpwstr>', x, re.S) if len(v)>LIMIT]
+        print(f"  custom properties trimmed to {LIMIT} chars ({len(over)} still over)")
+        d=x.encode("utf8")
+    elif it.filename=="word/document.xml":
+        x=d.decode("utf8")
+        # keep pandoc's tblHeader, drop the one this script injected
+        x=re.sub(r'<w:tblHeader/>(?=(?:(?!</w:trPr>).)*<w:tblHeader\b)', '', x, flags=re.S)
+        d=x.encode("utf8")
+    zout.writestr(it,d)
+zout.close(); zin.close(); shutil.move(tmp,src)
+PYW
