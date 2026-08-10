@@ -27,7 +27,7 @@ out_png <- "Text/ecomod_submission/figures/graphical_abstract.png"
 # so this panel cannot drift from the paper the way the earlier hand-typed
 # version did ----------------------------------------------------------------
 uq <- function(sc, m, col) {
-  u <- read.csv(sprintf("results/final_%s_confirm30/dbtarf_uncertainty_summary.csv", sc))
+  u <- read.csv(gv_results(sprintf("final_%s_confirm30", sc), "dbtarf_uncertainty_summary.csv"))
   u[[col]][u$model == m][1]
 }
 bars <- data.frame(

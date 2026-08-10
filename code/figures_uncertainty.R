@@ -22,7 +22,7 @@ setwd(gv_root())
 suppressPackageStartupMessages({ library(ggplot2); library(patchwork) })
 
 out_png <- "Text/ecomod_submission/figures/fig6_uncertainty.png"
-dir_for <- function(sc) sprintf("results/final_%s_confirm30", sc)
+dir_for <- function(sc) gv_results(sprintf("final_%s_confirm30", sc))
 
 DESIGNS <- c(random = "Simple random", regular_grid = "Systematic",
              clustered_random = "Clustered")

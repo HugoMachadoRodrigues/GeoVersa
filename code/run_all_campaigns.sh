@@ -15,8 +15,8 @@ COMMIT=$(git rev-parse --short HEAD)
 # predate the provenance fields. Anything else is set aside, never written into.
 is_complete() {
   local dir="$1" want="$2"
-  local f="results/$dir/dbtarf_all_results.csv"
-  local c="results/$dir/dbtarf_config.csv"
+  local f="$EXT/$dir/dbtarf_all_results.csv"
+  local c="$EXT/$dir/dbtarf_config.csv"
   [ -f "$f" ] && [ -f "$c" ] || return 1
   local n=$(tail -n +2 "$f" 2>/dev/null | wc -l | tr -d ' ')
   [ "${n:-0}" -ge "$want" ] || return 1
@@ -38,11 +38,10 @@ run() {                       # run <dir> <rows> <extra env assignments...>
     echo "  (dados anteriores de $dir movidos para STALE_*)"
   fi
   mkdir -p "$EXT/$dir"
-  ln -sfn "$EXT/$dir" "results/$dir"
   echo "===== $dir  $(date '+%m-%d %H:%M') ====="
-  env "$@" DBT_RESULTS_DIR="results/$dir" \
+  env "$@" DBT_RESULTS_DIR="$EXT/$dir" \
     Rscript code/run_dbtarf_wadoux_comparison.R 2>&1 | grep -E 'Done|Error' | tail -2
-  local n=$(tail -n +2 "results/$dir/dbtarf_all_results.csv" 2>/dev/null | wc -l | tr -d ' ')
+  local n=$(tail -n +2 "$EXT/$dir/dbtarf_all_results.csv" 2>/dev/null | wc -l | tr -d ' ')
   echo "----- $dir concluido $(date '+%m-%d %H:%M'), ${n:-0} linhas -----"
 }
 
@@ -72,6 +71,6 @@ echo "########## TODAS CONCLUIDAS $(date '+%m-%d %H:%M') ##########"
 for d in final_random_confirm30 final_regular_grid_confirm30 final_clustered_random_confirm30 \
          abl_nogeo_random size_n200_random size_n200_clustered_random \
          size_n800_random size_n800_clustered_random; do
-  n=$(tail -n +2 "results/$d/dbtarf_all_results.csv" 2>/dev/null | wc -l | tr -d ' ')
+  n=$(tail -n +2 "$EXT/$d/dbtarf_all_results.csv" 2>/dev/null | wc -l | tr -d ' ')
   printf "  %-36s %s linhas\n" "$d" "${n:-0}"
 done

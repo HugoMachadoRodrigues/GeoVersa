@@ -33,7 +33,7 @@ dir.create(out, recursive = TRUE, showWarnings = FALSE)
 DESIGNS <- c(random = "Simple random",
              regular_grid = "Systematic",
              clustered_random = "Clustered random")
-dir_for <- function(sc) sprintf("results/final_%s_confirm30", sc)
+dir_for <- function(sc) gv_results(sprintf("final_%s_confirm30", sc))
 
 sm <- function(sc) read.csv(file.path(dir_for(sc), "dbtarf_summary_by_protocol.csv"))
 pd <- function(sc) read.csv(file.path(dir_for(sc), "dbtarf_paired_deltas_vs_RF.csv"))
@@ -167,7 +167,7 @@ add_arm <- function(rows, label, dir) {
                       sprintf("%d/%d", sum(d_rf < 0), length(it)))))
 }
 rows <- add_arm(rows, "Correction, no variogram-derived features",
-                "results/abl_nogeo_random")
+                gv_results("abl_nogeo_random"))
 rows <- add_arm(rows, "Correction, fixed variogram recipe",
                 "results/abl_fixedrecipe_random")
 
@@ -185,9 +185,9 @@ message("[tables] ablation table written")
 
 # ---- Table: simulations -----------------------------------------------------
 
-if (file.exists("results/simulations/S1_anisotropy.csv")) {
-  S1 <- read.csv("results/simulations/S1_anisotropy.csv")
-  S2 <- read.csv("results/simulations/S2_design.csv")
+if (file.exists(gv_results("simulations", "S1_anisotropy.csv"))) {
+  S1 <- read.csv(gv_results("simulations", "S1_anisotropy.csv"))
+  S2 <- read.csv(gv_results("simulations", "S2_design.csv"))
   a1 <- aggregate(declared_aniso ~ true_ratio + snr, S1, mean)
   lines <- c("\\begin{tabular}{rrr}", "\\toprule",
              "True ratio $\\varrho$ & Signal-to-noise & Anisotropy declared \\\\",
@@ -256,7 +256,7 @@ message("[tables] coverage table written")
 # The design-based row must agree with the accuracy and ablation tables, so it
 # is read from the same rev1 campaign rather than from the protocols run.
 
-pr <- read.csv("results/canon_v030_protocols_confirm10/dbtarf_protocols_summary.csv")
+pr <- read.csv(gv_results("canon_v030_protocols_confirm10", "dbtarf_protocols_summary.csv"))
 prow <- function(tag) pr[pr$protocol == tag, ][1, ]
 dr <- pd("random"); dld <- dr$RMSE_DBTARF - dr$RMSE_RF
 sr <- sm("random")

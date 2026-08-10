@@ -73,4 +73,27 @@ gv_data_root <- function(required = TRUE) {
        "See data/README.md for the acquisition steps.", call. = FALSE)
 }
 
+# Where campaign outputs live. They are large, they are rewritten constantly
+# during a run, and the repository sits inside a synced folder, so keeping them
+# outside it avoids a sync client fighting the checkpoint writer. Symlinks were
+# tried first and did not survive: the client replaced them with real
+# directories holding stale partial copies, twice, silently.
+#
+#   1. GEOVERSA_RESULTS, if set
+#   2. ~/geoversa_results, if it exists
+#   3. <root>/results
+gv_results <- local({
+  cached <- NULL
+  function(..., create = FALSE) {
+    if (is.null(cached)) {
+      env <- Sys.getenv("GEOVERSA_RESULTS", unset = "")
+      ext <- path.expand("~/geoversa_results")
+      cached <<- if (nzchar(env)) env else if (dir.exists(ext)) ext else gv_path("results")
+    }
+    p <- file.path(cached, ...)
+    if (isTRUE(create)) dir.create(p, recursive = TRUE, showWarnings = FALSE)
+    p
+  }
+})
+
 invisible(NULL)
