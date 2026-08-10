@@ -95,11 +95,17 @@ half of a map's quality statement, the uncertainty attached to each prediction,
 and that is where this paper begins.
 
 Prediction intervals in environmental mapping are routinely obtained from
-kriging variances or from quantile heuristics, and we are not aware of studies
-that confront their coverage with the sampling design. Our first and principal
-argument is that no new theory is needed to do so, because coverage is a
-population parameter
-of exactly the same kind as the mean squared error. Section~\ref{sec:ht} shows
+kriging variances or from quantile heuristics, and whether they deserve to be
+believed has begun to receive attention. \citet{schmidinger2023} validate
+probabilistic predictions in digital soil mapping against independent test data,
+scoring reliability and sharpness across a range of methods, and
+\citet{rossiter2022} assess how faithfully digital soil maps reproduce the soil
+geography they claim to represent. What is missing from that literature is the
+step \citet{wadoux2021} took for point accuracy: treating the quantity being
+validated as a parameter of the finite population and estimating it from a
+probability sample by design-based inference. That is what we do here, and our
+first and principal argument is that it requires no new theory, because coverage
+is a population parameter of exactly the same kind as the mean squared error. Section~\ref{sec:ht} shows
 that the Horvitz-Thompson estimator applies to any cell-level function, so the
 apparatus \citet{wadoux2021} established for accuracy carries over to coverage
 without a single new assumption, and in the case of coverage the estimator is
@@ -114,9 +120,11 @@ residuals it incurs are larger than any the calibration sample observed. An
 external probability sample is under no such handicap, which is the whole point. Section~\ref{sec:intervals-results} measures this. Conformal intervals
 that are well behaved and sharp under representative sampling cover only 0.861
 against a nominal 0.90 once the calibration sample is clustered, and a
-spatial-block calibration restored nominal coverage in this experiment. We are not aware of an earlier
-design-based assessment of interval coverage at this scale, though we make that
-statement as a reading of the literature rather than as a claim of priority.
+spatial-block calibration restored nominal coverage in this experiment. The
+contribution is not that coverage had never been validated, which
+\citet{schmidinger2023} did, but that validating it design-based against an
+independent probability sample makes the failure visible and puts the estimate
+on the same footing as the accuracy indices reported beside it.
 
 The second argument concerns the point predictor those intervals are attached
 to, and we present it as the more modest of the two. Spatial predictive mapping,
