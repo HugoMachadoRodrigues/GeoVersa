@@ -272,20 +272,39 @@ writeLines(lines, file.path(out, "coverage.tex"))
 message("[tables] coverage table written")
 
 # ---- Table: sample-size sensitivity -----------------------------------------
-# The manuscript previously conceded in Limitations that almost every number
-# came from n = 500 and that the clustered shortfall might move with sample
-# size. It does not: accuracy responds to n and coverage does not, which is what
-# separates a small-sample artefact from a design bias.
+# Does the clustered shortfall shrink when the calibration sample grows? Three
+# arms, because "a bigger sample" is ambiguous under a clustered design:
 #
-# Sizes are included only when a campaign directory holds the full 30
-# repetitions and records a git commit, so an unfinished or un-provenanced run
-# is dropped rather than silently averaged over fewer iterations. The n = 500
-# campaigns predate the others by a few commits; those commits touched the
-# manuscript and the table generators and left R/dbtarf.R and the runner
-# byte-identical, so the three sizes are the same estimator.
+#   Simple random          the control; the design whose coverage was never in
+#                          question
+#   Clustered, denser      20 primary units at every size, more points inside
+#                          each. Identical spatial footprint, so this isolates
+#                          sample size and tests the mechanism the paper claims
+#   Clustered, wider       25 points per unit at every size, more units. The
+#                          footprint grows with n, so any repair is partly a
+#                          coverage effect and not a sample-size effect
+#
+# The n = 500 midpoint is 20 x 25 and belongs to both clustered arms.
+#
+# Sizes are included only when a campaign holds the full 30 repetitions, records
+# a git commit, and trained on the size the row claims. Campaigns predating the
+# DBT_VAL_SIZE split are still comparable: those commits left R/dbtarf.R and the
+# estimator path in the runner byte-identical, and every campaign here scores a
+# validation draw of 500.
 
-size_dir <- function(sc, n) {
-  if (identical(n, 500L)) dir_for(sc) else gv_results(sprintf("size_n%d_%s", n, sc))
+ARMS <- list(
+  list(key = "random", label = "Simple random", sc = "random",
+       dirs = c(`200` = "rand_n200", `500` = NA, `800` = "rand_n800")),
+  list(key = "dens", label = "Clustered, denser", sc = "clustered_random",
+       dirs = c(`200` = "clus_dens_n200", `500` = NA, `800` = "clus_dens_n800")),
+  list(key = "spread", label = "Clustered, wider", sc = "clustered_random",
+       dirs = c(`200` = "clus_spread_n200", `500` = NA, `800` = "clus_spread_n800"))
+)
+
+# NA means the shared midpoint campaign, which lives under the final_* names
+size_dir <- function(arm, n) {
+  d <- arm$dirs[[as.character(n)]]
+  if (is.na(d)) dir_for(arm$sc) else gv_results(d)
 }
 
 # A campaign is admitted only if it has provenance, the full 30 repetitions, and
@@ -300,8 +319,8 @@ size_dir <- function(sc, n) {
 # mean interval width gave it away, 98.9 against 97.7 where the random design
 # moved 114.7 against 103.3, but nothing in the pipeline objected. Now n_train
 # is read back from the diagnostics and has to agree.
-size_ready <- function(sc, n, want = 30L) {
-  d <- size_dir(sc, n)
+size_ready <- function(arm, n, want = 30L) {
+  d <- size_dir(arm, n)
   cfg <- file.path(d, "dbtarf_config.csv")
   unc <- file.path(d, "dbtarf_uncertainty.csv")
   dia <- file.path(d, "dbtarf_diagnostics.csv")
@@ -310,15 +329,33 @@ size_ready <- function(sc, n, want = 30L) {
   if (!"git_commit" %in% names(k) || !nzchar(as.character(k$git_commit[1]))) return(FALSE)
   x <- read.csv(unc)
   if (sum(x$model == "DBTARF") < want) return(FALSE)
+
+  # The calibration sample must be the size the row claims. This check is here
+  # because a campaign once ran to completion at the wrong size without a single
+  # complaint: DBT_SAMPLE_SIZE governs the calibration draw under the random and
+  # systematic designs, but the clustered design takes its size from DBT_N_PSU
+  # times DBT_M_PER_PSU, so a sweep over the former left clustered calibration
+  # at 500 and shrank only the validation draw. The resulting row was one
+  # experiment compared with itself. Mean interval width was the tell, 98.9
+  # against 97.7 where the random design moved 114.7 against 103.3, and nothing
+  # in the pipeline objected. Now n_train has to agree.
   g <- read.csv(dia)
   nt <- unique(g$n_train)
-  # spsample("regular") returns approximately n points, so the systematic design
-  # is allowed a small tolerance; the other designs must hit the size exactly
-  tol <- if (identical(sc, "regular_grid")) 0.05 else 0
-  if (length(nt) != 1L || abs(nt - n) > tol * n) {
+  if (length(nt) != 1L || nt != n) {
     warning(sprintf(
       "sample-size row dropped: %s asked for n = %d but trained on %s",
       basename(d), n, paste(nt, collapse = "/")), call. = FALSE)
+    return(FALSE)
+  }
+
+  # Coverage must also be measured at one precision across the table, or the
+  # standard deviations are not comparable between rows. Campaigns written
+  # before DBT_VAL_SIZE existed have no such column and validated at
+  # sample_size, which for those campaigns was 500.
+  vs <- if ("val_size" %in% names(k)) k$val_size[1] else k$sample_size[1]
+  if (!identical(as.integer(vs), 500L)) {
+    warning(sprintf("sample-size row dropped: %s validated on %s, not 500",
+                    basename(d), vs), call. = FALSE)
     return(FALSE)
   }
   TRUE
@@ -326,17 +363,17 @@ size_ready <- function(sc, n, want = 30L) {
 
 SIZES <- c(200L, 500L, 800L)
 sens <- list()
-for (sc in c("random", "clustered_random")) {
+for (arm in ARMS) {
   for (n in SIZES) {
-    if (!size_ready(sc, n)) next
-    d <- size_dir(sc, n)
+    if (!size_ready(arm, n)) next
+    d <- size_dir(arm, n)
     x <- read.csv(file.path(d, "dbtarf_uncertainty.csv"))
     a <- read.csv(file.path(d, "dbtarf_all_results.csv"))
     v <- x$PICP90[x$model == "DBTARF"]
     se <- stats::sd(v) / sqrt(length(v))
     blk <- x$PICP90[x$model == "DBTARF_spcal"]
     sens[[length(sens) + 1L]] <- list(
-      design = DESIGNS[[sc]], n = n,
+      design = arm$label, arm = arm$key, n = n,
       rmse = mean(a$RMSE[a$model == "DBTARF"]),
       mec  = mean(a$MEC[a$model == "DBTARF"]),
       mu = mean(v), sd = stats::sd(v),
@@ -347,7 +384,13 @@ for (sc in c("random", "clustered_random")) {
   }
 }
 
-if (length(sens) >= 4L) {
+# The table exists to say something about clustering. A run of the control arm
+# alone would fill it with rows nobody asked about, so it is written only once a
+# clustered arm has at least two admissible sizes to compare.
+per_arm <- table(vapply(sens, function(r) r$arm, character(1)))
+clustered_ok <- any(per_arm[intersect(names(per_arm), c("dens", "spread"))] >= 2L)
+
+if (clustered_ok) {
   z <- function(x, d = 3) sub("^0", "", sprintf(paste0("%.", d, "f"), x))
   lines <- c("\\begin{tabular}{lrrrrrrrr}", "\\toprule",
              paste("Design & $n$ & RMSE & MEC & PICP & SD & 95\\% CI &",
@@ -365,10 +408,9 @@ if (length(sens) >= 4L) {
   }
   lines <- c(lines, "\\bottomrule", "\\end{tabular}")
   writeLines(lines, file.path(out, "sizes.tex"))
-  message(sprintf("[tables] sample-size table written, %d rows (sizes: %s)",
+  message(sprintf("[tables] sample-size table written, %d rows across %s",
                   length(sens),
-                  paste(sort(unique(vapply(sens, function(r) r$n, integer(1)))),
-                        collapse = ", ")))
+                  paste(sprintf("%s(%s)", names(per_arm), per_arm), collapse = " ")))
 } else {
   # Deleting rather than merely skipping. A previous version of this table was
   # written from campaigns that a later check disqualified, and skipping left

@@ -101,6 +101,22 @@ if (length(invalid) > 0L) {
 
 n_iter <- as.integer(parse_num_dbt("DBT_N_ITER", 5L))
 sample_size <- as.integer(parse_num_dbt("DBT_SAMPLE_SIZE", 500L))
+# Size of the independent validation draw the DesignBased protocol scores on.
+# It used to be sample_size, which tied the precision of the measurement to the
+# quantity being measured: a sample-size sweep then changed both at once, and
+# under the clustered design, where sample_size does not reach the calibration
+# draw at all, it changed only the validation sample and produced a comparison
+# of one experiment with itself. Defaulting to sample_size keeps every campaign
+# run before this line was written reproducible.
+val_size <- as.integer(parse_num_dbt("DBT_VAL_SIZE", sample_size))
+# The clustered design takes its calibration size from these, not from
+# sample_size. They were read inline inside the sampler, which is why a sweep
+# over sample_size silently left the clustered calibration at 20 x 25 = 500 and
+# nothing in the recorded configuration showed it. They are hoisted here so the
+# provenance CSV carries them.
+kmeans_centers <- as.integer(parse_num_dbt("DBT_KMEANS_CENTERS", 100L))
+n_psu <- as.integer(parse_num_dbt("DBT_N_PSU", 20L))
+m_per_psu <- as.integer(parse_num_dbt("DBT_M_PER_PSU", 25L))
 train_seed <- as.integer(parse_num_dbt("DBT_TRAIN_SEED", 123L))
 results_dir <- Sys.getenv("DBT_RESULTS_DIR", unset = "results/dbtarf_run")
 checkpoint_every <- as.integer(parse_num_dbt("DBT_CHECKPOINT_EVERY", 1L))
@@ -219,9 +235,8 @@ sample_calibration_dbt <- function() {
   } else if (scenario == "clustered_random") {
     sample_valuetable_clustered_random_wadoux(
       common_data = common_data,
-      kmeans_centers = as.integer(parse_num_dbt("DBT_KMEANS_CENTERS", 100L)),
-      n_psu = as.integer(parse_num_dbt("DBT_N_PSU", 20L)),
-      m_per_psu = as.integer(parse_num_dbt("DBT_M_PER_PSU", 25L)))
+      kmeans_centers = kmeans_centers,
+      n_psu = n_psu, m_per_psu = m_per_psu)
   } else {
     stop("Unsupported DBT_SCENARIO: ", scenario)
   }
@@ -380,7 +395,7 @@ collect_dbtarf_diag <- function(out, protocol, iter) {
 #   - SpatialKFold: spatial hclust/cutree folds on the calibration sample, pooled
 eval_protocol_dbt <- function(protocol, valuetable, iter) {
   if (identical(protocol, "DesignBased")) {
-    val_srs <- sample_simple_random_rows_wadoux(common_data$s_df, sample_size)
+    val_srs <- sample_simple_random_rows_wadoux(common_data$s_df, val_size)
     fp <- fit_predict_all_dbt(valuetable, val_srs, iter, capture_diag = TRUE)
     unc <- eval_uncertainty_dbt(val_srs[[response_name_wadoux]], fp$dbtarf,
              fp$pred_map$DBTARF, valuetable, val_srs, iter, protocol,
@@ -536,7 +551,14 @@ summarise_and_save_dbt <- function(metric_rows) {
 write.csv(
   data.frame(scenario = scenario, protocols = paste(protocols, collapse = ","),
              models = paste(models, collapse = ","),
-             sample_size = sample_size, n_iter = n_iter,
+             sample_size = sample_size, val_size = val_size,
+             kmeans_centers = kmeans_centers,
+             n_psu = n_psu, m_per_psu = m_per_psu,
+             # what the calibration draw will actually be, per design, so a
+             # reader never has to know which knob governs which scenario
+             calib_size = if (identical(scenario, "clustered_random"))
+                            n_psu * m_per_psu else sample_size,
+             n_iter = n_iter,
              n_folds = n_folds_report,
              min_oof_improvement = dbtarf_params$min_oof_improvement,
              rf_tune = dbtarf_params$rf_tune,
