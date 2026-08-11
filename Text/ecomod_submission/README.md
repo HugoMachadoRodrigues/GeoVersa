@@ -62,8 +62,21 @@ table generator refuses any arm whose config lacks a commit.
    changes after acceptance, so confirm with the co-author before submitting.
 2. **The generative-AI declaration** is the one section whose wording is still
    open. It currently describes the tools actually used.
-3. **Sample-size sensitivity** covers n = 200 and n = 500 for the coverage
-   result; an n = 800 pair is running and slots into `tables/sizes.tex` on its
-   own when complete, since the generator includes a size only once its
-   campaign holds 30 repetitions and records a git commit. Everything other
-   than coverage still comes from n = 500, as Limitations says.
+3. **Sample-size sensitivity** is in progress and is not yet in the manuscript,
+   which still concedes in Limitations that almost every number comes from
+   n = 500.
+
+   The simple random design has been swept at n = 200, 500 and 800.
+   The clustered design has not, and a first attempt at it was wrong:
+   `DBT_SAMPLE_SIZE` sets the calibration draw under the random and systematic
+   designs but the clustered draw takes its size from `DBT_N_PSU` times
+   `DBT_M_PER_PSU`, so asking for n = 200 clustered shrank only the validation
+   sample and trained on 500 regardless. Varying the clustered size means
+   varying `DBT_M_PER_PSU` — holding the twenty primary units fixed and changing
+   how many points fall inside each, so the spatial footprint stays put and only
+   the density within it moves, which is the comparison the argument needs.
+
+   `tables_manuscript.R` now reads `n_train` back from each campaign's
+   diagnostics and drops any row whose calibration sample is not the size the
+   row claims, and deletes a previously written `tables/sizes.tex` rather than
+   leaving a disqualified table on disk for the manuscript to include.

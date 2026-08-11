@@ -287,15 +287,41 @@ message("[tables] coverage table written")
 size_dir <- function(sc, n) {
   if (identical(n, 500L)) dir_for(sc) else gv_results(sprintf("size_n%d_%s", n, sc))
 }
+
+# A campaign is admitted only if it has provenance, the full 30 repetitions, and
+# a calibration sample that is actually the size the row claims.
+#
+# That last check exists because it caught a real error. DBT_SAMPLE_SIZE governs
+# the calibration draw under the random and systematic designs, but the
+# clustered design ignores it and takes its size from DBT_N_PSU times
+# DBT_M_PER_PSU. Requesting n = 200 clustered therefore shrank only the
+# validation sample and left calibration at 500, and the resulting row was not a
+# sample-size comparison at all: it was the same experiment measured twice. The
+# mean interval width gave it away, 98.9 against 97.7 where the random design
+# moved 114.7 against 103.3, but nothing in the pipeline objected. Now n_train
+# is read back from the diagnostics and has to agree.
 size_ready <- function(sc, n, want = 30L) {
   d <- size_dir(sc, n)
   cfg <- file.path(d, "dbtarf_config.csv")
   unc <- file.path(d, "dbtarf_uncertainty.csv")
-  if (!file.exists(cfg) || !file.exists(unc)) return(FALSE)
+  dia <- file.path(d, "dbtarf_diagnostics.csv")
+  if (!file.exists(cfg) || !file.exists(unc) || !file.exists(dia)) return(FALSE)
   k <- read.csv(cfg)
   if (!"git_commit" %in% names(k) || !nzchar(as.character(k$git_commit[1]))) return(FALSE)
   x <- read.csv(unc)
-  sum(x$model == "DBTARF") >= want
+  if (sum(x$model == "DBTARF") < want) return(FALSE)
+  g <- read.csv(dia)
+  nt <- unique(g$n_train)
+  # spsample("regular") returns approximately n points, so the systematic design
+  # is allowed a small tolerance; the other designs must hit the size exactly
+  tol <- if (identical(sc, "regular_grid")) 0.05 else 0
+  if (length(nt) != 1L || abs(nt - n) > tol * n) {
+    warning(sprintf(
+      "sample-size row dropped: %s asked for n = %d but trained on %s",
+      basename(d), n, paste(nt, collapse = "/")), call. = FALSE)
+    return(FALSE)
+  }
+  TRUE
 }
 
 SIZES <- c(200L, 500L, 800L)
@@ -344,7 +370,16 @@ if (length(sens) >= 4L) {
                   paste(sort(unique(vapply(sens, function(r) r$n, integer(1)))),
                         collapse = ", ")))
 } else {
-  message("[tables] sample-size table skipped: fewer than two complete sizes per design")
+  # Deleting rather than merely skipping. A previous version of this table was
+  # written from campaigns that a later check disqualified, and skipping left
+  # the disqualified file on disk where the manuscript went on including it.
+  # A table that cannot be regenerated must not survive the attempt.
+  stale <- file.path(out, "sizes.tex")
+  if (file.exists(stale)) {
+    file.remove(stale)
+    message("[tables] stale sizes.tex removed; the manuscript must not \\input it")
+  }
+  message("[tables] sample-size table skipped: fewer than two admissible sizes per design")
 }
 
 # ---- Table: comparison across estimands -------------------------------------
