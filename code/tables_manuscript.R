@@ -271,6 +271,82 @@ lines <- c(lines, "\\bottomrule", "\\end{tabular}")
 writeLines(lines, file.path(out, "coverage.tex"))
 message("[tables] coverage table written")
 
+# ---- Table: sample-size sensitivity -----------------------------------------
+# The manuscript previously conceded in Limitations that almost every number
+# came from n = 500 and that the clustered shortfall might move with sample
+# size. It does not: accuracy responds to n and coverage does not, which is what
+# separates a small-sample artefact from a design bias.
+#
+# Sizes are included only when a campaign directory holds the full 30
+# repetitions and records a git commit, so an unfinished or un-provenanced run
+# is dropped rather than silently averaged over fewer iterations. The n = 500
+# campaigns predate the others by a few commits; those commits touched the
+# manuscript and the table generators and left R/dbtarf.R and the runner
+# byte-identical, so the three sizes are the same estimator.
+
+size_dir <- function(sc, n) {
+  if (identical(n, 500L)) dir_for(sc) else gv_results(sprintf("size_n%d_%s", n, sc))
+}
+size_ready <- function(sc, n, want = 30L) {
+  d <- size_dir(sc, n)
+  cfg <- file.path(d, "dbtarf_config.csv")
+  unc <- file.path(d, "dbtarf_uncertainty.csv")
+  if (!file.exists(cfg) || !file.exists(unc)) return(FALSE)
+  k <- read.csv(cfg)
+  if (!"git_commit" %in% names(k) || !nzchar(as.character(k$git_commit[1]))) return(FALSE)
+  x <- read.csv(unc)
+  sum(x$model == "DBTARF") >= want
+}
+
+SIZES <- c(200L, 500L, 800L)
+sens <- list()
+for (sc in c("random", "clustered_random")) {
+  for (n in SIZES) {
+    if (!size_ready(sc, n)) next
+    d <- size_dir(sc, n)
+    x <- read.csv(file.path(d, "dbtarf_uncertainty.csv"))
+    a <- read.csv(file.path(d, "dbtarf_all_results.csv"))
+    v <- x$PICP90[x$model == "DBTARF"]
+    se <- stats::sd(v) / sqrt(length(v))
+    blk <- x$PICP90[x$model == "DBTARF_spcal"]
+    sens[[length(sens) + 1L]] <- list(
+      design = DESIGNS[[sc]], n = n,
+      rmse = mean(a$RMSE[a$model == "DBTARF"]),
+      mec  = mean(a$MEC[a$model == "DBTARF"]),
+      mu = mean(v), sd = stats::sd(v),
+      lo = mean(v) - 1.96 * se, hi = mean(v) + 1.96 * se,
+      below = sum(v < 0.90), reps = length(v),
+      mpiw = mean(x$MPIW90[x$model == "DBTARF"]),
+      blk = if (length(blk)) mean(blk) else NA_real_)
+  }
+}
+
+if (length(sens) >= 4L) {
+  z <- function(x, d = 3) sub("^0", "", sprintf(paste0("%.", d, "f"), x))
+  lines <- c("\\begin{tabular}{lrrrrrrrr}", "\\toprule",
+             paste("Design & $n$ & RMSE & MEC & PICP & SD & 95\\% CI &",
+                   "Below 0.90 & Block \\\\"), "\\midrule")
+  prev <- NULL
+  for (r in sens) {
+    if (!is.null(prev) && !identical(prev, r$design)) lines <- c(lines, "\\midrule")
+    prev <- r$design
+    # the design label is repeated rather than left blank on continuation rows:
+    # a blank leading cell survives LaTeX but reads as missing data once a
+    # typesetter rebuilds the table from the Word file
+    lines <- c(lines, sprintf("%s & %d & %.2f & %s & %s & %s & [%s,%s] & %d/%d & %s \\\\",
+      r$design, r$n, r$rmse, z(r$mec), z(r$mu), z(r$sd), z(r$lo), z(r$hi),
+      r$below, r$reps, if (is.na(r$blk)) "--" else z(r$blk)))
+  }
+  lines <- c(lines, "\\bottomrule", "\\end{tabular}")
+  writeLines(lines, file.path(out, "sizes.tex"))
+  message(sprintf("[tables] sample-size table written, %d rows (sizes: %s)",
+                  length(sens),
+                  paste(sort(unique(vapply(sens, function(r) r$n, integer(1)))),
+                        collapse = ", ")))
+} else {
+  message("[tables] sample-size table skipped: fewer than two complete sizes per design")
+}
+
 # ---- Table: comparison across estimands -------------------------------------
 # The design-based row must agree with the accuracy and ablation tables, so it
 # is read from the same rev1 campaign rather than from the protocols run.

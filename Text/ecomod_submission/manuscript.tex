@@ -68,7 +68,9 @@ benchmark of Wadoux et al. (2021), CV+ intervals built from cross-fitted
 residuals are mildly conservative at 0.907 under representative sampling and
 about 16 per cent narrower than quantile regression forests, which sit at 0.937,
 so the widths are not compared at matched coverage. Under clustered calibration
-they cover only 0.861 against a nominal 0.90. That failure is invisible to any check
+they cover only 0.861 against a nominal 0.90, and the shortfall does not shrink
+at a smaller sample size: it is a design bias, not a data shortage.
+That failure is invisible to any check
 assuming exchangeability, the property clustering destroys; a spatial-block
 calibration restores it. The point predictor is a random forest with a cross-fitted residual correction
 whose geostatistical settings are selected out of fold rather than fixed. It
@@ -574,7 +576,9 @@ extrapolation. Each map is evaluated on an independent simple random validation
 sample of 500 cells, drawn independently of the calibration sample, with 30
 repetitions
 per design and a fixed seed. Calibration and validation sizes are therefore both
-$n = 500$. Comparators are the untuned default
+$n = 500$, and the sensitivity run of Section~\ref{sec:sizes} moves both to
+$n = 200$ for the simple random and clustered designs, again 30 repetitions
+each. Comparators are the untuned default
 forest exactly as in the reference study, a default Cubist, and a transparency
 model we label RF-tuned, the selected base forest with no correction applied,
 which separates the effect of tuning the forest from the effect of the
@@ -851,7 +855,61 @@ cost of width.}
 \label{fig:uncertainty}
 \end{figure}
 
+\subsection{The shortfall does not shrink with sample size}
+\label{sec:sizes}
 
+An undercoverage of 0.861 measured at a single sample size invites an obvious
+objection: perhaps it is a small-sample artefact, and a larger calibration
+sample would supply the residuals the conformity scores are missing. Table
+\ref{tab:sizes} repeats the whole experiment at $n = 200$ and compares it with
+the $n = 500$ campaign reported above, 30 repetitions each, under both a
+representative and a clustered design.
+
+Both sizes move together, so the validation sample is 200 in that run as well.
+That affects precision and not location: coverage estimated on an independent
+probability sample is design-unbiased at any validation size, so the smaller
+sample widens the confidence intervals without displacing the means. It does
+inflate the between-repetition standard deviation through estimation noise
+alone, by about 0.020 at $n = 200$ against 0.013 at $n = 500$ on a binomial
+calculation, and we subtract that below rather than read the raw spreads as if
+they were comparable.
+
+Accuracy behaves as expected. Going from 200 to 500 calibration points lowers
+RMSE and raises the modelling efficiency under both designs, so the extra data
+is doing what extra data does. Coverage does not follow it. Under clustered
+calibration the estimate moves from 0.864 to 0.861, a difference far inside the
+Monte Carlo error, with the same 25 of 30 repetitions falling below nominal at
+both sizes and confidence intervals that overlap almost completely. Removing the
+validation noise from the observed spreads of 0.043 and 0.040 leaves 0.036 and
+0.037, so the instability that clustering introduces is as large at one size as
+at the other. Under representative sampling the same subtraction leaves 0.022
+against 0.013, which is the ordinary result that a smaller calibration sample
+produces a more variable map. Clustering overwhelms that effect.
+
+That separation is the point. A quantity that improves with $n$ is a variance
+problem, and more data solves it. A quantity that does not is a bias, and the
+bias here is a property of where the calibration sample sits rather than of how
+many points it holds. Conformity scores collected inside clusters do not
+describe the errors the model makes far from them, and collecting more scores
+in the same places does not make them describe those errors any better. The
+repair carries across as cleanly as the failure does: spatial-block calibration
+reaches 0.947 and 0.946 at the two sizes, so neither the problem nor its
+correction is specific to the sample size we happened to run first.
+
+\begin{table}[!ht]
+\centering
+\caption{Sample-size sensitivity, 30 repetitions per cell, nominal 0.90.
+RMSE is in \Mgha{} and MEC is the modelling efficiency; both refer to the
+deployed map. PICP, SD and the confidence interval describe the CV+ interval,
+with leading zeros dropped on the bounded columns, and the last column gives
+the spatial-block calibration for comparison. All cells run the same estimator
+code. Accuracy improves with sample size under both designs; coverage under
+clustered calibration does not.}
+\label{tab:sizes}
+\footnotesize
+\setlength{\tabcolsep}{3pt}
+\input{tables/sizes}
+\end{table}
 
 \subsection{Where the improvement actually comes from}
 \label{sec:ablation}
@@ -1083,10 +1141,14 @@ because \citet{wadoux2021} treated it that way and comparability matters more
 than realism for this purpose. Nothing in the experiment speaks to how the
 undercoverage would scale on a different variable, region or resolution.
 
-Almost every number comes from $n = 500$. The magnitude of the clustered
-shortfall, the width of the spatial-block repair and the frequency with which
-the search declines an anisotropic geometry could all move with sample size, and
-we did not vary it.
+Sample size was varied for the coverage result and not for the rest.
+Section~\ref{sec:sizes} repeats the interval experiment at $n = 200$ and finds
+the clustered shortfall and its spatial-block repair essentially unchanged,
+which rules out a small-sample explanation over that range but says nothing
+about the very small samples, of a few dozen points, that some campaigns are
+forced to work with. Everything else, the ablation of the four components, the
+tabulation of which variogram geometry the search selects and the comparison
+across estimands, comes from $n = 500$ alone and could move with sample size.
 
 The two repairs are compared empirically, not like for like. The CV+ row is a
 different construction from the covariate-shift and spatial-block rows, which

@@ -62,5 +62,8 @@ table generator refuses any arm whose config lacks a commit.
    changes after acceptance, so confirm with the co-author before submitting.
 2. **The generative-AI declaration** is the one section whose wording is still
    open. It currently describes the tools actually used.
-3. **Sample-size sensitivity** was authorised and not run. The manuscript
-   declares in Limitations that almost every number comes from n = 500.
+3. **Sample-size sensitivity** covers n = 200 and n = 500 for the coverage
+   result; an n = 800 pair is running and slots into `tables/sizes.tex` on its
+   own when complete, since the generator includes a size only once its
+   campaign holds 30 repetitions and records a git commit. Everything other
+   than coverage still comes from n = 500, as Limitations says.
