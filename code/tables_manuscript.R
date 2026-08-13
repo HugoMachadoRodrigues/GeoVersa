@@ -295,9 +295,9 @@ message("[tables] coverage table written")
 ARMS <- list(
   list(key = "random", label = "Simple random", sc = "random",
        dirs = c(`200` = "rand_n200", `500` = NA, `800` = "rand_n800")),
-  list(key = "dens", label = "Clustered, denser", sc = "clustered_random",
+  list(key = "dens", label = "Clustered, dense", sc = "clustered_random",
        dirs = c(`200` = "clus_dens_n200", `500` = "clus_mid_n500", `800` = "clus_dens_n800")),
-  list(key = "spread", label = "Clustered, wider", sc = "clustered_random",
+  list(key = "spread", label = "Clustered, wide", sc = "clustered_random",
        dirs = c(`200` = "clus_spread_n200", `500` = "clus_mid_n500", `800` = "clus_spread_n800"))
 )
 
@@ -371,6 +371,7 @@ size_ready <- function(arm, n, want = 30L) {
 }
 
 SIZES <- c(200L, 500L, 800L)
+kmc <- 100L   # kmeans clusters the primary units are drawn from, DBT_KMEANS_CENTERS
 sens <- list()
 for (arm in ARMS) {
   for (n in SIZES) {
@@ -381,10 +382,27 @@ for (arm in ARMS) {
     v <- x$PICP90[x$model == "DBTARF"]
     se <- stats::sd(v) / sqrt(length(v))
     blk <- x$PICP90[x$model == "DBTARF_spcal"]
+    g <- read.csv(file.path(d, "dbtarf_diagnostics.csv"))
+    k <- read.csv(file.path(d, "dbtarf_config.csv"))
+    # Geometry, read from the provenance rather than from the directory name.
+    # Primary units are drawn with replacement, so the nominal count overstates
+    # the number of distinct clusters; the realised expectation is reported
+    # alongside it because the argument is about spatial spread and the nominal
+    # figure is not the spread the sample actually has.
+    geom <- if (identical(arm$sc, "clustered_random") && "n_psu" %in% names(k)) {
+      npsu <- k$n_psu[1]; mper <- k$m_per_psu[1]
+      distinct <- kmc * (1 - (1 - 1 / kmc)^npsu)
+      sprintf("%d/%d (%.1f)", npsu, mper, distinct)
+    } else "SRS"
+    # What the interval was calibrated on versus what it is applied to. The
+    # conformal quantile summarises the out-of-fold error of the calibration
+    # sample faithfully in every cell; the design changes the error over the
+    # domain, and their ratio is what coverage tracks.
     sens[[length(sens) + 1L]] <- list(
-      design = arm$label, arm = arm$key, n = n,
+      design = arm$label, arm = arm$key, n = n, geom = geom,
       rmse = mean(a$RMSE[a$model == "DBTARF"]),
       mec  = mean(a$MEC[a$model == "DBTARF"]),
+      gap = mean(a$RMSE[a$model == "DBTARF"]) / mean(g$selected_oof_rmse),
       mu = mean(v), sd = stats::sd(v),
       lo = mean(v) - 1.96 * se, hi = mean(v) + 1.96 * se,
       below = sum(v < 0.90), reps = length(v),
@@ -401,18 +419,21 @@ clustered_ok <- any(per_arm[intersect(names(per_arm), c("dens", "spread"))] >= 2
 
 if (clustered_ok) {
   z <- function(x, d = 3) sub("^0", "", sprintf(paste0("%.", d, "f"), x))
-  lines <- c("\\begin{tabular}{lrrrrrrrr}", "\\toprule",
-             paste("Design & $n$ & RMSE & MEC & PICP & SD & 95\\% CI &",
-                   "Below 0.90 & Block \\\\"), "\\midrule")
+  lines <- c("\\begin{tabular}{llrrrrrrrr}", "\\toprule",
+             paste("Design & Units/pts & $n$ & RMSE & Gap & PICP & SD &",
+                   "95\\% CI & Below & Block \\\\"), "\\midrule")
   prev <- NULL
   for (r in sens) {
     if (!is.null(prev) && !identical(prev, r$design)) lines <- c(lines, "\\midrule")
     prev <- r$design
-    # the design label is repeated rather than left blank on continuation rows:
+    # The design label is repeated rather than left blank on continuation rows:
     # a blank leading cell survives LaTeX but reads as missing data once a
-    # typesetter rebuilds the table from the Word file
-    lines <- c(lines, sprintf("%s & %d & %.2f & %s & %s & %s & [%s,%s] & %d/%d & %s \\\\",
-      r$design, r$n, r$rmse, z(r$mec), z(r$mu), z(r$sd), z(r$lo), z(r$hi),
+    # typesetter rebuilds the table from the Word file. The midpoint row is
+    # marked, since it is one campaign shown in two arms rather than two runs.
+    mark <- if (identical(r$n, 500L) && r$arm %in% c("dens", "spread")) "\\rlap{$^{a}$}" else ""
+    lines <- c(lines, sprintf("%s & %s%s & %d & %.2f & %s & %s & %s & [%s,%s] & %d/%d & %s \\\\",
+      r$design, r$geom, mark, r$n, r$rmse, sprintf("%.2f", r$gap),
+      z(r$mu), z(r$sd), z(r$lo), z(r$hi),
       r$below, r$reps, if (is.na(r$blk)) "--" else z(r$blk)))
   }
   lines <- c(lines, "\\bottomrule", "\\end{tabular}")

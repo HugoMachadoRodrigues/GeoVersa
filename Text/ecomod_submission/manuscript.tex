@@ -789,10 +789,14 @@ baseline \citep{meinshausen2006}. That baseline over-covers at 0.937, so the two
 are not compared at the same empirical coverage and the width difference is
 descriptive: a method that covers less will generally be narrower. A comparison
 at matched coverage would need both recalibrated to a common level, which we did
-not do. Under clustered
-calibration they under-cover at 0.861, with a 95 per cent confidence interval
-for the mean of $[0.846, 0.875]$ that excludes the nominal level, and 25 of the
-30 repetitions falling below it individually.
+not do. Under the clustered design of \citet{wadoux2021}, twenty primary units
+of twenty-five points each, they under-cover at 0.861, with a 95 per cent
+confidence interval for the mean of $[0.846, 0.875]$ that excludes the nominal
+level, and 25 of the 30 repetitions falling below it individually. That figure
+belongs to that geometry and not to clustered sampling in general:
+Section~\ref{sec:sizes} varies the number of primary units and the points within
+them and finds coverage ranging from 0.813 to 0.883 across the geometries
+tested, all of them short of nominal.
 
 Two features of that failure are worth separating, and they are visible in
 Fig.~\ref{fig:uncertainty} rather than in any mean. The first is the shift: the
@@ -851,7 +855,84 @@ cost of width.}
 \label{fig:uncertainty}
 \end{figure}
 
+\subsection{More data does not repair the coverage, and can worsen it}
+\label{sec:sizes}
 
+The obvious reading of Section~\ref{sec:intervals-results} is that a clustered
+sample of 500 points is too small, and that a larger one would supply the
+residuals the conformity scores are missing. Table~\ref{tab:sizes} tests it by
+varying the calibration size from 200 to 800 along two axes, 30 repetitions per
+cell, with the validation draw held at 500 throughout so that every coverage
+estimate is measured at the same precision.
+
+Hold the geometry fixed at twenty primary units and add points inside them, and
+coverage falls. It is 0.883 at $n=200$ and 0.856 at $n=800$, a change of
+$-0.027$ with a 95 per cent confidence interval of $[-0.044, -0.010]$, while
+RMSE improves from 36.85 to 34.22 \Mgha{}. Quadrupling the calibration sample
+therefore bought a better map and a worse interval. We do not read the three
+means as a monotone sequence: the step from 500 to 800 is $-0.005$ and is not
+resolved by 30 repetitions. The end-to-end contrast is what the data support.
+
+Hold the points per unit fixed and add units instead, and coverage rises, from
+0.813 to 0.880, a change of $+0.067$ with interval $[+0.044, +0.089]$. The two
+axes can be compared at equal cost. At $n=200$, spending the budget on twenty
+units rather than eight is worth $+0.069$ with interval $[+0.046, +0.093]$; at
+$n=800$, thirty-two units rather than twenty is worth $+0.024$ with interval
+$[+0.009, +0.039]$. Both survive a Holm correction over the eight contrasts
+these campaigns admit, adjusted $p<10^{-4}$ and $p=0.007$, as does the
+end-to-end contrast within the fixed geometry at $p=0.007$; the three
+intermediate single steps do not, which is why the argument rests on the
+endpoints. Sample size is thus the wrong variable. What governs
+coverage is the number of independent primary units, and adding observations
+without adding units moves it the wrong way.
+
+The reason is visible in the Gap column, which divides the error over the
+domain by the out-of-fold error of the calibration sample itself. The
+out-of-fold error barely moves across the whole table, from 29.0 to 32.2
+\Mgha{}, so the conformal quantile is an honest summary of the sample it was
+built from in every cell. What the design changes is the error everywhere else.
+The gap is 1.01 under simple random sampling, 1.15 to 1.18 across the fixed
+geometry, and falls from 1.40 to 1.10 as units are added. Coverage falls as the
+gap widens, with a correlation of $-0.98$ over the campaigns. The relation is
+not an exact ordering: two pairs whose gaps differ by less than 0.05 sit the
+other way round, so the gap explains the large differences and not the small
+ones. The interval is not miscalibrated for its own calibration sample. It is
+miscalibrated for the domain, and only a design that samples the domain can
+reveal the difference.
+
+Two qualifications. Primary units are drawn with replacement from one hundred
+candidate clusters, so the realised number of distinct clusters is 7.7, 18.2 and
+27.5 rather than 8, 20 and 32; the parenthesised figures in
+Table~\ref{tab:sizes} are the realised expectations. The same mechanism means
+the wider arm also densifies slightly as it widens, by about 12 per cent in
+points per distinct cluster, which acts against the effect reported and makes
+$+0.067$ a conservative bound rather than an inflated one.
+
+No geometry reaches the nominal level. Widening the footprint improves coverage
+without restoring it, which is the same conclusion Section~\ref{sec:intervals}
+reaches from the theory. The spatial-block calibration, by contrast, returns
+between 0.930 and 0.946 in every cell of the table, so the repair is insensitive
+to both the size and the geometry that break the plain interval.
+
+\begin{table}[!ht]
+\centering
+\caption{Sample-size and geometry sensitivity, 30 repetitions per cell, nominal
+0.90, validation draw of 500 throughout. Units $\times$ pts gives the primary
+units and the points drawn within each, with the realised expected number of
+distinct units in parentheses, primary units being drawn with replacement. Gap
+is the design-based RMSE divided by the out-of-fold RMSE of the calibration
+sample, so it measures how much larger the error over the domain is than the
+error the conformal quantile was built from. RMSE is in \Mgha{}; PICP, SD and
+the confidence interval describe the CV+ interval, with leading zeros dropped on
+the bounded columns; Block is the spatial-block calibration.
+$^{a}$The 20 $\times$ 25 campaign is the design shared by both clustered arms
+and is one set of 30 repetitions reported twice, so the arms meet at it rather
+than crossing.}
+\label{tab:sizes}
+\footnotesize
+\setlength{\tabcolsep}{2pt}
+\input{tables/sizes}
+\end{table}
 
 \subsection{Where the improvement actually comes from}
 \label{sec:ablation}
