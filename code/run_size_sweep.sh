@@ -110,6 +110,16 @@ run clus_spread_n200 clustered_random 200 DBT_SAMPLE_SIZE=200 DBT_N_PSU=8  DBT_M
 run clus_dens_n800   clustered_random 800 DBT_SAMPLE_SIZE=800 DBT_N_PSU=20 DBT_M_PER_PSU=40
 run clus_spread_n800 clustered_random 800 DBT_SAMPLE_SIZE=800 DBT_N_PSU=32 DBT_M_PER_PSU=25
 
+# --- the shared midpoint, re-run for provenance ------------------------------
+# 20 x 25 = 500 already exists as final_clustered_random_confirm30 and is the
+# hinge of both arms. That campaign predates the commit that started recording
+# n_psu and m_per_psu, so its geometry is inferred from the sampler defaults
+# rather than written down. Every other cell in the table states its geometry;
+# the one both arms pivot on should not be the exception, and inferring a
+# parameter from a default is exactly what produced the retraction this sweep
+# exists to repair.
+run clus_mid_n500 clustered_random 500 DBT_SAMPLE_SIZE=500 DBT_N_PSU=20 DBT_M_PER_PSU=25
+
 # --- the representative control, last: it was never the design in question ---
 # Re-run at n = 200 rather than reusing size_n200_random, whose validation draw
 # was 200 and so is not measured at the same precision as everything else here.
