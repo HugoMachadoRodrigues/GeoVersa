@@ -296,12 +296,21 @@ ARMS <- list(
   list(key = "random", label = "Simple random", sc = "random",
        dirs = c(`200` = "rand_n200", `500` = NA, `800` = "rand_n800")),
   list(key = "dens", label = "Clustered, denser", sc = "clustered_random",
-       dirs = c(`200` = "clus_dens_n200", `500` = NA, `800` = "clus_dens_n800")),
+       dirs = c(`200` = "clus_dens_n200", `500` = "clus_mid_n500", `800` = "clus_dens_n800")),
   list(key = "spread", label = "Clustered, wider", sc = "clustered_random",
-       dirs = c(`200` = "clus_spread_n200", `500` = NA, `800` = "clus_spread_n800"))
+       dirs = c(`200` = "clus_spread_n200", `500` = "clus_mid_n500", `800` = "clus_spread_n800"))
 )
 
-# NA means the shared midpoint campaign, which lives under the final_* names
+# The clustered midpoint is clus_mid_n500 rather than the older campaign it
+# reproduces. Both are 20 x 25, but only the newer one says so: the older
+# predates the commit that began recording n_psu and m_per_psu, so its geometry
+# was an inference from the sampler defaults. The re-run settles it, and settles
+# it strongly, reproducing all 30 repetitions bit for bit on PICP, MPIW and
+# RMSE. A different geometry could not have done that.
+#
+# It is one campaign appearing in two arms, which is what a shared midpoint
+# means. The arms do not cross there; they meet at a node they have in common,
+# and the table marks it.
 size_dir <- function(arm, n) {
   d <- arm$dirs[[as.character(n)]]
   if (is.na(d)) dir_for(arm$sc) else gv_results(d)
