@@ -114,6 +114,7 @@ val_size <- as.integer(parse_num_dbt("DBT_VAL_SIZE", sample_size))
 # over sample_size silently left the clustered calibration at 20 x 25 = 500 and
 # nothing in the recorded configuration showed it. They are hoisted here so the
 # provenance CSV carries them.
+clustered <- identical(scenario, "clustered_random")
 kmeans_centers <- as.integer(parse_num_dbt("DBT_KMEANS_CENTERS", 100L))
 n_psu <- as.integer(parse_num_dbt("DBT_N_PSU", 20L))
 m_per_psu <- as.integer(parse_num_dbt("DBT_M_PER_PSU", 25L))
@@ -552,12 +553,16 @@ write.csv(
   data.frame(scenario = scenario, protocols = paste(protocols, collapse = ","),
              models = paste(models, collapse = ","),
              sample_size = sample_size, val_size = val_size,
-             kmeans_centers = kmeans_centers,
-             n_psu = n_psu, m_per_psu = m_per_psu,
+             # Written only for the design that uses them. Recorded
+             # unconditionally they read as though a simple random campaign had
+             # a primary-unit structure, which is how a parameter that governs
+             # nothing comes to look like one that governs something.
+             kmeans_centers = if (clustered) kmeans_centers else NA_integer_,
+             n_psu = if (clustered) n_psu else NA_integer_,
+             m_per_psu = if (clustered) m_per_psu else NA_integer_,
              # what the calibration draw will actually be, per design, so a
              # reader never has to know which knob governs which scenario
-             calib_size = if (identical(scenario, "clustered_random"))
-                            n_psu * m_per_psu else sample_size,
+             calib_size = if (clustered) n_psu * m_per_psu else sample_size,
              n_iter = n_iter,
              n_folds = n_folds_report,
              min_oof_improvement = dbtarf_params$min_oof_improvement,
