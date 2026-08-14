@@ -855,6 +855,78 @@ cost of width.}
 \label{fig:uncertainty}
 \end{figure}
 
+\subsection{The failure is indexed by distance from the calibration sample}
+\label{sec:distance}
+
+Sections~\ref{sec:intervals} and \ref{sec:intervals-results} assert that the
+mechanism is spatial extrapolation but measure coverage only over the whole map.
+Fig.~\ref{fig:distance} measures it against the variable the mechanism names. We
+re-ran three designs recording, for every validation point, its distance to the
+nearest calibration point together with the interval it received: 10 repetitions
+each of simple random calibration, the clustered design of \citet{wadoux2021}
+and the eight-unit geometry, 5000 points per design.
+
+Coverage declines with that distance under all three. Fitting one logistic slope
+per repetition and testing the ten slopes, a miss becomes more likely by
+$+0.189$ log-odds per doubling of distance under simple random calibration
+($[+0.139, +0.240]$), $+0.198$ under twenty units ($[+0.104, +0.292]$) and
+$+0.363$ under eight ($[+0.244, +0.483]$). The within-repetition standard errors
+play no part in those intervals; only the spread between repetitions does, so
+nothing here treats points that share a fitted model as independent.
+
+Two things are worth separating. The first is that the three designs behave
+almost identically at matched distance, which Fig.~\ref{fig:distance}c shows and
+which the marginal coverages conceal. Comparing each clustered design with
+simple random inside the four distance bands they share, seven of the eight
+contrasts contain zero, and the one that does not is a shortfall of $0.035$
+between 25 and 50 km for the twenty-unit design, Holm-adjusted
+$p = 0.028$. What differs between designs is not how they behave at a given
+distance but how much of the map sits at each distance. The median distance from
+a validation point to the nearest calibration point is 25 km under
+simple random sampling, 75 under twenty units and 164 under eight, and the
+fraction of the domain lying more than 100 km from any calibration
+point is 0.001, 0.387 and 0.687. Clustering does not corrupt the interval so
+much as move the population away from the sample that built it.
+
+The second is what the interval does about that, which is nothing.
+Fig.~\ref{fig:distance}b puts the realised error and the issued half-width on
+one axis. Under the eight-unit geometry the conditional RMSE rises from 27.9 to
+48.4 \Mgha{} between the nearest and farthest bands while the half-width moves
+from 51.5 to 53.8, a 73 per cent rise against 4 per cent. The CV+ construction
+emits a separate bound for every point and those bounds do vary, with a standard
+deviation of 1.4 \Mgha{} within a repetition, so the width is free to respond to
+location. It does not respond to distance, because the conformity scores that
+set it were collected where the calibration sample is.
+
+The residual band contrast has the same origin. At matched distance the
+twenty-unit design issues a narrower interval than simple random, 48.6 against
+51.2 \Mgha{}, and its out-of-fold error is correspondingly smaller, 29.8 against
+31.4. A sample whose points sit near one another is easy to interpolate between,
+so it looks more predictable than the domain is, and the conformal quantile
+inherits the optimism. Clustering therefore acts twice and in the same
+direction: it moves the target population away from the calibration sample, and
+it makes that sample understate the error.
+
+\begin{figure}[!ht]
+\centering
+\includegraphics[width=\textwidth]{figures/fig8_distance.png}
+\caption{Where the interval fails. (a) The fraction of the mapped domain lying
+farther than $\delta$ from any calibration point, estimated design-unbiasedly
+because validation is a simple random sample of the same frame in every
+repetition. (b) Conditional RMSE (solid) and the mean half-width the interval
+issued (dashed), in distance bands. (c) Coverage within each band, with 95 per
+cent intervals from a bootstrap that resamples whole repetitions, since the 500
+points of a repetition share one fitted model and one conformal calibration; the
+faint lines are the coverage of all points beyond $\delta$, which cannot
+coincide across designs because each averages over its own distance
+distribution. Distance indexes the failure and is not shown to cause it: within
+one design, distance from the calibration sample and geographic position are the
+same variable, and the causal argument is the stationary-field simulation of
+Section~\ref{sec:sims}. Distances are geometric and say nothing directly about
+support in covariate space.}
+\label{fig:distance}
+\end{figure}
+
 \subsection{More data does not repair the coverage, and can worsen it}
 \label{sec:sizes}
 

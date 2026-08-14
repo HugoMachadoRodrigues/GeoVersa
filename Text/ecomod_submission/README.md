@@ -12,9 +12,9 @@ Build:
 
 | File | Role |
 |---|---|
-| `manuscript.tex` / `manuscript.docx` | the manuscript, 33 pages |
+| `manuscript.tex` / `manuscript.docx` | the manuscript, 37 pages |
 | `references.bib` | 30 references |
-| `figures/` | the four manuscript figures, all script-generated |
+| `figures/` | the five manuscript figures, all script-generated |
 | `tables/` | nine generated tables the manuscript `\input`s |
 | `highlights.md` | required; 5 bullets, each within 85 characters |
 | `figures/graphical_abstract.png` | encouraged; 3984 x 1592 px |
@@ -45,6 +45,8 @@ inline.
 * `figures_protocols.R` the estimand comparison
 * `figures_uncertainty.R` the interval-assessment figure, reading the same
   campaign CSVs as the coverage table so the two cannot disagree
+* `figures_distance.R` the error-against-distance figure, from the per-point
+  dumps written by `run_point_dump.sh` with `DBT_DUMP_POINTS=1`
 * `figures_graphical_abstract.R` the graphical abstract, also from those CSVs
 * `maps_compute.R` and `maps_plot.R` whole-grid prediction and the map panel
 * `run_all_campaigns.sh` the campaign set; `freeze_check.sh` the pre-flight that
