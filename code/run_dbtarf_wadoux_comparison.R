@@ -115,6 +115,12 @@ val_size <- as.integer(parse_num_dbt("DBT_VAL_SIZE", sample_size))
 # nothing in the recorded configuration showed it. They are hoisted here so the
 # provenance CSV carries them.
 clustered <- identical(scenario, "clustered_random")
+# Per-point dump for the error-against-distance figure. Off by default: it
+# writes one row per validation point per iteration, which is three orders of
+# magnitude more than the aggregated outputs.
+dump_points <- parse_bool_dbt("DBT_DUMP_POINTS", FALSE)
+# rowMins without taking a dependency on matrixStats for one call
+matrixStats_rowMins <- function(m) do.call(pmin, as.data.frame(m))
 kmeans_centers <- as.integer(parse_num_dbt("DBT_KMEANS_CENTERS", 100L))
 n_psu <- as.integer(parse_num_dbt("DBT_N_PSU", 20L))
 m_per_psu <- as.integer(parse_num_dbt("DBT_M_PER_PSU", 25L))
@@ -314,6 +320,50 @@ eval_uncertainty_dbt <- function(obs, dbt_out, pred_dbt, valuetable, test_df,
   }
   qi <- fit_rf_quantile_interval(valuetable, test_df, alpha = 0.10, seed = seed)
   if (!is.null(qi)) rows[[length(rows) + 1L]] <- wrow("RF_quantile", qi$lwr, qi$upr)
+
+  # Optional per-point dump, off unless DBT_DUMP_POINTS is set.
+  #
+  # Every campaign output is aggregated to one row per repetition, which is
+  # enough for coverage but says nothing about WHERE the interval fails. The
+  # paper argues the failure is spatial extrapolation, and that argument is
+  # only testable against each validation point's distance to the calibration
+  # sample. Those coordinates exist here and nowhere afterwards, so this is the
+  # one place the question can be answered.
+  #
+  # Written per iteration and appended, so an interrupted run keeps what it had.
+  if (dump_points && !is.null(dbt_out) && !is.null(pred_dbt) &&
+      !is.null(dbt_out$pi_lo90) && length(dbt_out$pi_lo90) == length(pred_dbt)) {
+    cn <- intersect(c("x", "y"), names(test_df))
+    if (length(cn) == 2L && all(cn %in% names(valuetable))) {
+      V <- as.matrix(valuetable[, cn, drop = FALSE])
+      T_ <- as.matrix(test_df[, cn, drop = FALSE])
+      # Distance from each validation point to the NEAREST calibration point.
+      # Chunked so a large validation draw cannot build an n x m matrix that
+      # does not fit; 2000 rows at a time is well inside memory at any size
+      # these campaigns use.
+      nn <- numeric(nrow(T_))
+      for (i0 in seq(1L, nrow(T_), by = 2000L)) {
+        idx <- i0:min(i0 + 1999L, nrow(T_))
+        d2 <- outer(T_[idx, 1], V[, 1], "-")^2 + outer(T_[idx, 2], V[, 2], "-")^2
+        nn[idx] <- sqrt(matrixStats_rowMins(d2))
+      }
+      dump <- data.frame(
+        iteration = iter, scenario = scenario,
+        x = T_[, 1], y = T_[, 2],
+        dist_nn = nn,
+        obs = obs, pred = pred_dbt,
+        lo = dbt_out$pi_lo90, hi = dbt_out$pi_hi90,
+        lo_sp = if (!is.null(dbt_out$pi_q90_sp) && is.finite(dbt_out$pi_q90_sp))
+                  pred_dbt - dbt_out$pi_q90_sp else NA_real_,
+        hi_sp = if (!is.null(dbt_out$pi_q90_sp) && is.finite(dbt_out$pi_q90_sp))
+                  pred_dbt + dbt_out$pi_q90_sp else NA_real_,
+        stringsAsFactors = FALSE)
+      f <- file.path(results_dir, "dbtarf_points.csv")
+      utils::write.table(dump, f, sep = ",", row.names = FALSE,
+                         col.names = !file.exists(f), append = file.exists(f))
+    }
+  }
+
   rows <- rows[!vapply(rows, is.null, logical(1))]
   if (length(rows)) do.call(rbind, rows) else data.frame()
 }
