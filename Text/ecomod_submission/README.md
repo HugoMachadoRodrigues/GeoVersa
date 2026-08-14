@@ -15,12 +15,12 @@ Build:
 | `manuscript.tex` / `manuscript.docx` | the manuscript, 37 pages |
 | `references.bib` | 30 references |
 | `figures/` | the five manuscript figures, all script-generated |
-| `tables/` | nine generated tables the manuscript `\input`s |
+| `tables/` | ten generated tables the manuscript `\input`s |
 | `highlights.md` | required; 5 bullets, each within 85 characters |
 | `figures/graphical_abstract.png` | encouraged; 3984 x 1592 px |
 | `elsevier-harv-expanded.csl` | needed by `make_docx.sh`, not uploaded |
 
-The manuscript carries ten tables: the nine generated ones plus a descriptive
+The manuscript carries eleven tables: the ten generated ones plus a descriptive
 table of the three sampling mechanisms, which contains no data and is written
 inline.
 
@@ -38,7 +38,7 @@ inline.
 
 * `project_paths.R` resolves the repository, the benchmark data and the campaign
   outputs without any absolute path. Every other script bootstraps it.
-* `tables_manuscript.R` all nine generated tables, built from the campaign CSVs
+* `tables_manuscript.R` all ten generated tables, built from the campaign CSVs
   so no number in the paper can drift from the run that produced it.
 * `figures_schematic.R` the pipeline diagram, drawn from the correction library
   actually implemented in `R/dbtarf.R`
@@ -64,21 +64,26 @@ table generator refuses any arm whose config lacks a commit.
    changes after acceptance, so confirm with the co-author before submitting.
 2. **The generative-AI declaration** is the one section whose wording is still
    open. It currently describes the tools actually used.
-3. **Sample-size sensitivity** is in progress and is not yet in the manuscript,
-   which still concedes in Limitations that almost every number comes from
-   n = 500.
+3. **Sample-size sensitivity** is reported in Section 6.5 and Table 5, from
+   seven campaigns of 30 repetitions: simple random at n = 200, 500 and 800, and
+   two clustered arms crossing at a shared 20 x 25 midpoint.
 
-   The simple random design has been swept at n = 200, 500 and 800.
-   The clustered design has not, and a first attempt at it was wrong:
-   `DBT_SAMPLE_SIZE` sets the calibration draw under the random and systematic
-   designs but the clustered draw takes its size from `DBT_N_PSU` times
-   `DBT_M_PER_PSU`, so asking for n = 200 clustered shrank only the validation
-   sample and trained on 500 regardless. Varying the clustered size means
-   varying `DBT_M_PER_PSU` — holding the twenty primary units fixed and changing
-   how many points fall inside each, so the spatial footprint stays put and only
-   the density within it moves, which is the comparison the argument needs.
+   Two traps are worth knowing about before extending it. `DBT_SAMPLE_SIZE` sets
+   the calibration draw under the random and systematic designs but *not* under
+   the clustered one, which takes its size from `DBT_N_PSU` times
+   `DBT_M_PER_PSU`; a first attempt at the sweep set only the former and so
+   shrank the validation sample while training on 500 regardless. And primary
+   units are drawn with replacement from one hundred candidates, so the nominal
+   unit count overstates the distinct one: 8, 20 and 32 realise 7.7, 18.2 and
+   27.5.
 
-   `tables_manuscript.R` now reads `n_train` back from each campaign's
-   diagnostics and drops any row whose calibration sample is not the size the
-   row claims, and deletes a previously written `tables/sizes.tex` rather than
-   leaving a disqualified table on disk for the manuscript to include.
+   `tables_manuscript.R` reads `n_train` back from each campaign's diagnostics
+   and drops any row whose calibration sample is not the size the row claims,
+   requires a validation draw of 500 so the standard deviations are comparable,
+   and deletes a previously written `tables/sizes.tex` rather than leaving a
+   disqualified table on disk for the manuscript to include.
+
+4. **The per-point dumps** behind Figure 5 are three campaigns of 10
+   repetitions, run by `run_point_dump.sh`. They are the only outputs holding
+   one row per validation point; every other campaign is aggregated per
+   repetition, which is why the mechanism could not be examined before.
