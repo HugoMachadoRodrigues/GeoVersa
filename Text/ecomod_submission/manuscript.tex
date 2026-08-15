@@ -1369,10 +1369,30 @@ with \texttt{quantreg = TRUE} and the same predictors.
 \paragraph{Sampling designs} Simple random sampling draws $n=500$ cells without
 replacement; the systematic design draws a regular grid; the clustered design is
 two-stage with 20 primary units chosen over 100 $k$-means centres and 25 points
-each. The validation sample is an independent simple random sample of $n=500$;
-the Population estimand uses 20{,}000 cells drawn after excluding the
-calibration cells. Spatial block cross-validation uses complete-linkage
-clustering of coordinates cut at 350 km.
+each. Primary units are drawn with replacement, so the realised number of
+distinct units is smaller than the nominal one, 18.2 in expectation for 20 and
+7.7 and 27.5 for the 8 and 32 used in Section~\ref{sec:sizes}. The validation
+sample is an independent simple random sample of $n=500$ drawn from the same
+frame without excluding calibration cells, an overlap of about one cell in
+2600 at that size. The Population estimand scores a fixed 20{,}000-cell
+reference subset drawn once with its own seed, also without exclusion. Spatial
+block cross-validation uses complete-linkage clustering of coordinates cut at
+350 km.
+
+\paragraph{The sensitivity campaigns} Section~\ref{sec:sizes} varies the
+calibration size over 200, 500 and 800 with 30 repetitions per cell and the
+validation draw fixed at 500, which the runner takes from a separate setting so
+that the precision of the measurement does not move with the quantity measured.
+Under the random design the size is the number of cells drawn. Under the
+clustered design it is the product of the primary-unit count and the points
+within each, and the two are varied separately: 20 units by 10, 25 and 40
+points, and 8, 20 and 32 units by 25 points. The 20 by 25 cell is shared by both
+arms and is reported once. Section~\ref{sec:distance} re-runs three of these
+designs with 10 repetitions each and an additional per-point record: the
+coordinates of every validation point, its distance to the nearest calibration
+point, the observation, the prediction and both interval bounds. That record is
+written only when explicitly requested, since it is three orders of magnitude
+larger than the aggregated outputs.
 
 \paragraph{Preprocessing, missing data, seeds} Covariates and response enter
 untransformed. Rows with non-finite response or coordinates are dropped before
@@ -1393,8 +1413,16 @@ package. Every table and figure in this paper is produced by
 \file{run_dbtarf_protocols_comparison.R} (estimands),
 \file{simulations.R} (Section~\ref{sec:sims}), \file{tables_manuscript.R}
 (all tables), \file{maps_compute.R} with \file{maps_plot.R} (the maps),
-\file{figures_schematic.R}, \file{figures_protocols.R} and
-\file{figures_uncertainty.R} (the remaining figures).
+\file{figures_schematic.R}, \file{figures_protocols.R},
+\file{figures_uncertainty.R} and \file{figures_distance.R} (the remaining
+figures). The campaign sets are driven by \file{run_all_campaigns.sh} for the
+headline designs, \file{run_size_sweep.sh} for Section~\ref{sec:sizes} and
+\file{run_point_dump.sh} for Section~\ref{sec:distance}; \file{freeze_check.sh}
+is the pre-flight that gates a launch, and refuses to run against a working tree
+with uncommitted changes. Every campaign directory records the git commit,
+whether the tree was dirty, the R version, a timestamp and the sampling
+parameters that governed it, and the table generator drops any campaign whose
+recorded calibration size is not the size the table claims for it.
 
 
 \section*{Declaration of generative AI and AI-assisted technologies in the

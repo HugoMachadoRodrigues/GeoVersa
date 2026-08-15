@@ -17,7 +17,7 @@ Build:
 | `figures/` | the five manuscript figures, all script-generated |
 | `tables/` | ten generated tables the manuscript `\input`s |
 | `highlights.md` | required; 5 bullets, each within 85 characters |
-| `figures/graphical_abstract.png` | encouraged; 3984 x 1592 px |
+| `figures/graphical_abstract.png` | encouraged; 3984 x 1593 px |
 | `elsevier-harv-expanded.csl` | needed by `make_docx.sh`, not uploaded |
 
 The manuscript carries eleven tables: the ten generated ones plus a descriptive
@@ -47,10 +47,13 @@ inline.
   campaign CSVs as the coverage table so the two cannot disagree
 * `figures_distance.R` the error-against-distance figure, from the per-point
   dumps written by `run_point_dump.sh` with `DBT_DUMP_POINTS=1`
-* `figures_graphical_abstract.R` the graphical abstract, also from those CSVs
+* `figures_graphical_abstract.R` the graphical abstract, from the per-point
+  dumps and the sensitivity campaigns
 * `maps_compute.R` and `maps_plot.R` whole-grid prediction and the map panel
-* `run_all_campaigns.sh` the campaign set; `freeze_check.sh` the pre-flight that
-  gates it
+* `run_all_campaigns.sh` the headline campaigns, `run_size_sweep.sh` the
+  sensitivity sweep and `run_point_dump.sh` the per-point dumps;
+  `freeze_check.sh` is the pre-flight that gates a launch and refuses a dirty
+  working tree
 
 Campaign outputs live outside the synced folder, resolved through
 `GEOVERSA_RESULTS` or `~/geoversa_results`. Every results directory records the

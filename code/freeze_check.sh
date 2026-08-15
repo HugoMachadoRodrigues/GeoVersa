@@ -42,7 +42,7 @@ before=$(md5 -q Text/ecomod_submission/tables/coverage.tex 2>/dev/null)
 try "tables_manuscript.R" 'Rscript code/tables_manuscript.R'
 after=$(md5 -q Text/ecomod_submission/tables/coverage.tex 2>/dev/null)
 [ -n "$after" ] && [ "$before" = "$after" ] && ok "tabelas byte a byte" || bad "tabelas mudaram ou ilegiveis"
-for g in figures_uncertainty figures_schematic figures_protocols figures_graphical_abstract; do
+for g in figures_uncertainty figures_schematic figures_protocols figures_graphical_abstract figures_distance; do
   try "$g.R" "Rscript code/$g.R"
 done
 
