@@ -294,10 +294,13 @@ p_c <- ggplot(dec, aes(d_km, cover, colour = design, fill = design)) +
   # panel b maps linetype as well, so neither merges cleanly with this one
   guides(fill = "none", colour = guide_legend(order = 1))
 
-fig <- (p_a / p_b / p_c) + plot_layout(guides = "collect", heights = c(1, 1.05, 1.3)) &
+fig <- (p_a / p_b / p_c) + plot_layout(guides = "collect", heights = c(0.85, 1, 1.25)) &
   theme(legend.position = "bottom", legend.box = "vertical",
         legend.margin = margin(0, 0, 0, 0))
 
-ggsave(out_png, fig, width = 8.6, height = 10.2, dpi = 300, bg = "white")
+# Kept wider than tall. At width = textwidth an aspect ratio above about 1.1
+# makes the float taller than the text block, and LaTeX defers it to the end
+# of the document; this one was landing after the bibliography.
+ggsave(out_png, fig, width = 9.2, height = 8.4, dpi = 300, bg = "white")
 write.csv(curves, out_csv, row.names = FALSE)
 cat(sprintf("wrote %s\nwrote %s\n", out_png, out_csv))

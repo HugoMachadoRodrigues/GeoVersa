@@ -62,20 +62,20 @@ design-based inference, yet interval coverage is rarely confronted with the
 sampling design at all. We show that coverage is a
 population parameter of the same kind as the mean squared error, so the
 Horvitz-Thompson argument that makes accuracy design-unbiased applies to it
-unchanged, and is here exactly rather than approximately unbiased. This needs no
-new theory. On the Amazonian above-ground biomass
-benchmark of Wadoux et al. (2021), CV+ intervals built from cross-fitted
-residuals are mildly conservative at 0.907 under representative sampling and
-about 16 per cent narrower than quantile regression forests, which sit at 0.937,
-so the widths are not compared at matched coverage. Under clustered calibration
-they cover only 0.861 against a nominal 0.90. That failure is invisible to any check
-assuming exchangeability, the property clustering destroys; a spatial-block
-calibration restores it. The point predictor is a random forest with a cross-fitted residual correction
-whose geostatistical settings are selected out of fold rather than fixed. It
-lowers design-based RMSE under all three designs, by 0.85 to 1.10 \Mgha{}, and an
-ablation separates the variogram-derived representation, worth $0.172$ \Mgha{},
-from the selection of its parameters, worth $0.008$ and not distinguishable
-from zero.
+unchanged, and is here exactly rather than approximately unbiased. On the
+Amazonian above-ground biomass benchmark of Wadoux et al. (2021), CV+ intervals
+built from cross-fitted residuals are mildly conservative at 0.907 under
+representative sampling. Under the clustered design of that study they cover
+0.861 against a nominal 0.90, and across the geometries we test the shortfall
+runs from 0.813 to 0.883. Sample size does not repair it. Holding the primary
+units fixed and quadrupling the points inside them lowers coverage further, from
+0.883 to 0.856, while the map improves, so what governs coverage is the number
+of independent units and not the number of observations. Recording every
+validation point's distance to the nearest calibration point shows why: the
+realised error grows with that distance while the interval width does not, and
+designs that differ in marginal coverage cover almost identically at matched
+distance. A spatial-block calibration holds 0.93 to 0.95 throughout, at the cost
+of width.
 \end{abstract}
 
 \begin{keyword}
@@ -120,7 +120,7 @@ residuals it incurs are larger than any the calibration sample observed. An
 external probability sample is under no such handicap, which is the whole point. Section~\ref{sec:intervals-results} measures this. Conformal intervals
 that are well behaved and sharp under representative sampling cover only 0.861
 against a nominal 0.90 once the calibration sample is clustered, and a
-spatial-block calibration restored nominal coverage in this experiment. The
+spatial-block calibration returned coverage above nominal in this experiment. The
 contribution is not that coverage had never been validated, which
 \citet{schmidinger2023} did, but that validating it design-based against an
 independent probability sample makes the failure visible and puts the estimate
@@ -504,7 +504,7 @@ cosmetic. Choosing the configuration on the same out-of-fold residuals that
 later serve as conformity scores would let a configuration be selected
 \emph{because} its residuals were small, and those residuals would then no
 longer be exchangeable with a fresh one. That is the selection-induced optimism
-we acknowledge for risk estimation in Section~\ref{sec:ablation}, and it applies
+we acknowledge for risk estimation in Section~\ref{sec:correction}, and it applies
 to calibration too. Nesting the selection costs $K$ times the search, and it is
 what makes the bound in Eq.~(12) applicable to the interval we actually report.
 
@@ -574,7 +574,14 @@ extrapolation. Each map is evaluated on an independent simple random validation
 sample of 500 cells, drawn independently of the calibration sample, with 30
 repetitions
 per design and a fixed seed. Calibration and validation sizes are therefore both
-$n = 500$. Comparators are the untuned default
+$n = 500$ for these three headline campaigns. Two further sets are introduced
+where they are used: Section~\ref{sec:sizes} sweeps the calibration size from
+200 to 800, on the clustered design along two axes, the number of primary units
+and the points drawn within each, with the validation draw held at 500
+throughout and 30 repetitions per cell; and Section~\ref{sec:distance} re-runs
+three of those designs for 10 repetitions each, recording every validation
+point's distance to the nearest calibration point together with the interval it
+received. Comparators are the untuned default
 forest exactly as in the reference study, a default Cubist, and a transparency
 model we label RF-tuned, the selected base forest with no correction applied,
 which separates the effect of tuning the forest from the effect of the
@@ -605,11 +612,12 @@ sample and the map is scored on an independent probability sample.}
 \subsection{The correction improves the map, and the tuning does not}
 
 The estimator lowers the root mean squared error under all three designs
-(Table~\ref{tab:accuracy}), winning 28, 30 and 29 of 30 paired repetitions with
-Wilcoxon $p$ values of $6.5\times10^{-9}$, $9.3\times10^{-10}$ and
-$1.9\times10^{-9}$, and design-based bias moves toward zero in every design. The
-RF-tuned row is the one to read carefully: tuning the forest buys between 0.02
-and 0.16 \Mgha{}, two to thirteen per cent of what the full method achieves, so
+(Table~\ref{tab:accuracy}), winning 28, 29 and 29 of 30 paired repetitions, the
+systematic design contributing one exact tie and no losses, with two-sided
+Wilcoxon $p$ values of $1.3\times10^{-8}$, $3.7\times10^{-9}$ and
+$3.7\times10^{-9}$, and design-based bias moves toward zero in every design. The
+RF-tuned row is the one to read carefully: tuning the forest buys between 0.008
+and 0.160 \Mgha{}, one to fifteen per cent of what the full method achieves, so
 the improvement is the residual correction and not a better forest. One estimand in Table~\ref{tab:estimands} is a large independent simple random
 sample of 20{,}000 cells, which is a precise estimate of population accuracy but
 not the population quantity itself. That quantity is available here, because the
@@ -711,7 +719,7 @@ forest is not fitted on coordinates alone: its features include radial basis
 functions whose centres and bandwidth come from the fitted variogram, and from
 the anisotropic geometry of Eq.~(11) when that is accepted, and its output is
 multiplied, where the search retains it, by the gate of Eq.~(10) whose length
-scale is the fitted range. The search disabled that gate in 82 of the 90
+scale is the fitted range. The search disabled that gate in 81 of the 90
 repetitions, keeping it only under clustered calibration, so the features carry
 the argument here and the gate does not. Remove the variogram and neither
 exists. What
@@ -767,7 +775,8 @@ one-sided paired Wilcoxon $p$ at 10 repetitions cannot fall below
 $2^{-10} \approx 0.00098$, the value attained, so it certifies that all ten
 draws favour the method and nothing stronger. These are 10 draws scored three
 ways rather than 30 independent repetitions, and results within a draw are
-dependent, correlating at $r = 0.59$. The cross-validation rows train on strict
+dependent, the strongest of the three pairwise correlations between protocols
+reaching $r = 0.59$. The cross-validation rows train on strict
 subsets, so their absolute values are not commensurable with the design-based
 rows. We do not read the ordering of the four differences as a gradient:
 adjacent protocols are not statistically distinguishable ($p = 0.36$), and the
@@ -863,8 +872,10 @@ mechanism is spatial extrapolation but measure coverage only over the whole map.
 Fig.~\ref{fig:distance} measures it against the variable the mechanism names. We
 re-ran three designs recording, for every validation point, its distance to the
 nearest calibration point together with the interval it received: 10 repetitions
-each of simple random calibration, the clustered design of \citet{wadoux2021}
-and the eight-unit geometry, 5000 points per design.
+each of simple random calibration at $n = 500$, the clustered design of
+\citet{wadoux2021} at the same size, and the eight-unit geometry, which carries
+200 calibration points rather than 500 and so differs from the others on both
+axes at once; 5000 validation points per design.
 
 Coverage declines with that distance under all three. Fitting one logistic slope
 per repetition and testing the ten slopes, a miss becomes more likely by
@@ -879,8 +890,8 @@ almost identically at matched distance, which Fig.~\ref{fig:distance}c shows and
 which the marginal coverages conceal. Comparing each clustered design with
 simple random inside the four distance bands they share, seven of the eight
 contrasts contain zero, and the one that does not is a shortfall of $0.035$
-between 25 and 50 km for the twenty-unit design, Holm-adjusted
-$p = 0.028$. What differs between designs is not how they behave at a given
+between 25 and 50 km for the twenty-unit design, with a Holm-adjusted
+bootstrap $p$ near $0.02$. What differs between designs is not how they behave at a given
 distance but how much of the map sits at each distance. The median distance from
 a validation point to the nearest calibration point is 25 km under
 simple random sampling, 75 under twenty units and 164 under eight, and the
@@ -890,18 +901,18 @@ much as move the population away from the sample that built it.
 
 The second is what the interval does about that, which is nothing.
 Fig.~\ref{fig:distance}b puts the realised error and the issued half-width on
-one axis. Under the eight-unit geometry the conditional RMSE rises from 27.9 to
+one axis. Under the eight-unit geometry the conditional RMSE rises from 26.8 to
 48.4 \Mgha{} between the nearest and farthest bands while the half-width moves
-from 51.5 to 53.8, a 73 per cent rise against 4 per cent. The CV+ construction
+from 51.5 to 53.8, a rise of 81 per cent against 5 per cent. The CV+ construction
 emits a separate bound for every point and those bounds do vary, with a standard
-deviation of 1.4 \Mgha{} within a repetition, so the width is free to respond to
-location. It does not respond to distance, because the conformity scores that
+deviation of 2.2 \Mgha{} within a repetition of that design, so the width is
+free to respond to location. It does not respond to distance, because the conformity scores that
 set it were collected where the calibration sample is.
 
 The residual band contrast has the same origin. At matched distance the
 twenty-unit design issues a narrower interval than simple random, 48.6 against
-51.2 \Mgha{}, and its out-of-fold error is correspondingly smaller, 29.8 against
-31.4. A sample whose points sit near one another is easy to interpolate between,
+51.2 \Mgha{}, and its out-of-fold error is correspondingly smaller, 29.4 against
+31.0, both read from the same ten repetitions as the rest of this section. A sample whose points sit near one another is easy to interpolate between,
 so it looks more predictable than the domain is, and the conformal quantile
 inherits the optimism. Clustering therefore acts twice and in the same
 direction: it moves the target population away from the calibration sample, and
@@ -952,16 +963,17 @@ units rather than eight is worth $+0.069$ with interval $[+0.046, +0.093]$; at
 $n=800$, thirty-two units rather than twenty is worth $+0.024$ with interval
 $[+0.009, +0.039]$. Both survive a Holm correction over the eight contrasts
 these campaigns admit, adjusted $p<10^{-4}$ and $p=0.007$, as does the
-end-to-end contrast within the fixed geometry at $p=0.007$; the three
+end-to-end contrast within the fixed geometry at $p=0.007$. Three of the four
 intermediate single steps do not, which is why the argument rests on the
-endpoints. Sample size is thus the wrong variable. What governs
+endpoints rather than on the step-by-step sequence. Sample size is thus the wrong variable. What governs
 coverage is the number of independent primary units, and adding observations
 without adding units moves it the wrong way.
 
 The reason is visible in the Gap column, which divides the error over the
 domain by the out-of-fold error of the calibration sample itself. The
-out-of-fold error barely moves across the whole table, from 29.0 to 32.2
-\Mgha{}, so the conformal quantile is an honest summary of the sample it was
+out-of-fold error moves little across the table, from 29.0 to 32.2 \Mgha{} over
+the clustered cells and 33.6 at its widest once the representative control is
+included, so the conformal quantile is an honest summary of the sample it was
 built from in every cell. What the design changes is the error everywhere else.
 The gap is 1.15 to 1.18 across the fixed
 geometry and falls from 1.40 to 1.10 as units are added. The representative
@@ -1040,7 +1052,7 @@ The two together are the honest description of what the geostatistics does
 here. Encoding spatial structure through a variogram earns its place in the
 model. Choosing the variogram's parameters from the data does not earn its
 place in the accuracy, and we do not claim it does. What that selection buys is
-stated in Section~\ref{sec:results}: it costs nothing on the criterion it is
+stated in Section~\ref{sec:ablation}: it costs nothing on the criterion it is
 run against, it changes the fitted model in a little under half the
 repetitions, and it lets us report that the conventional recipe was adequate
 for these data rather than assume it.
@@ -1214,15 +1226,16 @@ holds the true geometry fixed and varies only the design, finding no detectable
 difference in recovery, so the refusal cannot be attributed to the design in the
 way we first supposed.
 
-\paragraph{What the correction does not fix} The point gain is incremental, of order 0.9 to 1.2
+\paragraph{What the correction does not fix} The point gain is incremental, of order 0.85 to 1.10
 \Mgha{}. The anisotropy model is geometric and global, one angle and ratio for
 the whole domain, and the geometry estimator has limited power against mild
-anisotropy. The covariate-shift calibration helps only marginally, for the
+anisotropy. The covariate-shift calibration does not help at all, for the
 structural reason that reweighting cannot manufacture residuals a clustered
 sample never observed. The reference surface is a remote-sensing product treated
 as a finite population, so conclusions concern reconstructing that benchmark
-rather than agreement with field measurements. And all results come from a
-single dataset at one sample size.
+rather than agreement with field measurements. And all field results come from a
+single dataset, although Sections~\ref{sec:distance} and \ref{sec:sizes} vary
+the sampling design and the calibration size within it.
 
 \section{Limitations}
 \label{sec:limits}
@@ -1240,10 +1253,17 @@ because \citet{wadoux2021} treated it that way and comparability matters more
 than realism for this purpose. Nothing in the experiment speaks to how the
 undercoverage would scale on a different variable, region or resolution.
 
-Almost every number comes from $n = 500$. The magnitude of the clustered
-shortfall, the width of the spatial-block repair and the frequency with which
-the search declines an anisotropic geometry could all move with sample size, and
-we did not vary it.
+Sample size is varied for the coverage result and not for the rest.
+Section~\ref{sec:sizes} spans calibration sizes from 200 to 800 on two design
+axes, so a small-sample explanation for the clustered shortfall is excluded over
+that range, and the spatial-block calibration holds its coverage in every cell.
+Its width does not: the repaired interval narrows from 144.9 to 136.0 \Mgha{}
+as points are added to a fixed geometry and from 167.3 to 129.1 as units are
+added, so what the sweep establishes about the repair is that it stays
+conservative, not that its cost is stable. The point-accuracy comparison, the
+ablation, the estimand comparison and the counts of how often the search
+displaces the conventional recipe or declines an anisotropic geometry all still
+come from $n = 500$ alone.
 
 The two repairs are compared empirically, not like for like. The CV+ row is a
 different construction from the covariate-shift and spatial-block rows, which
@@ -1252,8 +1272,10 @@ coverage figures are therefore descriptive.
 
 The spatial-block result is a repair that worked here. It reached $0.946$
 against a nominal $0.90$ with intervals about half as wide again, which is
-conservative rather than calibrated, and we have no theorem that says it will
-recover coverage on another dataset.
+conservative rather than calibrated. It held between $0.930$ and $0.946$ across
+every design, size and geometry in Table~\ref{tab:sizes}, which is more than a
+single point but is still one dataset, and we have no theorem that says it will
+recover coverage on another.
 
 \section{Conclusion}
 
@@ -1263,7 +1285,7 @@ theory and
 reveals something: cross-fitted conformal intervals that are calibrated and
 sharp under representative sampling under-cover badly once the calibration
 sample is clustered, a failure no exchangeability-assuming check can detect, and
-a spatial-block calibration restores nominal coverage in this experiment. Map
+a spatial-block calibration returns coverage above nominal in this experiment. Map
 uncertainty, like map accuracy, should be confronted with the sampling design.
 
 The geostatistical decisions behind the point map can meanwhile be treated as
