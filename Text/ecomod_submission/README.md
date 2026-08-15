@@ -12,7 +12,7 @@ Build:
 
 | File | Role |
 |---|---|
-| `manuscript.tex` / `manuscript.docx` | the manuscript, 37 pages |
+| `manuscript.tex` / `manuscript.docx` | the manuscript, 38 pages |
 | `references.bib` | 30 references |
 | `figures/` | the five manuscript figures, all script-generated |
 | `tables/` | ten generated tables the manuscript `\input`s |
@@ -26,7 +26,7 @@ inline.
 
 ## Journal rules this package is built against
 
-* Abstract at most 250 words. Currently 223.
+* Abstract at most 250 words. Currently 231.
 * Keywords 1 to 7. Currently 6.
 * Highlights required, 3 to 5 bullets, at most 85 characters each.
 * Graphical abstract encouraged, not required.
