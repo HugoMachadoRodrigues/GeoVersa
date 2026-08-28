@@ -224,17 +224,27 @@ pick <- function(u, m, col) {
   if (length(v)) v[1] else NA_real_
 }
 
+# Every interval is shown under every design. An earlier version of this table
+# printed the quantile regression forest only under simple random calibration,
+# where it over-covers at 0.937 and reads as the loose baseline the text calls
+# it, and dropped it under clustered calibration, where it holds 0.928 with a
+# narrower interval than the spatial-block repair. Whatever the reason that
+# happened, the effect was to show a comparator only where it lost.
 rows <- list(
-  list("Simple random", "CV+",                       "random",           "DBTARF",       FALSE),
-  list("Simple random",                   "Pooled OOF quantile", "random",          "DBTARF_oofq",  FALSE),
-  list("Simple random",                   "Quantile RF", "random",           "RF_quantile",  FALSE),
-  list("MID",                             NA, NA, NA, NA),
-  list("Systematic",                      "CV+",                        "regular_grid",     "DBTARF",       FALSE),
-  list("MID",                             NA, NA, NA, NA),
-  list("Clustered random", "CV+",                     "clustered_random", "DBTARF",       FALSE),
-  list("Clustered random",                "Pooled OOF quantile", "clustered_random","DBTARF_oofq",  FALSE),
-  list("Clustered random",                "Covariate-shift weighted",   "clustered_random", "DBTARF_dbcal", FALSE),
-  list("Clustered random",                "Spatial-block",    "clustered_random", "DBTARF_spcal", TRUE)
+  list("Simple random",    "CV+",                      "random",           "DBTARF",       FALSE),
+  list("Simple random",    "Pooled OOF quantile",      "random",           "DBTARF_oofq",  FALSE),
+  list("Simple random",    "Spatial-block",            "random",           "DBTARF_spcal", FALSE),
+  list("Simple random",    "Quantile RF",              "random",           "RF_quantile",  FALSE),
+  list("MID", NA, NA, NA, NA),
+  list("Systematic",       "CV+",                      "regular_grid",     "DBTARF",       FALSE),
+  list("Systematic",       "Spatial-block",            "regular_grid",     "DBTARF_spcal", FALSE),
+  list("Systematic",       "Quantile RF",              "regular_grid",     "RF_quantile",  FALSE),
+  list("MID", NA, NA, NA, NA),
+  list("Clustered random", "CV+",                      "clustered_random", "DBTARF",       FALSE),
+  list("Clustered random", "Pooled OOF quantile",      "clustered_random", "DBTARF_oofq",  FALSE),
+  list("Clustered random", "Covariate-shift weighted", "clustered_random", "DBTARF_dbcal", FALSE),
+  list("Clustered random", "Spatial-block",            "clustered_random", "DBTARF_spcal", TRUE),
+  list("Clustered random", "Quantile RF",              "clustered_random", "RF_quantile",  FALSE)
 )
 
 # Review asked for dispersion, not just means: a mean of 0.861 could hide wide

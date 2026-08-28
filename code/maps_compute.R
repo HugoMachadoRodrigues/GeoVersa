@@ -98,7 +98,11 @@ db <- dbtarf_train_predict(
   rf_tune_max_grid = 18L,
   resid_rf_tune_max_grid = 12L,
   fair_profile_max = 6L,
-  ensemble_top_k  = 3L,
+    # One profile, as every campaign in the paper uses. This file kept the
+    # three-profile blend after the campaigns moved to one, so the map in the
+    # figure was drawn by an estimator the paper does not report. That is the
+    # same defect the intervals had, surviving in the figure that shows the map.
+    ensemble_top_k  = 1L,
   train_seed      = seed)
 message(sprintf("[maps] DB-TARF done in %.1f min | selected mode = %s, lambda = %s",
                 as.numeric(difftime(Sys.time(), t0, units = "mins")),

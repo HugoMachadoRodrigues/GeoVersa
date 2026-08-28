@@ -69,8 +69,9 @@ representative sampling. Under the clustered design of that study they cover
 0.861 against a nominal 0.90, and across the geometries we test the shortfall
 runs from 0.813 to 0.883. Sample size does not repair it. Holding the primary
 units fixed and quadrupling the points inside them lowers coverage further, from
-0.883 to 0.856, while the map improves, so what governs coverage is the number
-of independent units and not the number of observations. Recording every
+0.883 to 0.856, while the map improves; adding units instead raises it. Both
+axes move coverage, in opposite directions, so a larger sample is no guarantee
+of a better interval. Recording every
 validation point's distance to the nearest calibration point shows why: the
 realised error grows with that distance while the interval width does not, and
 designs that differ in marginal coverage cover almost identically at matched
@@ -126,6 +127,21 @@ contribution is not that coverage had never been validated, which
 independent probability sample makes the failure visible and puts the estimate
 on the same footing as the accuracy indices reported beside it.
 
+Having made the failure measurable we can ask what drives it, and the answer is
+not what a practitioner would guess. Section~\ref{sec:sizes} varies the
+calibration sample from 200 to 800 points along two axes and finds that
+enlarging it does not repair the coverage: holding the primary units fixed and
+adding points inside them makes the interval worse while making the map better,
+while adding units improves it. Both axes matter and they pull in opposite
+directions, so a larger calibration sample is not by itself a better one. Section~\ref{sec:distance} shows why, by recording each
+validation point's distance to the nearest calibration point. The realised error
+grows with that distance and the interval width does not, and designs whose
+overall coverage differs by 0.07 cover almost identically at matched distance.
+Clustering does not corrupt the interval so much as move the map away from the
+sample that built it. For anyone planning a campaign the practical reading is
+that a budget spent on more locations buys interval validity and the same budget
+spent on more points per location does not.
+
 The second argument concerns the point predictor those intervals are attached
 to, and we present it as the more modest of the two. Spatial predictive mapping,
 in soil science \citep{mcbratney2003} as in ecology, has increasingly favoured
@@ -150,9 +166,9 @@ variogram's parameters rather than fixing them does not: it is worth $0.008$
 zero, and it wins in only 8 of 30 repetitions. What it does deliver is that the null
 correction is in the candidate library, so the selection never returns something
 worse on its own out-of-fold criterion,
-that it changes the fitted model in a little under half the repetitions, that it
-declines an anisotropic geometry outright under clustered calibration, and that
-it converts an assumption into a measured statement, namely that the
+that it changes the fitted model in a little under half the repetitions, that no
+anisotropic geometry survives to be selected under clustered calibration, and
+that it converts an assumption into a measured statement, namely that the
 conventional recipe was adequate for these data. That is worth reporting, and it is all we claim.
 
 The two arguments are connected by construction: the same cross-fitting that
@@ -215,10 +231,19 @@ the calibration sample and follows a probability design with known, positive
 inclusion probabilities. It says nothing about whether the conformal guarantee
 holds; it measures what the intervals did, whatever produced them.
 
-The distinction matters because the two can disagree, and Section~\ref{sec:results}
-is where they do: the conformal construction carries a marginal guarantee under
-exchangeability, and the design-based estimate of realised coverage shows that
-guarantee failing to transfer once the calibration sample is clustered.
+The distinction matters because the two can disagree, and
+Section~\ref{sec:results} is where they do. We are careful about the form of
+the disagreement. CV+ guarantees $1-2\alpha$, not $1-\alpha$, so at
+$\alpha=0.10$ its floor is 0.80 less a finite-sample deduction, and every
+coverage we measure clears that floor: 0.861 under the clustered design of
+\citet{wadoux2021}, 0.813 at the worst geometry we test, 0.811 in the
+simulation. The theorem is not violated anywhere in this paper, and we make no
+such claim. What fails is the thing a practitioner actually relies on. Under
+representative sampling these intervals sit near the nominal 0.90 they were
+asked for, comfortably above the guarantee, and it is that empirical margin,
+not the theorem, that clustering consumes. A design-based estimate is what
+distinguishes the two, because a check resting on exchangeability cannot see a
+margin disappear when exchangeability is what has gone.
 
 
 
@@ -687,8 +712,11 @@ automatic, but not in a majority.
 \end{table}
 
 Two features of the clustered design deserve attention. The anisotropic geometry
-is accepted in none of its 30 repetitions, and the range scale is the axis it
-displaces most often, in 7. The binning and estimator move in 4, fewer than
+is accepted in none of its 30 repetitions, and the candidate scores confirm that
+it was never in contention: the anisotropic profile and its isotropic twin
+record identical out-of-fold errors in all 30, so the geometry estimator's 3 per
+cent parsimony threshold settled the matter before the search saw it. The range
+scale is the axis the search displaces most often, in 7. The binning and estimator move in 4, fewer than
 under simple random sampling, where they move in 7.
 
 We resist reading a mechanism into the anisotropy result at this point. The
@@ -824,6 +852,23 @@ observed. The spatial-block calibration recovered conservative empirical
 coverage in this experiment, reaching 0.946, above the nominal 0.90, at
 the cost of intervals about 48 per cent wider.
 
+The quantile regression forest deserves more attention here than a baseline
+usually gets, because it does not fail. Its coverage is 0.937, 0.936 and 0.928
+across the three designs, so clustering costs it 0.009 where it costs CV+
+0.046, and under clustered calibration it reaches 0.928 with intervals of 137
+\Mgha{} against the spatial-block repair's 0.946 at 144. We report this because
+it is what the experiment found and because it qualifies the framing: a
+practitioner whose only concern is that clustered intervals should not
+under-cover could reach for the quantile forest and be served. What that method
+does not offer is the reason to expect it. It carries no finite-sample bound, it
+over-covers by 0.037 under representative sampling where CV+ is calibrated to
+0.007, and it is wider than CV+ everywhere, so its robustness under clustering
+is bought in advance and paid for on every map. Its widths are also per point,
+derived from the spread of the forest's own leaves, which is a plausible reason
+it degrades less where the model extrapolates; our per-point record covers only
+the conformal interval, so we cannot test that here and offer it as a
+conjecture rather than a finding.
+
 \begin{table}[!ht]
 \centering
 \caption{Design-based interval coverage at a nominal 0.90 level and mean width in
@@ -858,9 +903,8 @@ under test.
 \caption{Design-based interval assessment. Left, coverage with the nominal 0.90
 level marked; right, mean interval width. The plain conformal calibration is
 valid and sharpest under representative sampling but under-covers under
-clustering, and only the spatial-block calibration recovered nominal coverage
-in this experiment, at the
-cost of width.}
+clustering. Two intervals hold up there, the spatial-block calibration and the
+quantile regression forest, both at the cost of width.}
 \label{fig:uncertainty}
 \end{figure}
 
@@ -965,9 +1009,18 @@ $[+0.009, +0.039]$. Both survive a Holm correction over the eight contrasts
 these campaigns admit, adjusted $p<10^{-4}$ and $p=0.007$, as does the
 end-to-end contrast within the fixed geometry at $p=0.007$. Three of the four
 intermediate single steps do not, which is why the argument rests on the
-endpoints rather than on the step-by-step sequence. Sample size is thus the wrong variable. What governs
-coverage is the number of independent primary units, and adding observations
-without adding units moves it the wrong way.
+endpoints rather than on the step-by-step sequence.
+
+Neither axis dominates the other and we do not claim one does. Over the range
+tested the two effects are of similar size and opposite sign: $-0.027$ from
+quadrupling the points inside a fixed geometry, $+0.024$ from going from twenty
+units to thirty-two at $n=800$. The representative control declines slightly
+with sample size as well, by $0.007$ with an interval containing zero, so the
+fixed-geometry effect net of it is $-0.020$ with a 95 per cent interval of
+$[-0.039, -0.000]$, which is real but marginal. The conclusion that survives is
+weaker than a ranking of the two axes and more useful than one: a larger
+calibration sample is not by itself a better one, and where the extra points go
+decides whether the interval improves or degrades.
 
 The reason is visible in the Gap column, which divides the error over the
 domain by the out-of-fold error of the calibration sample itself. The
@@ -1091,8 +1144,14 @@ dataset, selecting the geostatistical hyperparameters does not make the map more
 accurate, and any claim that it does would not survive Table~\ref{tab:ablation}.
 What the selection does deliver is different and, we think, still worth having.
 It changes what the fitted model is, displacing the conventional recipe in 14,
-12 and 11 of 30 repetitions across the three designs. It declines an anisotropic geometry in every clustered repetition, though
-Section~\ref{sec:sims} shows we cannot attribute that refusal to the design. It is not selected against, because the
+12 and 11 of 30 repetitions across the three designs. The anisotropy axis is a
+separate matter and we should not claim it as a selection result. Anisotropy is
+adopted only on an out-of-fold improvement above 3 per cent, a parsimony
+threshold applied inside the geometry estimator, and under clustered calibration
+that threshold is never cleared: in all 30 repetitions the anisotropic candidate
+collapses onto its isotropic twin and the two score identically, so the search
+never faced a live choice. The refusal is the threshold's, not the search's, and
+Section~\ref{sec:sims} shows we cannot attribute it to the design either. It is not selected against, because the
 null correction of Eq.~(9) bounds the out-of-fold criterion below by the
 uncorrected forest. That is a statement about the selection criterion, not a
 guarantee of non-inferiority on an independent population. And
@@ -1198,7 +1257,9 @@ sampling violates exchangeability, so no guarantee survives it, and what
 Section~\ref{sec:intervals-results} reports for the spatial-block variant is
 restored \emph{empirical} coverage in this experiment rather than a theorem. The
 comparison with quantile regression forests is likewise qualified: the two
-methods sit at different effective coverage levels, 0.907 against 0.937, so the
+methods sit at different effective coverage levels, 0.907 against 0.937, and the
+quantile forest holds 0.928 under clustered calibration where CV+ falls to
+0.861, so the
 16 per cent width advantage should be read alongside that difference rather than
 as a like-for-like sharpening.
 
@@ -1211,8 +1272,9 @@ hyperparameter space makes maps better. We argue something narrower: that it can
 be done without penalty on the selection criterion, since Eq.~(9) bounds it
 below by the uncorrected
 forest; that it changes the fitted model, displacing the conventional recipe in
-14, 12 and 11 of 30 repetitions; that it declines an anisotropic geometry in
-every clustered repetition; and that it replaces an assumption with a
+14, 12 and 11 of 30 repetitions; that under clustered calibration no anisotropic
+geometry ever clears the parsimony threshold that would let the search consider
+one; and that it replaces an assumption with a
 measurement, letting us report that the conventional recipe was adequate here
 instead of taking it on faith.
 
@@ -1285,12 +1347,19 @@ theory and
 reveals something: cross-fitted conformal intervals that are calibrated and
 sharp under representative sampling under-cover badly once the calibration
 sample is clustered, a failure no exchangeability-assuming check can detect, and
-a spatial-block calibration returns coverage above nominal in this experiment. Map
-uncertainty, like map accuracy, should be confronted with the sampling design.
+a spatial-block calibration returns coverage above nominal in this experiment.
+Enlarging the calibration sample does not help, and spent inside a fixed set of
+primary units it hurts while the map improves, because what the interval lacks
+is not data but reach: the error grows with distance from the calibration sample and the
+interval width does not follow it. Map uncertainty, like map accuracy, should be
+confronted with the sampling design, and a campaign that wants believable
+intervals should buy locations rather than points.
 
 The geostatistical decisions behind the point map can meanwhile be treated as
-hyperparameters and selected out of fold rather than fixed by habit. On these
-data that does not lower the error. It costs
+hyperparameters and selected out of fold rather than fixed by habit. The
+correction as a whole lowers design-based RMSE under every design, but choosing
+the variogram's parameters rather than fixing them by convention contributes
+nothing to that on these data. It costs
 nothing, it changes what the model does, it declines parameters the data do not
 reward, and it lets a modeller state that the conventional recipe was adequate
 rather than assume it. The corrector the model finally prefers is a

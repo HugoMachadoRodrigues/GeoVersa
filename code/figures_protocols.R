@@ -28,13 +28,27 @@ out_png <- "Text/ecomod_submission/figures/fig4_protocols.png"
 
 # ---- DesignBased (random design, 30 reps) -----------------------------------
 
-db <- read.csv("results/rev1_random_confirm30/dbtarf_summary_by_protocol.csv",
+# Read through gv_results and from the campaign the tables read, not through a
+# relative path into the repository's own results directory. Both mattered: the
+# hardcoded path bypassed the resolver that exists so that no script carries a
+# machine-specific location, and rev1_random_confirm30 is a superseded campaign
+# that predates the provenance discipline, records no git_commit, and disagrees
+# with the current one. The figure showed a design-based gain of 0.876 while
+# Table 6 showed 0.849, from what a reader would take to be one experiment.
+db_dir <- gv_results("final_random_confirm30")
+stopifnot(dir.exists(db_dir))
+db_cfg <- read.csv(file.path(db_dir, "dbtarf_config.csv"), stringsAsFactors = FALSE)
+if (!"git_commit" %in% names(db_cfg) || !nzchar(as.character(db_cfg$git_commit[1]))) {
+  stop("campaign without provenance: ", db_dir)
+}
+db <- read.csv(file.path(db_dir, "dbtarf_summary_by_protocol.csv"),
                stringsAsFactors = FALSE)
 get_db <- function(m) db$RMSE_mean[db$model == m][1]
 
 # ---- Population / RandomKFold / SpatialKFold (10 reps each) -----------------
 
-pr <- read.csv("results/canon_v030_protocols_confirm10/dbtarf_protocols_all_results.csv",
+pr <- read.csv(gv_results("canon_v030_protocols_confirm10",
+                          "dbtarf_protocols_all_results.csv"),
                stringsAsFactors = FALSE)
 agg <- function(proto, col) mean(pr[[col]][pr$protocol == proto], na.rm = TRUE)
 

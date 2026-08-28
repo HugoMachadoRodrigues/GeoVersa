@@ -4,13 +4,17 @@ Design & Interval & PICP & SD & 95\% CI & MPIW & Below 0.90 \\
 \midrule
 Simple random & CV+ & .907 & .019 & [.900,.913] & 103 & 11/30 \\
 Simple random & Pooled OOF quantile & .894 & .020 & [.887,.902] & 100 & 17/30 \\
+Simple random & Spatial-block & .930 & .018 & [.924,.937] & 117 & 2/30 \\
 Simple random & Quantile RF & .937 & .014 & [.932,.942] & 123 & 1/30 \\
 \midrule
 Systematic & CV+ & .913 & .020 & [.906,.920] & 107 & 6/30 \\
+Systematic & Spatial-block & .931 & .016 & [.925,.936] & 117 & 2/30 \\
+Systematic & Quantile RF & .936 & .013 & [.932,.941] & 122 & 0/30 \\
 \midrule
 Clustered random & CV+ & .861 & .040 & [.846,.875] & 98 & 25/30 \\
 Clustered random & Pooled OOF quantile & .848 & .039 & [.834,.862] & 94 & 27/30 \\
 Clustered random & Covariate-shift weighted & .862 & .034 & [.850,.874] & 98 & 26/30 \\
 Clustered random & \textbf{Spatial-block} & \textbf{.946} & \textbf{.030} & \textbf{[.935,.956]} & \textbf{144} & \textbf{2/30} \\
+Clustered random & Quantile RF & .928 & .023 & [.920,.936] & 137 & 5/30 \\
 \bottomrule
 \end{tabular}
