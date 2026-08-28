@@ -12,9 +12,9 @@ Build:
 
 | File | Role |
 |---|---|
-| `manuscript.tex` / `manuscript.docx` | the manuscript, 38 pages |
+| `manuscript.tex` / `manuscript.docx` | the manuscript, 40 pages |
 | `references.bib` | 30 references |
-| `figures/` | the five manuscript figures, all script-generated |
+| `figures/` | the five manuscript figures; not under version control, see below |
 | `tables/` | ten generated tables the manuscript `\input`s |
 | `highlights.md` | required; 5 bullets, each within 85 characters |
 | `figures/graphical_abstract.png` | encouraged; 3984 x 1593 px |
@@ -59,6 +59,32 @@ Campaign outputs live outside the synced folder, resolved through
 `GEOVERSA_RESULTS` or `~/geoversa_results`. Every results directory records the
 git commit, whether the tree was dirty, the R version and a timestamp, and the
 table generator refuses any arm whose config lacks a commit.
+
+### Regenerating the figures and tables
+
+The generators are under version control; their inputs are not. Of the five
+manuscript figures, three are drawn from campaign outputs, one needs the
+reference grid and about eighty minutes of prediction over 1.3 M cells, and one
+runs on a bare clone. Every table is drawn from campaign outputs. Those outputs
+run to 833 MB and are excluded from the repository along with the reference
+data, so a clone does not rebuild the manuscript in one command. The chain is:
+
+1. Obtain the benchmark materials as `external/README.md` describes. They are
+   not redistributed here.
+2. Run the campaigns: `code/run_all_campaigns.sh` for the three headline
+   designs, `code/run_size_sweep.sh` for the size and geometry sweep, and
+   `code/run_point_dump.sh` for the per-point records behind Figure 5. This is
+   days of computation, not minutes.
+3. Run `code/maps_compute.R` and `code/maps_plot.R` for the map panel, which
+   fits on one calibration sample and predicts the whole grid.
+4. Run `code/tables_manuscript.R` and the `code/figures_*.R` scripts, then
+   `make_pdf.sh`.
+
+`code/figures_schematic.R` is the exception: it draws from the correction
+library in `R/dbtarf.R` alone and runs on a bare clone. `code/freeze_check.sh`
+verifies on the author machine that every generator reproduces its output byte
+for byte from the recorded campaigns, which is the check that the scripts and
+the published numbers have not drifted apart.
 
 ## Left to the corresponding author
 
