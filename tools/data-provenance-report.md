@@ -1,15 +1,15 @@
 # GeoVersa: what this repository distributes
 
-Generated 2026-08-28T20:10:05Z from commit `217cf3cba487f8d40fc885ff5b60fd7da7daae73`.
+Generated 2026-08-28T20:13:38Z from commit `69ceb99e117441c6829e35ac0c81f10cbec1f7cd`.
 
 | | |
 |---|---|
 | Repository | `https://github.com/HugoMachadoRodrigues/GeoVersa.git` |
-| Commit | `217cf3c` |
-| Commits in history | 123 |
-| Files tracked by git | 102 |
-| Uncommitted changes when generated | 6 |
-| Blobs scanned (every version ever committed) | 439 |
+| Commit | `69ceb99` |
+| Commits in history | 124 |
+| Files tracked by git | 104 |
+| Uncommitted changes when generated | 3 |
+| Blobs scanned (every version ever committed) | 442 |
 
 Reproduce with:
 
@@ -22,12 +22,15 @@ sh tools/data-provenance-report.sh
 
 ## 1. Data files under version control
 
-The following 2 file(s) match a data extension:
+The following 3 file(s) match a data extension. The extension list is
+deliberately broad and matches configuration and report files too; the
+first line carrying text is printed so the reader can see what it holds.
 
-| File | Bytes | SHA-256 |
-|---|---|---|
-| `.zenodo.json` | 2159 | `57ee07fcf3333004f185f8a7f18e189147fa274440bb3e6a819d320e65860553` |
-| `docs/wadoux2021-reference/official_rdata_manifest.csv` | 907 | `347a4d3b14de0c909f6e01a5ce1b71bbccc5b6356c8ea357a344f4bcff05aed9` |
+| File | Lines | Bytes | First line | SHA-256 |
+|---|---|---|---|---|
+| `.zenodo.json` | 43 | 2159 | `"title": "GeoVersa: Design-Based Residual-Correction For` | `57ee07fcf3333004f185f8a7f18e189147fa274440bb3e6a819d320e65860553` |
+| `docs/wadoux2021-reference/official_rdata_manifest.csv` | 4 | 907 | `"scenario","expected_rdata","full_path","exists","upstream` | `347a4d3b14de0c909f6e01a5ce1b71bbccc5b6356c8ea357a344f4bcff05aed9` |
+| `tools/data-provenance-report.json` | 35 | 2137 | `"generated_at": "2026-08-28T20:13:14Z",` | `aaa13a6c01f4079cf562dd61b3af36dd78a8ec9ce2c9efba7ab92ee455b0a9e4` |
 
 Verify with:
 
@@ -45,29 +48,29 @@ committed at any time and later deleted.
 
 | Term | Files in a clone | Occurrences in history | Where |
 |---|---|---|---|
-| `datsoilspc` | 1 | 1 | tools/data-provenance-report.sh |
-| `svrc_example` | 1 | 1 | tools/data-provenance-report.sh |
-| `OSSL` | 1 | 2 | tools/data-provenance-report.sh |
-| `KSSL` | 1 | 1 | tools/data-provenance-report.sh |
-| `Kellogg` | 1 | 1 | tools/data-provenance-report.sh |
-| `NCSS` | 1 | 1 | tools/data-provenance-report.sh |
-| `RaCA` | 1 | 1 | tools/data-provenance-report.sh |
-| `SSURGO` | 1 | 1 | tools/data-provenance-report.sh |
-| `STATSGO` | 1 | 1 | tools/data-provenance-report.sh |
-| `NASIS` | 1 | 1 | tools/data-provenance-report.sh |
-| `LUCAS` | 1 | 1 | tools/data-provenance-report.sh |
-| `WoSIS` | 1 | 1 | tools/data-provenance-report.sh |
-| `ISRIC` | 1 | 1 | tools/data-provenance-report.sh |
-| `SoilGrids` | 1 | 1 | tools/data-provenance-report.sh |
-| `AfSIS` | 1 | 1 | tools/data-provenance-report.sh |
-| `ICRAF` | 1 | 1 | tools/data-provenance-report.sh |
-| `SoilData` | 1 | 1 | tools/data-provenance-report.sh |
-| `Dataverse` | 1 | 1 | tools/data-provenance-report.sh |
-| `prospectr` | 1 | 1 | tools/data-provenance-report.sh |
-| `resemble` | 1 | 1 | tools/data-provenance-report.sh |
-| `simplerspec` | 1 | 1 | tools/data-provenance-report.sh |
-| `asdreader` | 1 | 1 | tools/data-provenance-report.sh |
-| `opusreader` | 1 | 1 | tools/data-provenance-report.sh |
+| `datsoilspc` | 2 | 4 | tools/data-provenance-report.json;tools/data-provenance-report.sh |
+| `svrc_example` | 2 | 4 | tools/data-provenance-report.json;tools/data-provenance-report.sh |
+| `OSSL` | 2 | 6 | tools/data-provenance-report.json;tools/data-provenance-report.sh |
+| `KSSL` | 2 | 4 | tools/data-provenance-report.json;tools/data-provenance-report.sh |
+| `Kellogg` | 2 | 4 | tools/data-provenance-report.json;tools/data-provenance-report.sh |
+| `NCSS` | 2 | 4 | tools/data-provenance-report.json;tools/data-provenance-report.sh |
+| `RaCA` | 2 | 4 | tools/data-provenance-report.json;tools/data-provenance-report.sh |
+| `SSURGO` | 2 | 4 | tools/data-provenance-report.json;tools/data-provenance-report.sh |
+| `STATSGO` | 2 | 4 | tools/data-provenance-report.json;tools/data-provenance-report.sh |
+| `NASIS` | 2 | 4 | tools/data-provenance-report.json;tools/data-provenance-report.sh |
+| `LUCAS` | 2 | 4 | tools/data-provenance-report.json;tools/data-provenance-report.sh |
+| `WoSIS` | 2 | 4 | tools/data-provenance-report.json;tools/data-provenance-report.sh |
+| `ISRIC` | 2 | 4 | tools/data-provenance-report.json;tools/data-provenance-report.sh |
+| `SoilGrids` | 2 | 4 | tools/data-provenance-report.json;tools/data-provenance-report.sh |
+| `AfSIS` | 2 | 4 | tools/data-provenance-report.json;tools/data-provenance-report.sh |
+| `ICRAF` | 2 | 4 | tools/data-provenance-report.json;tools/data-provenance-report.sh |
+| `SoilData` | 2 | 4 | tools/data-provenance-report.json;tools/data-provenance-report.sh |
+| `Dataverse` | 2 | 4 | tools/data-provenance-report.json;tools/data-provenance-report.sh |
+| `prospectr` | 2 | 4 | tools/data-provenance-report.json;tools/data-provenance-report.sh |
+| `resemble` | 2 | 4 | tools/data-provenance-report.json;tools/data-provenance-report.sh |
+| `simplerspec` | 2 | 4 | tools/data-provenance-report.json;tools/data-provenance-report.sh |
+| `asdreader` | 2 | 4 | tools/data-provenance-report.json;tools/data-provenance-report.sh |
+| `opusreader` | 2 | 4 | tools/data-provenance-report.json;tools/data-provenance-report.sh |
 
 Verify any single term with:
 

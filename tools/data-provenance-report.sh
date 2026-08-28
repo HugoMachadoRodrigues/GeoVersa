@@ -96,13 +96,19 @@ printf -- '---\n\n## 1. Data files under version control\n\n'
 if [ "${NDATA:-0}" -eq 0 ]; then
   printf 'None. No file matching a data extension is tracked by git.\n\n'
 else
-  printf 'The following %s file(s) match a data extension:\n\n' "$NDATA"
-  printf '| File | Bytes | SHA-256 |\n|---|---|---|\n'
+  printf 'The following %s file(s) match a data extension. The extension list is\n' "$NDATA"
+  printf 'deliberately broad and matches configuration and report files too; the\n'
+  printf 'first line carrying text is printed so the reader can see what it holds.\n\n'
+  printf '| File | Lines | Bytes | First line | SHA-256 |\n|---|---|---|---|---|\n'
   printf '%s\n' "$TRACKED_DATA" | while IFS= read -r f; do
     [ -n "$f" ] || continue
     b=$(wc -c < "$f" 2>/dev/null | tr -d ' ')
+    l=$(wc -l < "$f" 2>/dev/null | tr -d ' ')
     h=$( (shasum -a 256 "$f" 2>/dev/null || sha256sum "$f" 2>/dev/null) | awk '{print $1}')
-    printf '| `%s` | %s | `%s` |\n' "$f" "${b:-?}" "${h:-?}"
+    # The first line is printed from the file itself rather than described, so a
+    # reader can see what each one is without taking a label on trust.
+    fl=$(grep -m1 '[A-Za-z]' "$f" 2>/dev/null | cut -c1-58 | tr -d '`|' | tr -s ' ' | sed 's/^ *//')
+    printf '| `%s` | %s | %s | `%s` | `%s` |\n' "$f" "${l:-?}" "${b:-?}" "${fl:-}" "${h:-?}"
   done
   printf '\n'
 fi
