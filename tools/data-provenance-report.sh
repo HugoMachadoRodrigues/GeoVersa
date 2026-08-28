@@ -141,15 +141,16 @@ printf '\n'
 
 printf -- '---\n\n## 4. Declared dependencies\n\n'
 printf 'From `DESCRIPTION`. None is a soil-spectroscopy package.\n\n```\n'
-sed -n '/^Imports:/,/^[A-Z][A-Za-z]*:/p;/^Suggests:/,/^[A-Z][A-Za-z]*:/p' DESCRIPTION 2>/dev/null \
-  | grep -vE '^(RoxygenNote|Config|Encoding|License):' || true
+awk '/^(Imports|Suggests):/{p=1} p&&/^[A-Z][A-Za-z]*:/&&!/^(Imports|Suggests):/{p=0} p' DESCRIPTION 2>/dev/null || true
 printf '```\n\nAny data these packages bundle is distributed by those packages under\n'
 printf 'their own licences, from CRAN, and is not redistributed here.\n\n'
 
 printf -- '---\n\n## 5. Scope, and what this report does not cover\n\n'
-printf -- '- The term search covers the working tree and the full git object\n'
-printf '  database of this repository. It does not cover forks, mirrors, or\n'
-printf '  release archives published outside git.\n'
+printf -- '- The term search covers the files a clone receives, read through\n'
+printf '  `git grep`, and every blob in the object database, which includes\n'
+printf '  content committed at any time and later deleted. It does not cover\n'
+printf '  forks, mirrors, release archives published outside git, or untracked\n'
+printf '  files that exist only on the author machine and are not distributed.\n'
 printf -- '- It does **not** exclude this script or its own output. Both contain\n'
 printf '  every term by construction, so a term with a count of 1 or 2 whose\n'
 printf '  location is `%s` or the report files is matching the\n' "$SELF"
