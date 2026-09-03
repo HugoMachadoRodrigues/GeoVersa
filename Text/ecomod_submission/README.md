@@ -12,7 +12,7 @@ Build:
 
 | File | Role |
 |---|---|
-| `manuscript.tex` / `manuscript.docx` | the manuscript, 41 pages |
+| `manuscript.tex` / `manuscript.docx` | the manuscript, 42 pages |
 | `references.bib` | 30 references |
 | `figures/` | the five manuscript figures; not under version control, see below |
 | `tables/` | ten generated tables the manuscript `\input`s |
@@ -92,8 +92,15 @@ the published numbers have not drifted apart.
    Rodrigues as corresponding author. This journal does not permit authorship
    changes after acceptance, so confirm with the co-author before submitting.
 2. **The generative-AI declaration** is the one section whose wording is still
-   open. It currently describes the tools actually used.
-3. **Sample-size sensitivity** is reported in Section 7.6 and Table 8, from
+   open. It currently describes the tools actually used. The recommendation is
+   to leave it until the journal is fixed, then match that journal's required
+   form literally.
+3. **The Zenodo DOI** in Data and code availability is a placeholder. Mint the
+   archived release before submission and replace it. The statement cites
+   commit `5db0ec3`, which is where the reported results were produced; if
+   further commits land before submission, either re-run the campaigns or leave
+   the citation at the commit that produced them.
+4. **Sample-size sensitivity** is reported in Section 7.6 and Table 8, from
    seven campaigns of 30 repetitions: simple random at n = 200, 500 and 800, and
    two clustered arms crossing at a shared 20 x 25 midpoint.
 
@@ -112,7 +119,7 @@ the published numbers have not drifted apart.
    and deletes a previously written `tables/sizes.tex` rather than leaving a
    disqualified table on disk for the manuscript to include.
 
-4. **The per-point dumps** behind Figure 5 are three campaigns of 10
+5. **The per-point dumps** behind Figure 5 are three campaigns of 10
    repetitions, run by `run_point_dump.sh`. They are the only outputs holding
    one row per validation point; every other campaign is aggregated per
    repetition, which is why the mechanism could not be examined before.
