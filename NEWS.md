@@ -1,3 +1,61 @@
+# GeoVersa 0.5.0
+
+The release archived alongside the manuscript. Everything below postdates 0.4.0
+and changes what the estimator does or what a run records about itself, so the
+0.4.0 notes no longer describe the code.
+
+## Prediction intervals
+
+* **CV+ calibration is nested inside the model selection.** 0.4.0 built CV+
+  intervals from folds of a model whose profile, corrector and shrinkage had
+  already been chosen on the whole calibration sample. The conformity scores
+  were therefore scored against a configuration that had seen them, and the
+  finite-sample argument does not survive that. `.dbt_cvplus_nested()` re-runs
+  the entire selection inside each calibration fold, so a score is produced by
+  a model fitted without the point it scores. The fold partition is drawn
+  independently of the response.
+
+* **The geostatistical recipe reaches the calibration.** The variogram family,
+  practical range, lag binning, estimator and anisotropy setting were read by
+  lexical scoping in the interval path rather than passed, so a run that had
+  selected a recipe could calibrate against a different one. They are arguments
+  now.
+
+* **The map and the interval are one estimator.** `ensemble_top_k` defaults to
+  1. The previous default blended the three best profiles for the map while the
+  interval came from a single profile, so the reported coverage belonged to a
+  model that was not the one being mapped.
+
+## What a run records
+
+* `DBT_VAL_SIZE` separates the validation draw from the calibration draw. Tied
+  together, the precision of the measurement moved with the quantity being
+  measured, which is enough to make a sample-size sweep look conclusive while
+  comparing one experiment with itself.
+
+* `DBT_N_PSU`, `DBT_M_PER_PSU` and `DBT_KMEANS_CENTERS` are read once at the top
+  and written to the configuration record, with a `calib_size` field stating the
+  calibration size the design will actually produce. Under the clustered design
+  that size is the product of the first two and never came from
+  `DBT_SAMPLE_SIZE`, which nothing recorded.
+
+* `geo_basis` gates the variogram-derived representation for the ablation, and
+  the switch now reaches the model. Plain coordinates survive it deliberately.
+
+* `DBT_DUMP_POINTS`, off by default, writes one row per validation point:
+  coordinates, distance to the nearest calibration point, observation,
+  prediction and both interval bounds. No other output is finer than one row
+  per repetition, which is why the failure could be counted but not located.
+
+* Every campaign directory records the git commit, whether the tree was dirty,
+  the R version, a timestamp and the sampling parameters that governed it.
+
+## Portability
+
+* No script carries an absolute path. `code/project_paths.R` resolves the
+  repository, the benchmark data and the campaign outputs, and every other
+  script bootstraps it.
+
 # GeoVersa 0.4.0
 
 Two defects reported in peer review of the accompanying manuscript are fixed in

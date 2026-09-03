@@ -1,6 +1,6 @@
 Package: GeoVersa
 Title: Design-Based Residual-Correction Forests for Digital Soil Mapping
-Version: 0.4.0
+Version: 0.5.0
 Authors@R: person("Hugo", "Rodrigues", role = c("aut", "cre"),
                   email = "rodrigues.machado.hugo@gmail.com")
 Description: Implements DB-TARF (Design-Based Targeted Adaptive Residual
