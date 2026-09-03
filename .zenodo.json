@@ -4,8 +4,7 @@
   "version": "0.5.0",
   "upload_type": "software",
   "access_right": "open",
-  "license": "MIT",
-  "publication_date": "2026-07-06",
+  "license": "mit-license",
   "creators": [
     {
       "name": "Rodrigues, Hugo",
@@ -14,17 +13,16 @@
     }
   ],
   "keywords": [
-    "Digital Soil Mapping",
+    "Digital soil mapping",
     "Pedometrics",
-    "Kriging",
-    "Deep Learning",
+    "Design-based inference",
+    "Prediction intervals",
+    "Conformal prediction",
     "Geostatistics",
-    "Spatial Statistics",
-    "Convolutional Neural Network",
-    "PyTorch",
-    "R",
-    "Anisotropy",
-    "Residual Kriging"
+    "Variogram",
+    "Random forest",
+    "Spatial sampling",
+    "R"
   ],
   "related_identifiers": [
     {
@@ -39,5 +37,5 @@
     }
   ],
   "language": "eng",
-  "notes": "The DB-TARF core is published on CRAN as the GeoVersa R package (v0.3.0, 2026-07-06). The ConvKrigingNet2D deep-kriging code is research code kept in the repository and is not part of the CRAN package. Benchmark uses the Wadoux et al. (2021) design-based validation framework."
+  "notes": "Archived alongside the manuscript on design-based assessment of prediction-interval coverage under clustered calibration. The deposit contains source code only: no third-party data is redistributed. The benchmark materials of Wadoux et al. (2021) are obtained by the user from their original repository, as data/README.md describes."
 }
