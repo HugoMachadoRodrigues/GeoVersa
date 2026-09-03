@@ -92,8 +92,12 @@ for it in zin.infolist():
         x = re.sub(r'<w:p>\s*<w:pPr>\s*<w:pStyle w:val="Author"\s*/>\s*</w:pPr>.*?</w:p>',
                    '', x, flags=re.S)
         if "Range Cattle Research" not in x:
-            m=re.search(r'(<w:body>)', x)
-            if m: x = x[:m.end()] + block + x[m.end():]
+            # After the title, not at the top of the body. Inserting at the top
+            # put the byline above the title, so the Word file opened on the
+            # authors and named the paper underneath them.
+            t=re.search(r'<w:p[ >].*?w:val="Title".*?</w:p>', x, re.S)
+            at = t.end() if t else re.search(r'<w:body>', x).end()
+            x = x[:at] + block + x[at:]
         # pandoc ignores elsarticle's \sep, so the keyword list arrives as one
         # run of comma-jammed terms with no label. Rebuild that paragraph.
         tex=open("manuscript.tex").read()

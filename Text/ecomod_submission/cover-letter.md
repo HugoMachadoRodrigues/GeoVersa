@@ -15,10 +15,9 @@ Editor, *Ecological Modelling*
 
 Dear [EDITOR],
 
-We submit for your consideration the manuscript **"Prediction-interval coverage
-in spatial predictive mapping: design-based assessment and correction under
-clustered calibration"**, by Hugo Rodrigues and Golmar Golmohammadi, as a
-research article.
+We submit for your consideration the manuscript **"Design-based assessment of
+prediction-interval coverage in spatial mapping"**, by Hugo Rodrigues and Golmar
+Golmohammadi, as a research article.
 
 Wadoux, Heuvelink, de Bruin and Brus argued in this journal in 2021 that map
 accuracy must be estimated from a probability sample by design-based inference,
