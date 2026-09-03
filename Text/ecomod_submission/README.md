@@ -17,6 +17,7 @@ Build:
 | `figures/` | the five manuscript figures; not under version control, see below |
 | `tables/` | ten generated tables the manuscript `\input`s |
 | `highlights.md` | required; 5 bullets, each within 85 characters |
+| `cover-letter.md` | one page; two slots to fill, editor name and date |
 | `figures/graphical_abstract.png` | encouraged; 3984 x 1593 px |
 | `elsevier-harv-expanded.csl` | needed by `make_docx.sh`, not uploaded |
 
