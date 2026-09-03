@@ -384,19 +384,14 @@ for it in zin.infolist():
                 first=first.replace("<w:trPr>", "<w:trPr><w:tblHeader/>", 1)
             return body[:i]+first+body[j:]
         x=re.sub(r'<w:tbl>.*?</w:tbl>', hdr, x, flags=re.S)
-        # cantSplit stops a row breaking across pages; it does not stop the
-        # table breaking between rows, which is how the sensitivity table came
-        # to end with its last line alone on a page of its own. keepNext on
-        # every row but the last binds them together.
-        def keep(m):
-            tb=m.group(0)
-            rows=re.findall(r"<w:tr[ >].*?</w:tr>", tb, re.S)
-            for r in rows[:-1]:
-                r2=r.replace("<w:pPr>", "<w:pPr><w:keepNext/>")
-                r2=re.sub(r"<w:p>(?!<w:pPr>)", "<w:p><w:pPr><w:keepNext/></w:pPr>", r2)
-                tb=tb.replace(r, r2, 1)
-            return tb
-        x=re.sub(r'<w:tbl>.*?</w:tbl>', keep, x, flags=re.S)
+        # No keepNext inside the tables. It was added when the sensitivity
+        # table sat in portrait and ended with one row alone on a page, and it
+        # solved that. Once the wide tables moved to landscape they fit their
+        # page with room to spare, and the binding stopped earning its cost:
+        # combined with a bound caption it made caption and table one
+        # indivisible block, so the coverage table took a page of its own and
+        # left its caption on the page before. cantSplit still stops a single
+        # row breaking across pages, and the header row still repeats.
         # Binding the rows made each table a rigid block, and a rigid block that
         # does not fit the space left after its caption moves to the next page
         # and leaves the caption behind. The caption has to travel with it, so
