@@ -397,6 +397,27 @@ for it in zin.infolist():
                 tb=tb.replace(r, r2, 1)
             return tb
         x=re.sub(r'<w:tbl>.*?</w:tbl>', keep, x, flags=re.S)
+        # Binding the rows made each table a rigid block, and a rigid block that
+        # does not fit the space left after its caption moves to the next page
+        # and leaves the caption behind. The caption has to travel with it, so
+        # the paragraph immediately before each table gets keepNext too.
+        out=[]; pos=0
+        for m in re.finditer(r"<w:tbl>", x):
+            i=m.start()
+            a=max(x.rfind("<w:p>", pos, i), x.rfind("<w:p ", pos, i))
+            if a < 0: continue
+            b=x.find("</w:p>", a)
+            if b < 0 or b > i: continue
+            cap=x[a:b+6]
+            if "<w:keepNext/>" in cap: continue
+            if "<w:pPr>" in cap:
+                cap2=cap.replace("<w:pPr>", "<w:pPr><w:keepNext/>", 1)
+            else:
+                cap2=re.sub(r"(<w:p[ >][^>]*>)", r"\1<w:pPr><w:keepNext/></w:pPr>", cap, count=1)
+            out.append((a, b+6, cap2)); pos=i
+        for a,b,cap2 in reversed(out):
+            x = x[:a] + cap2 + x[b:]
+        print("  %d captions bound to their table" % len(out))
         d=x.encode("utf8")
     zout.writestr(it,d)
 zout.close(); zin.close(); shutil.move(tmp,src)
