@@ -554,7 +554,26 @@ the population, which is design-based coverage in the sense of Eq.~(4).
 Simple random sampling of the calibration points makes them exchangeable with a
 uniformly drawn target cell in the sense the guarantee needs: sampling without
 replacement from a finite population gives symmetry under permutation, not
-independence, and permutation symmetry is what the rank argument uses. Our
+independence, and permutation symmetry is what the rank argument uses.
+
+Two exactness claims appear in this paper and they rest on different things, so
+we separate them. The design-based coverage estimator of Eq.~(4) is exactly
+unbiased for any probability design with known positive inclusion
+probabilities. That is a property of the estimator and the validation design
+alone; it holds whatever produced the intervals, and nothing about
+exchangeability enters it. The conformal bound of Eq.~(12) is the claim that
+needs exchangeability, and it is exact when the calibration points and the
+target form one simple random sample of $n+1$ cells drawn without replacement.
+Our validation sample is drawn independently of the calibration sample from the
+same frame and is not screened against it, so the two are not quite that object:
+a validation cell coincides with a calibration cell with probability $n/N$,
+here $3.8\times10^{-4}$, which puts an expected 0.19 coincident cells in a
+500-cell validation draw and leaves about one repetition in six with a single
+one. The departure from exchangeability is of that order and we have not
+corrected for it. Screening the validation draw against the calibration sample
+would remove it, at the cost of a validation design that is no longer a simple
+random sample of the population the map is meant to cover, which is the estimand
+Section~\ref{sec:ht} defines. Our
 systematic design does not have that property. It draws a randomly located
 regular grid, so the design is probabilistic and the validation estimator is
 unbiased, but the calibration points are not exchangeable with an arbitrary

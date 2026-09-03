@@ -153,6 +153,145 @@ PYY
 # Long tables split across pages. Word cannot keep a whole table together, but it
 # can stop a single row breaking mid-row and repeat the header on the next page,
 # which turns a broken table into a readable one.
+# pandoc drops the section numbering elsarticle generates, so the manuscript
+# arrived in Word with unnumbered headings while its own prose sent the reader
+# to "Section 7.4". It also renders \paragraph as Heading4, skipping level 3,
+# and gives the appendix no label. All three are fixed here from document order
+# rather than from a hardcoded list, so a new section does not silently break
+# the count.
+python3 - <<'PYN'
+import zipfile, re, shutil
+src="manuscript.docx"; tmp="/tmp/_docx_num.docx"
+zin=zipfile.ZipFile(src); zout=zipfile.ZipFile(tmp,"w",zipfile.ZIP_DEFLATED)
+for it in zin.infolist():
+    d=zin.read(it.filename)
+    if it.filename=="word/document.xml":
+        x=d.decode("utf8")
+        paras=list(re.finditer(r"<w:p[ >].*?</w:p>", x, re.S))
+        h1=0; h2=0; appendix=False; out=[]; last=0
+        # everything from the appendix heading onward stops taking a number,
+        # and the declarations that follow it are unnumbered in the source too
+        for m in paras:
+            body=m.group(0)
+            lvl=re.search(r'w:val="Heading(\d)"', body)
+            if not lvl: continue
+            n=int(lvl.group(1)); txt=re.sub(r"<[^>]+>","",body)
+            pre=None
+            if n==1:
+                if txt.startswith("Full computational specification"):
+                    appendix=True; pre="Appendix A. "
+                elif not appendix:
+                    h1+=1; h2=0; pre=f"{h1}. "
+            elif n==2 and not appendix:
+                h2+=1; pre=f"{h1}.{h2}. "
+            new=body
+            if n>=4:                       # \paragraph -> level 3, no gap
+                new=new.replace('w:val="Heading%d"'%n, 'w:val="Heading3"')
+            if pre:
+                new=re.sub(r"(<w:t(?: [^>]*)?>)", lambda q: q.group(1)+pre, new, count=1)
+            if new!=body:
+                out.append((m.start(), m.end(), new))
+        buf=[]
+        for a,b,new in out:
+            buf.append(x[last:a]); buf.append(new); last=b
+        buf.append(x[last:])
+        x="".join(buf)
+        d=x.encode("utf8")
+    zout.writestr(it,d)
+zout.close(); zin.close(); shutil.move(tmp,src)
+print("  headings numbered, appendix labelled, level-4 headings demoted to 3")
+PYN
+
+# pandoc gives every column of every table the same width: the text block
+# divided by the column count. A ten-column table then gets 0.55 cm per column
+# and Word breaks "Simple" across three lines. Widths are reassigned here in
+# proportion to the longest cell in each column, and the layout set to autofit
+# so Word may still adjust.
+python3 - <<'PYW'
+import zipfile, re, shutil
+src="manuscript.docx"; tmp="/tmp/_docx_w.docx"
+zin=zipfile.ZipFile(src); zout=zipfile.ZipFile(tmp,"w",zipfile.ZIP_DEFLATED)
+TOTAL=9360   # twips available in the text block, landscape-free
+for it in zin.infolist():
+    d=zin.read(it.filename)
+    if it.filename=="word/document.xml":
+        x=d.decode("utf8")
+        def fix(m):
+            tb=m.group(0)
+            rows=re.findall(r"<w:tr[ >].*?</w:tr>", tb, re.S)
+            if not rows: return tb
+            widths=[]
+            for r in rows:
+                cells=re.findall(r"<w:tc>.*?</w:tc>", r, re.S)
+                lens=[len(re.sub(r"<[^>]+>","",c)) for c in cells]
+                if len(lens)>len(widths): widths += [0]*(len(lens)-len(widths))
+                for i,l in enumerate(lens): widths[i]=max(widths[i], l)
+            n=len(widths)
+            if n==0: return tb
+            # a floor keeps a one-character column from vanishing, and the
+            # proportional share does the rest
+            widths=[max(w,3) for w in widths]
+            tot=sum(widths)
+            cols=[max(int(TOTAL*w/tot), 480) for w in widths]
+            gi=iter(cols)
+            tb=re.sub(r'<w:gridCol w:w="\d+"', lambda q: '<w:gridCol w:w="%d"'%next(gi, 800), tb)
+            if "<w:tblLayout" in tb:
+                tb=re.sub(r'<w:tblLayout w:type="\w+"/>', '<w:tblLayout w:type="autofit"/>', tb)
+            else:
+                tb=tb.replace("</w:tblPr>", '<w:tblLayout w:type="autofit"/></w:tblPr>', 1)
+            return tb
+        x=re.sub(r"<w:tbl>.*?</w:tbl>", fix, x, flags=re.S)
+        d=x.encode("utf8")
+    zout.writestr(it,d)
+zout.close(); zin.close(); shutil.move(tmp,src)
+print("  table column widths set in proportion to content")
+PYW
+
+# pandoc maps LaTeX \varrho to U+1D71A, MATHEMATICAL ITALIC RHO SYMBOL, which
+# lives outside the Basic Multilingual Plane. Word substitutes it from Cambria
+# Math, but LibreOffice and several PDF viewers have no glyph and draw a red
+# box, which is what a reader checking Eq. 11 sees. The plain Greek rho carries
+# the same meaning, is present in every font, and is already italicised by the
+# surrounding OMML run. Any other astral-plane character would fail the same
+# way, so the whole Mathematical Alphanumeric Symbols block is folded down.
+python3 - <<'PYU'
+import zipfile, re, shutil, unicodedata
+src="manuscript.docx"; tmp="/tmp/_docx_u.docx"
+def fold(ch):
+    o=ord(ch)
+    if not (0x1D400 <= o <= 0x1D7FF): return ch
+    n=unicodedata.name(ch, "")
+    for greek in ("ALPHA","BETA","GAMMA","DELTA","EPSILON","ZETA","ETA","THETA",
+                  "IOTA","KAPPA","LAMDA","MU","NU","XI","OMICRON","PI","RHO",
+                  "SIGMA","TAU","UPSILON","PHI","CHI","PSI","OMEGA"):
+        if greek in n:
+            small = "SMALL" in n or "ITALIC" in n and "CAPITAL" not in n
+            try:
+                return unicodedata.lookup("GREEK %s LETTER %s" % ("SMALL" if small else "CAPITAL", greek))
+            except KeyError:
+                return ch
+    d=unicodedata.decomposition(ch)
+    if d and d.split()[0].startswith("<"):
+        try: return chr(int(d.split()[-1], 16))
+        except Exception: return ch
+    return ch
+zin=zipfile.ZipFile(src); zout=zipfile.ZipFile(tmp,"w",zipfile.ZIP_DEFLATED)
+n_fold=0
+for it in zin.infolist():
+    d=zin.read(it.filename)
+    if it.filename.endswith(".xml"):
+        x=d.decode("utf8")
+        out=[]
+        for ch in x:
+            f=fold(ch)
+            if f!=ch: n_fold+=1
+            out.append(f)
+        d="".join(out).encode("utf8")
+    zout.writestr(it,d)
+zout.close(); zin.close(); shutil.move(tmp,src)
+print("  %d astral-plane math characters folded to BMP equivalents" % n_fold)
+PYU
+
 python3 - <<'PYZ'
 import zipfile, re, shutil
 src="manuscript.docx"; tmp="/tmp/_docx_tbl.docx"

@@ -12,7 +12,7 @@ Build:
 
 | File | Role |
 |---|---|
-| `manuscript.tex` / `manuscript.docx` | the manuscript, 40 pages |
+| `manuscript.tex` / `manuscript.docx` | the manuscript, 41 pages |
 | `references.bib` | 30 references |
 | `figures/` | the five manuscript figures; not under version control, see below |
 | `tables/` | ten generated tables the manuscript `\input`s |

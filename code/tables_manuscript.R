@@ -73,16 +73,19 @@ writeLines(lines, file.path(out, "accuracy.tex"))
 lines <- c(
   "\\begin{tabular}{lrrrrrr}", "\\toprule",
   paste("Design & Mean $\\Delta$ & SD & MCSE & 95\\% CI &",
-        "Median [IQR] & Wins \\\\"), "\\midrule")
+        "Median [IQR] & W / L / T \\\\"), "\\midrule")
 for (sc in names(DESIGNS)) {
   d <- pd(sc); dl <- d$RMSE_DBTARF - d$RMSE_RF
   tt <- stats::t.test(dl)
   lines <- c(lines, sprintf(
-    "%s & $%+.3f$ & %.2f & %.3f & $[%.2f, %.2f]$ & $%+.2f$ $[%.2f, %.2f]$ & %d/%d \\\\",
+    "%s & $%+.3f$ & %.2f & %.3f & $[%.2f, %.2f]$ & $%+.2f$ $[%.2f, %.2f]$ & %d / %d / %d \\\\",
     DESIGNS[[sc]], mean(dl), stats::sd(dl), stats::sd(dl) / sqrt(length(dl)),
     tt$conf.int[1], tt$conf.int[2], stats::median(dl),
     stats::quantile(dl, .25), stats::quantile(dl, .75),
-    sum(dl < 0), sum(dl != 0)))
+    # Wins, losses and ties, not wins over a denominator that silently drops
+    # the ties. The systematic design has one exact tie, and printing it as
+    # 29/29 invites the reader to think that design ran fewer repetitions.
+    sum(dl < 0), sum(dl > 0), sum(dl == 0)))
 }
 lines <- c(lines, "\\bottomrule", "\\end{tabular}")
 writeLines(lines, file.path(out, "paired.tex"))
