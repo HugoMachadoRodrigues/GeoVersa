@@ -93,7 +93,7 @@ the published numbers have not drifted apart.
    changes after acceptance, so confirm with the co-author before submitting.
 2. **The generative-AI declaration** is the one section whose wording is still
    open. It currently describes the tools actually used.
-3. **Sample-size sensitivity** is reported in Section 6.5 and Table 5, from
+3. **Sample-size sensitivity** is reported in Section 7.6 and Table 8, from
    seven campaigns of 30 repetitions: simple random at n = 200, 500 and 800, and
    two clustered arms crossing at a shared 20 x 25 midpoint.
 
