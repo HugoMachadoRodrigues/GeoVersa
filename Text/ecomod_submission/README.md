@@ -95,11 +95,20 @@ the published numbers have not drifted apart.
    open. It currently describes the tools actually used. The recommendation is
    to leave it until the journal is fixed, then match that journal's required
    form literally.
-3. **The Zenodo DOI** in Data and code availability is a placeholder. Mint the
-   archived release before submission and replace it. The statement cites
-   commit `5db0ec3`, which is where the reported results were produced; if
-   further commits land before submission, either re-run the campaigns or leave
-   the citation at the commit that produced them.
+3. **The repository is private and the Zenodo deposit is blocked by that.**
+   Zenodo's GitHub integration fetches the release tarball anonymously and
+   receives 404 on a private repository, which is why two v0.5.0 releases show
+   as Failed with `"404 Not Found"` and no metadata fix could have helped.
+   Data and code availability now states the repository is private during
+   evaluation, offered to editors and reviewers on request, and deposited
+   publicly with a DOI at acceptance. Two routes to a DOI exist if one is wanted
+   sooner: make the repository public, or upload the release archive to Zenodo
+   directly, which mints a DOI without the GitHub integration but publishes the
+   code all the same.
+
+   The statement cites commit `5db0ec3`, where the reported results were
+   produced. If further commits land before submission, either re-run the
+   campaigns or leave the citation at the commit that produced them.
 4. **Sample-size sensitivity** is reported in Section 7.6 and Table 8, from
    seven campaigns of 30 repetitions: simple random at n = 200, 500 and 800, and
    two clustered arms crossing at a shared 20 x 25 midpoint.

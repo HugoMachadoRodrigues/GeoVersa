@@ -1,50 +1,31 @@
 cff-version: 1.2.0
-message: "If you use GeoVersa (DB-TARF) or ConvKrigingNet2D in your research, please cite it as below."
-title: "GeoVersa: Design-Based Residual-Correction Forests for Digital Soil Mapping"
-version: 0.3.0
-date-released: 2026-07-06
-url: https://github.com/HugoMachadoRodrigues/GeoVersa
-repository-code: https://github.com/HugoMachadoRodrigues/GeoVersa
+message: "If you use GeoVersa in your research, please cite it as below."
+title: "GeoVersa: Design-Based Residual-Correction Forests for Spatial Predictive Mapping"
+version: 0.5.0
+date-released: "2026-09-03"
+url: "https://github.com/HugoMachadoRodrigues/GeoVersa"
+repository-code: "https://github.com/HugoMachadoRodrigues/GeoVersa"
 license: MIT
 type: software
 abstract: >-
-  GeoVersa ships DB-TARF (Design-Based Targeted Adaptive Residual Forest), a
-  random forest augmented by a cross-fitted, out-of-fold-selected residual
-  correction (residual forests, Cubist, ordinary kriging, MLP, and a
-  variogram-informed radial-basis smoother) together with design-based
-  conformal prediction intervals. It is evaluated under the design-based
+  GeoVersa implements DB-TARF, a random forest augmented by a cross-fitted,
+  out-of-fold-selected residual correction, together with design-based
+  conformal prediction intervals whose coverage is estimated from an
+  independent probability sample. It is evaluated under the design-based
   paradigm of Wadoux et al. (2021) on their public Amazonian above-ground
-  woody biomass benchmark. The repository also preserves the ConvKrigingNet2D
-  research line — a hybrid deep architecture fusing a 2D CNN raster-patch
-  encoder, a tabular MLP, and a coordinate MLP through a differentiable
-  anisotropic residual kriging layer.
+  woody biomass benchmark. The package contains source code only and
+  redistributes no third-party data.
 keywords:
-  - Digital Soil Mapping
-  - Pedometrics
-  - Kriging
-  - Deep Learning
-  - Geostatistics
-  - Spatial Statistics
-  - Convolutional Neural Network
-  - R
-  - torch
+  - digital soil mapping
+  - pedometrics
+  - design-based inference
+  - prediction intervals
+  - conformal prediction
+  - geostatistics
+  - variogram
+  - random forest
+  - spatial sampling
 authors:
   - family-names: Rodrigues
     given-names: Hugo
-    orcid: https://orcid.org/0000-0002-8070-8126
-references:
-  - type: article
-    authors:
-      - family-names: Wadoux
-        given-names: "Alexandre M.J.-C."
-      - family-names: Heuvelink
-        given-names: "Gerard B.M."
-      - family-names: de Bruin
-        given-names: Sytze
-      - family-names: Brus
-        given-names: "Dick J."
-    title: "Spatial cross-validation is not the right way to evaluate map accuracy"
-    journal: "Ecological Modelling"
-    volume: 457
-    year: 2021
-    doi: 10.1016/j.ecolmodel.2021.109692
+    orcid: "https://orcid.org/0000-0002-8070-8126"
