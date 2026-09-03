@@ -452,7 +452,10 @@ if (clustered_ok) {
     # a blank leading cell survives LaTeX but reads as missing data once a
     # typesetter rebuilds the table from the Word file. The midpoint row is
     # marked, since it is one campaign shown in two arms rather than two runs.
-    mark <- if (identical(r$n, 500L) && r$arm %in% c("dens", "spread")) "\\rlap{$^{a}$}" else ""
+    # \\rlap{$^{a}$} put a maths superscript over a zero-width box, which pandoc
+    # carries into Word as an OMML object whose invisible base LibreOffice draws
+    # as a square. \\textsuperscript is an ordinary run in both renderings.
+    mark <- if (identical(r$n, 500L) && r$arm %in% c("dens", "spread")) "\\textsuperscript{a}" else ""
     lines <- c(lines, sprintf("%s & %s%s & %d & %.2f & %s & %s & %s & [%s,%s] & %d/%d & %s \\\\",
       r$design, r$geom, mark, r$n, r$rmse, sprintf("%.2f", r$gap),
       z(r$mu), z(r$sd), z(r$lo), z(r$hi),

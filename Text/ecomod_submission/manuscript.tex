@@ -139,8 +139,8 @@ grows with that distance and the interval width does not, and designs whose
 overall coverage differs by 0.07 cover almost identically at matched distance.
 Clustering does not corrupt the interval so much as move the map away from the
 sample that built it. For anyone planning a campaign the practical reading is
-that a budget spent on more locations buys interval validity and the same budget
-spent on more points per location does not.
+that a budget spent on more locations buys more reliable interval coverage and
+the same budget spent on more points per location does not.
 
 The second argument concerns the point predictor those intervals are attached
 to, and we present it as the more modest of the two. Spatial predictive mapping,
@@ -1054,7 +1054,7 @@ geometry and falls from 1.40 to 1.10 as units are added. The representative
 control shows what its absence looks like: under simple random sampling the gap
 is 1.01 at all three sizes and coverage is 0.915, 0.907 and 0.907, so there
 sample size does what sample size is supposed to do, improving the map from
-33.96 to 30.83 \Mgha{} and leaving the interval valid. Coverage falls as the
+33.96 to 30.83 \Mgha{} while leaving coverage near nominal. Coverage falls as the
 gap widens, with a correlation of $-0.98$ over the campaigns. The relation is
 not an exact ordering: two pairs whose gaps differ by less than 0.05 sit the
 other way round, so the gap explains the large differences and not the small
@@ -1087,7 +1087,7 @@ sample, so it measures how much larger the error over the domain is than the
 error the conformal quantile was built from. RMSE is in \Mgha{}; PICP, SD and
 the confidence interval describe the CV+ interval, with leading zeros dropped on
 the bounded columns; Block is the spatial-block calibration.
-$^{a}$The 20 $\times$ 25 campaign is the design shared by both clustered arms
+\textsuperscript{a}\,The 20 $\times$ 25 campaign is the design shared by both clustered arms
 and is one set of 30 repetitions reported twice, so the arms meet at it rather
 than crossing.}
 \label{tab:sizes}

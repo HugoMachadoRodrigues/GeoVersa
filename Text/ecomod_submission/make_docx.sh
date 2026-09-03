@@ -220,7 +220,7 @@ src="manuscript.docx"; tmp="/tmp/_docx_w.docx"
 zin=zipfile.ZipFile(src); zout=zipfile.ZipFile(tmp,"w",zipfile.ZIP_DEFLATED)
 TOTAL=9360    # twips in the portrait text block
 WIDE_TOTAL=12960  # and in the landscape one, for the two tables placed there
-WIDE=("DesignIntervalPICP", "DesignUnits/pts")
+WIDE=("DesignIntervalPICP", "DesignUnits/pts", "EstimandReps")
 for it in zin.infolist():
     d=zin.read(it.filename)
     if it.filename=="word/document.xml":
@@ -229,21 +229,36 @@ for it in zin.infolist():
             tb=m.group(0)
             rows=re.findall(r"<w:tr[ >].*?</w:tr>", tb, re.S)
             if not rows: return tb
-            widths=[]
-            for r in rows:
-                cells=re.findall(r"<w:tc>.*?</w:tc>", r, re.S)
-                lens=[len(re.sub(r"<[^>]+>","",c)) for c in cells]
-                if len(lens)>len(widths): widths += [0]*(len(lens)-len(widths))
-                for i,l in enumerate(lens): widths[i]=max(widths[i], l)
+            # A spanning row, the italic subheading a \\multicolumn produces, has
+            # fewer cells than the table has columns and its whole text would
+            # otherwise be charged to the first column. Width is measured only
+            # from rows that carry a cell for every column.
+            per_row=[re.findall(r"<w:tc>.*?</w:tc>", r, re.S) for r in rows]
+            ncol=max((len(c) for c in per_row), default=0)
+            widths=[0]*ncol
+            for cells in per_row:
+                if len(cells)!=ncol: continue
+                for i,c in enumerate(cells):
+                    widths[i]=max(widths[i], len(re.sub(r"<[^>]+>","",c)))
             n=len(widths)
             if n==0: return tb
             hdr=re.sub(r"<[^>]+>","", rows[0])
             total = WIDE_TOTAL if any(hdr.startswith(w) for w in WIDE) else TOTAL
-            # a floor keeps a one-character column from vanishing, and the
-            # proportional share does the rest
-            widths=[max(w,3) for w in widths]
-            tot=sum(widths)
-            cols=[max(int(total*w/tot), 480) for w in widths]
+            # Width from what the cell has to hold, not from its share of the
+            # character count. A pure proportion starved the sample-size column,
+            # whose longest entry is three digits, until Word broke "200" after
+            # the second digit. CHAR is a conservative advance width at the
+            # table's type size and PAD covers the cell margins on both sides.
+            CHAR, PAD = 115, 300
+            need=[w*CHAR + PAD for w in widths]
+            tot=sum(need)
+            if tot <= total:
+                # It fits, so leave it at the width it needs. Distributing the
+                # slack in proportion handed the widest column most of it and
+                # stretched a six-centimetre text column to fourteen.
+                cols=list(need)
+            else:
+                cols=[max(int(total*nw/tot), 620) for nw in need]
             gi=iter(cols)
             tb=re.sub(r'<w:gridCol w:w="\d+"', lambda q: '<w:gridCol w:w="%d"'%next(gi, 800), tb)
             if "<w:tblLayout" in tb:
@@ -322,7 +337,7 @@ def brk(sect):
     return '<w:p><w:pPr><w:sectPr>%s</w:sectPr></w:pPr></w:p>' % sect
 # a table is chosen by the text of its header row, so renumbering cannot
 # silently move the landscape to the wrong one
-WIDE = ("DesignIntervalPICP", "DesignUnits/pts")
+WIDE = ("DesignIntervalPICP", "DesignUnits/pts", "EstimandReps")
 zin=zipfile.ZipFile(src); zout=zipfile.ZipFile(tmp,"w",zipfile.ZIP_DEFLATED)
 for it in zin.infolist():
     d=zin.read(it.filename)
@@ -369,6 +384,19 @@ for it in zin.infolist():
                 first=first.replace("<w:trPr>", "<w:trPr><w:tblHeader/>", 1)
             return body[:i]+first+body[j:]
         x=re.sub(r'<w:tbl>.*?</w:tbl>', hdr, x, flags=re.S)
+        # cantSplit stops a row breaking across pages; it does not stop the
+        # table breaking between rows, which is how the sensitivity table came
+        # to end with its last line alone on a page of its own. keepNext on
+        # every row but the last binds them together.
+        def keep(m):
+            tb=m.group(0)
+            rows=re.findall(r"<w:tr[ >].*?</w:tr>", tb, re.S)
+            for r in rows[:-1]:
+                r2=r.replace("<w:pPr>", "<w:pPr><w:keepNext/>")
+                r2=re.sub(r"<w:p>(?!<w:pPr>)", "<w:p><w:pPr><w:keepNext/></w:pPr>", r2)
+                tb=tb.replace(r, r2, 1)
+            return tb
+        x=re.sub(r'<w:tbl>.*?</w:tbl>', keep, x, flags=re.S)
         d=x.encode("utf8")
     zout.writestr(it,d)
 zout.close(); zin.close(); shutil.move(tmp,src)
