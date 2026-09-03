@@ -631,7 +631,7 @@ model we label RF-tuned, the selected base forest with no correction applied,
 which separates the effect of tuning the forest from the effect of the
 correction. Forests use \texttt{ranger} \citep{wright2017} and all variogram
 work uses \texttt{gstat} \citep{pebesma2004}; every forest receives an explicit
-seed. The estimator is released as the \texttt{GeoVersa} package for R.
+seed. The estimator is implemented in the \texttt{GeoVersa} package for R.
 Fig.~\ref{fig:schematic} summarises the procedure. We refer to the predictor
 as TARF, a targeted adaptive residual forest, the estimator the \texttt{GeoVersa}
 package names DB-TARF, and deliberately keep
@@ -695,9 +695,11 @@ of the number of repetitions.
 \centering
 \caption{Paired difference in RMSE between the corrected map and the default
 forest, by calibration design, over 30 repetitions. Negative values favour the
-corrected map. MCSE is the Monte Carlo standard error of the mean difference,
-and the confidence interval is the 95 per cent interval for that mean. RMSE in
-\Mgha{}.}
+corrected map. The interval is the 95 per cent confidence interval for the mean
+difference; the Monte Carlo standard error behind it ranges from 0.082 to 0.129
+\Mgha{} across the three designs, an order of magnitude below the effect. W, L
+and T count repetitions in which the corrected map won, lost or tied exactly.
+RMSE in \Mgha{}.}
 \label{tab:paired}
 \footnotesize
 \setlength{\tabcolsep}{2pt}
@@ -921,8 +923,8 @@ under test.
 \includegraphics[width=\textwidth]{figures/fig6_uncertainty.png}
 \caption{Design-based interval assessment. Left, coverage with the nominal 0.90
 level marked; right, mean interval width. The plain conformal calibration is
-valid and sharpest under representative sampling but under-covers under
-clustering. Two intervals hold up there, the spatial-block calibration and the
+empirically well calibrated and sharpest under representative sampling but
+under-covers under clustering. Two intervals hold up there, the spatial-block calibration and the
 quantile regression forest, both at the cost of width.}
 \label{fig:uncertainty}
 \end{figure}
@@ -1266,7 +1268,7 @@ which \citet{wadoux2021} found point-accuracy estimators to fail, and it fails
 for a related reason: the sample is not representative of the domain the map has
 to cover. The practical recommendation follows directly. Assess coverage
 design-based, and when clustering is suspected use a spatial-block calibration,
-accepting wider but valid intervals.
+accepting wider intervals that restored empirical coverage in this experiment.
 
 We are careful about how strong a claim this supports. CV+ carries a
 finite-sample marginal guarantee of $1-2\alpha$ less a term of order $K/n$ under
@@ -1518,8 +1520,8 @@ recorded calibration size is not the size the table claims for it.
 No new primary data were collected for this study.
 
 \paragraph{Software} The estimator, the campaign runners and every script that
-produces a table or figure in this paper are released as the \texttt{GeoVersa}
-package for R, licensed MIT. The repository is held privately while the
+produces a table or figure in this paper are implemented in the \texttt{GeoVersa}
+package for R, licensed under the MIT licence. The repository is held privately while the
 manuscript is under evaluation. It is made available to the editors and
 reviewers on request, and will be deposited in a public archive with a
 persistent identifier upon acceptance, at which point the \textsc{doi} replaces

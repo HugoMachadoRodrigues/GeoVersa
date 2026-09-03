@@ -70,16 +70,23 @@ writeLines(lines, file.path(out, "accuracy.tex"))
 
 # ---- Table: paired differences, the uncertainty the review asked for --------
 
+# Four columns, not seven. SD and MCSE were squeezing the interval and the
+# IQR into two lines each in the Word rendering, and neither carries the
+# argument: the caption states the MCSE range and the SD is recoverable from
+# it. What the reader needs here is the effect, its interval, its spread and
+# how often it held.
 lines <- c(
-  "\\begin{tabular}{lrrrrrr}", "\\toprule",
-  paste("Design & Mean $\\Delta$ & SD & MCSE & 95\\% CI &",
+  "\\begin{tabular}{lrrr}", "\\toprule",
+  paste("Design & Mean $\\Delta$RMSE [95\\% CI] &",
         "Median [IQR] & W / L / T \\\\"), "\\midrule")
+mcse_all <- c()
 for (sc in names(DESIGNS)) {
   d <- pd(sc); dl <- d$RMSE_DBTARF - d$RMSE_RF
   tt <- stats::t.test(dl)
+  mcse_all <- c(mcse_all, stats::sd(dl) / sqrt(length(dl)))
   lines <- c(lines, sprintf(
-    "%s & $%+.3f$ & %.2f & %.3f & $[%.2f, %.2f]$ & $%+.2f$ $[%.2f, %.2f]$ & %d / %d / %d \\\\",
-    DESIGNS[[sc]], mean(dl), stats::sd(dl), stats::sd(dl) / sqrt(length(dl)),
+    "%s & $%+.3f$ $[%.2f, %.2f]$ & $%+.2f$ $[%.2f, %.2f]$ & %d / %d / %d \\\\",
+    DESIGNS[[sc]], mean(dl),
     tt$conf.int[1], tt$conf.int[2], stats::median(dl),
     stats::quantile(dl, .25), stats::quantile(dl, .75),
     # Wins, losses and ties, not wins over a denominator that silently drops
@@ -89,6 +96,8 @@ for (sc in names(DESIGNS)) {
 }
 lines <- c(lines, "\\bottomrule", "\\end{tabular}")
 writeLines(lines, file.path(out, "paired.tex"))
+message(sprintf("[tables] paired table: MCSE ranges %.3f to %.3f",
+                min(mcse_all), max(mcse_all)))
 
 # ---- Table: which geostatistical choices the search makes -------------------
 

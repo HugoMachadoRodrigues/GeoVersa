@@ -168,7 +168,7 @@ for it in zin.infolist():
     if it.filename=="word/document.xml":
         x=d.decode("utf8")
         paras=list(re.finditer(r"<w:p[ >].*?</w:p>", x, re.S))
-        h1=0; h2=0; appendix=False; out=[]; last=0
+        h1=0; h2=0; lastlvl=1; appendix=False; out=[]; last=0
         # everything from the appendix heading onward stops taking a number,
         # and the declarations that follow it are unnumbered in the source too
         for m in paras:
@@ -185,8 +185,15 @@ for it in zin.infolist():
             elif n==2 and not appendix:
                 h2+=1; pre=f"{h1}.{h2}. "
             new=body
-            if n>=4:                       # \paragraph -> level 3, no gap
-                new=new.replace('w:val="Heading%d"'%n, 'w:val="Heading3"')
+            if n <= 2:
+                lastlvl = n
+            else:
+                # A \\paragraph sits one level under whatever section contains
+                # it. Pinning it at 3 left a 1 -> 3 jump wherever a paragraph
+                # follows a section directly, which is every first paragraph
+                # in the appendix and the one in the Discussion.
+                tgt = min(lastlvl + 1, 3)
+                new = new.replace('w:val="Heading%d"' % n, 'w:val="Heading%d"' % tgt)
             if pre:
                 new=re.sub(r"(<w:t(?: [^>]*)?>)", lambda q: q.group(1)+pre, new, count=1)
             if new!=body:
@@ -211,7 +218,9 @@ python3 - <<'PYW'
 import zipfile, re, shutil
 src="manuscript.docx"; tmp="/tmp/_docx_w.docx"
 zin=zipfile.ZipFile(src); zout=zipfile.ZipFile(tmp,"w",zipfile.ZIP_DEFLATED)
-TOTAL=9360   # twips available in the text block, landscape-free
+TOTAL=9360    # twips in the portrait text block
+WIDE_TOTAL=12960  # and in the landscape one, for the two tables placed there
+WIDE=("DesignIntervalPICP", "DesignUnits/pts")
 for it in zin.infolist():
     d=zin.read(it.filename)
     if it.filename=="word/document.xml":
@@ -228,11 +237,13 @@ for it in zin.infolist():
                 for i,l in enumerate(lens): widths[i]=max(widths[i], l)
             n=len(widths)
             if n==0: return tb
+            hdr=re.sub(r"<[^>]+>","", rows[0])
+            total = WIDE_TOTAL if any(hdr.startswith(w) for w in WIDE) else TOTAL
             # a floor keeps a one-character column from vanishing, and the
             # proportional share does the rest
             widths=[max(w,3) for w in widths]
             tot=sum(widths)
-            cols=[max(int(TOTAL*w/tot), 480) for w in widths]
+            cols=[max(int(total*w/tot), 480) for w in widths]
             gi=iter(cols)
             tb=re.sub(r'<w:gridCol w:w="\d+"', lambda q: '<w:gridCol w:w="%d"'%next(gi, 800), tb)
             if "<w:tblLayout" in tb:
@@ -291,6 +302,50 @@ for it in zin.infolist():
 zout.close(); zin.close(); shutil.move(tmp,src)
 print("  %d astral-plane math characters folded to BMP equivalents" % n_fold)
 PYU
+
+# The coverage table and the sensitivity table are seven and ten columns wide.
+# Proportional widths stopped the worst of the breaking but Word still stacks
+# "n=200" and ".915" vertically in the ten-column one, and the reviewer was
+# right that shrinking the font further is not the answer. Both are placed in
+# their own landscape section, caption included, which is the ordinary
+# typographic remedy for a table that does not fit the measure.
+python3 - <<'PYL'
+import zipfile, re, shutil
+src="manuscript.docx"; tmp="/tmp/_docx_ls.docx"
+PORT = ('<w:pgSz w:w="12240" w:h="15840"/>'
+        '<w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"'
+        ' w:header="720" w:footer="720" w:gutter="0"/>')
+LAND = ('<w:pgSz w:w="15840" w:h="12240" w:orient="landscape"/>'
+        '<w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"'
+        ' w:header="720" w:footer="720" w:gutter="0"/>')
+def brk(sect):
+    return '<w:p><w:pPr><w:sectPr>%s</w:sectPr></w:pPr></w:p>' % sect
+# a table is chosen by the text of its header row, so renumbering cannot
+# silently move the landscape to the wrong one
+WIDE = ("DesignIntervalPICP", "DesignUnits/pts")
+zin=zipfile.ZipFile(src); zout=zipfile.ZipFile(tmp,"w",zipfile.ZIP_DEFLATED)
+for it in zin.infolist():
+    d=zin.read(it.filename)
+    if it.filename=="word/document.xml":
+        x=d.decode("utf8")
+        n=0
+        for tb in re.findall(r"<w:tbl>.*?</w:tbl>", x, re.S):
+            hdr=re.sub(r"<[^>]+>","", re.search(r"<w:tr[ >].*?</w:tr>", tb, re.S).group(0))
+            if not any(hdr.startswith(w) for w in WIDE): continue
+            i=x.find(tb)
+            # take the caption paragraph that precedes the table along with it
+            pre=x.rfind("<w:p>", 0, i)
+            pre2=x.rfind("<w:p ", 0, i)
+            start=max(pre, pre2)
+            if start < 0: start=i
+            j=i+len(tb)
+            x = x[:start] + brk(PORT) + x[start:j] + brk(LAND) + x[j:]
+            n+=1
+        d=x.encode("utf8")
+    zout.writestr(it,d)
+zout.close(); zin.close(); shutil.move(tmp,src)
+print("  %d wide tables placed in landscape sections" % n)
+PYL
 
 python3 - <<'PYZ'
 import zipfile, re, shutil
