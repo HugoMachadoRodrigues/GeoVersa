@@ -2,7 +2,8 @@ cff-version: 1.2.0
 message: "If you use GeoVersa in your research, please cite it as below."
 title: "GeoVersa: Design-Based Residual-Correction Forests for Spatial Predictive Mapping"
 version: 0.5.1
-date-released: "2026-10-19"
+date-released: "2026-10-20"
+doi: 10.5281/zenodo.19380534
 url: "https://github.com/HugoMachadoRodrigues/GeoVersa"
 repository-code: "https://github.com/HugoMachadoRodrigues/GeoVersa"
 license: MIT

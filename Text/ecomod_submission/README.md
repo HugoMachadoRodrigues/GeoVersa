@@ -101,7 +101,11 @@ the published numbers have not drifted apart.
    two v0.5.0 releases, published while the repository was private, failed
    with `"404 Not Found"`. Making the repository public does not re-trigger
    them: Zenodo archives only releases published after its webhook exists.
-   v0.5.1 is the first release made with the repository public.
+   v0.5.1 is the first release made with the repository public, and is
+   archived as `10.5281/zenodo.23487542`, the DOI the availability statement
+   and the cover letter cite. The concept DOI `10.5281/zenodo.19380534`
+   always resolves to the latest version and is the one in the repository
+   README and `CITATION.cff`.
 
    The statement cites commit `5db0ec3`, where the reported results were
    produced, and v0.5.1, which contains it. If further commits land before

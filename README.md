@@ -10,6 +10,7 @@
 [![R >= 4.2](https://img.shields.io/badge/R-%E2%89%A54.2-276DC3?logo=r&logoColor=white)](https://cran.r-project.org/)
 [![torch](https://img.shields.io/badge/torch-lantern-EE4C2C?logo=pytorch&logoColor=white)](https://torch.mlverse.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19380534.svg)](https://doi.org/10.5281/zenodo.19380534)
 [![Pedometrics](https://img.shields.io/badge/domain-Pedometrics%20%7C%20DSM-2e8b57)](https://www.pedometrics.org/)
 [![ORCID](https://img.shields.io/badge/ORCID-0000--0002--8070--8126-A6CE39?style=flat&logo=orcid&logoColor=white)](https://orcid.org/0000-0002-8070-8126)
 
