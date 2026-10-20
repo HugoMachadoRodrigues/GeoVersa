@@ -1,7 +1,7 @@
 {
   "title": "GeoVersa: Design-Based Residual-Correction Forests for Digital Soil Mapping",
   "description": "Design-based residual-correction forests for spatial predictive mapping. This release archives the code that produced the results reported in the accompanying manuscript on design-based assessment of prediction-interval coverage under clustered calibration. It contains no third-party data.",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "upload_type": "software",
   "access_right": "open",
   "license": "mit-license",

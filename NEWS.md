@@ -1,3 +1,23 @@
+# GeoVersa 0.5.1
+
+The first release archived on Zenodo with the repository public. 0.5.0 was
+tagged while the repository was private, and Zenodo, which fetches the release
+archive without credentials, could not retrieve it.
+
+No change to the estimator, the intervals or the campaign runners. Every
+number in the manuscript was produced at commit `5db0ec3`, which both 0.5.0 and
+0.5.1 contain, so the results do not depend on which of the two is used.
+
+* `code/tables_manuscript.R` writes the paired-difference table in four columns
+  instead of seven, folding the confidence interval into the mean and reporting
+  the Monte Carlo standard error range in its log rather than as a column. The
+  footnote marker of the sensitivity table is `\textsuperscript` rather than a
+  maths superscript over a zero-width box, which Word rendered as a square.
+* `tools/data-provenance-report.sh` states that the repository is public and
+  prints the clone command, so the report can be re-derived from a fresh clone.
+* The manuscript sources under `Text/ecomod_submission/` carry the final table
+  layout, the Word conversion fixes and the cover letter.
+
 # GeoVersa 0.5.0
 
 The release archived alongside the manuscript. Everything below postdates 0.4.0

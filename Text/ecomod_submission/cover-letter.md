@@ -66,10 +66,8 @@ The manuscript is original, is not under consideration elsewhere, and has been
 approved by both authors. The research received no external funding and we
 declare no competing interests. Reference data are the public materials of
 Wadoux et al. (2021), obtained from the authors' repository and not
-redistributed with our work. The analysis code is held in a private repository
-during evaluation and we will provide the editors and reviewers with access on
-request; it will be deposited publicly with a persistent identifier upon
-acceptance. In accordance with the journal's policy, the manuscript carries a
+redistributed with our work. The analysis code is openly available and archived
+on Zenodo, as the Data and code availability statement records. In accordance with the journal's policy, the manuscript carries a
 declaration of the generative AI tools used in its preparation.
 
 We would be glad to answer any questions, and we thank you for your
