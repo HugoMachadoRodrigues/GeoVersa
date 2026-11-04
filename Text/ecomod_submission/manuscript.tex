@@ -56,8 +56,8 @@ Center, 3401 Experiment Station, Ona, FL 33865, USA}
 
 \begin{abstract}
 Spatial predictive maps of environmental variables increasingly carry a
-prediction interval alongside each value, and those intervals now inform carbon
-accounting. Map accuracy must be estimated from a probability sample by
+prediction interval alongside each value, and users increasingly rely on those
+intervals to judge how far each value can be trusted. Map accuracy must be estimated from a probability sample by
 design-based inference, yet interval coverage is rarely confronted with the
 sampling design at all. We show that coverage is a
 population parameter of the same kind as the mean squared error, so the
@@ -81,7 +81,7 @@ of width.
 
 \begin{keyword}
 Spatial prediction\sep Design-based inference\sep Prediction intervals\sep
-Conformal prediction\sep Variogram\sep Random forest
+Interval coverage\sep Conformal prediction\sep Spatial sampling\sep Random forest
 \end{keyword}
 
 \end{frontmatter}
@@ -1035,16 +1035,17 @@ end-to-end contrast within the fixed geometry at $p=0.007$. Three of the four
 intermediate single steps do not, which is why the argument rests on the
 endpoints rather than on the step-by-step sequence.
 
-Neither axis dominates the other and we do not claim one does. Over the range
-tested the two effects are of similar size and opposite sign: $-0.027$ from
+Over the range tested the two effects are of similar size and opposite sign: $-0.027$ from
 quadrupling the points inside a fixed geometry, $+0.024$ from going from twenty
 units to thirty-two at $n=800$. The representative control declines slightly
 with sample size as well, by $0.007$ with an interval containing zero, so the
 fixed-geometry effect net of it is $-0.020$ with a 95 per cent interval of
-$[-0.039, -0.000]$, which is real but marginal. The conclusion that survives is
-weaker than a ranking of the two axes and more useful than one: a larger
-calibration sample is not by itself a better one, and where the extra points go
-decides whether the interval improves or degrades.
+$[-0.039, -0.000]$, which is real but marginal. Neither effect is larger than
+the other, so the result is not that one axis matters more. It is about
+allocation: a larger calibration sample is not by itself a better one, where
+the extra points go decides whether the interval improves or degrades, and at a
+fixed budget the equal-cost contrasts above both favour more units over more
+points per unit.
 
 The reason is visible in the Gap column, which divides the error over the
 domain by the out-of-fold error of the calibration sample itself. The
@@ -1312,21 +1313,10 @@ holds the true geometry fixed and varies only the design, finding no detectable
 difference in recovery, so the refusal cannot be attributed to the design in the
 way we first supposed.
 
-\paragraph{What the correction does not fix} The point gain is incremental, of order 0.85 to 1.10
-\Mgha{}. The anisotropy model is geometric and global, one angle and ratio for
-the whole domain, and the geometry estimator has limited power against mild
-anisotropy. The covariate-shift calibration does not help at all, for the
-structural reason that reweighting cannot manufacture residuals a clustered
-sample never observed. The reference surface is a remote-sensing product treated
-as a finite population, so conclusions concern reconstructing that benchmark
-rather than agreement with field measurements. And all field results come from a
-single dataset, although Sections~\ref{sec:distance} and \ref{sec:sizes} vary
-the sampling design and the calibration size within it.
-
 \section{Limitations}
 \label{sec:limits}
 
-Four limits bound what the results above support.
+Five limits bound what the results above support.
 
 The evidence comes from one surface, and it is not a soil survey. The
 benchmark is above-ground biomass, so the paper is framed as spatial
@@ -1362,6 +1352,11 @@ conservative rather than calibrated. It held between $0.930$ and $0.946$ across
 every design, size and geometry in Table~\ref{tab:sizes}, which is more than a
 single point but is still one dataset, and we have no theorem that says it will
 recover coverage on another.
+
+The point predictor's gain is incremental and its spatial model is simple. The
+improvement is of order 0.85 to 1.10 \Mgha{}. The anisotropy model is geometric
+and global, one angle and ratio for the whole domain, and the geometry estimator
+has limited power against mild anisotropy (Table~\ref{tab:sim1}).
 
 \section{Conclusion}
 

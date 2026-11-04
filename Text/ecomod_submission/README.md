@@ -27,8 +27,8 @@ inline.
 
 ## Journal rules this package is built against
 
-* Abstract at most 250 words. Currently 231.
-* Keywords 1 to 7. Currently 6.
+* Abstract at most 250 words. Currently 245.
+* Keywords 1 to 7. Currently 7.
 * Highlights required, 3 to 5 bullets, at most 85 characters each.
 * Graphical abstract encouraged, not required.
 * No word limit and no cap on figures and tables for a regular paper, which is
