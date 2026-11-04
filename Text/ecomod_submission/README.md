@@ -32,7 +32,8 @@ inline.
 * Highlights required, 3 to 5 bullets, at most 85 characters each.
 * Graphical abstract encouraged, not required.
 * No word limit and no cap on figures and tables for a regular paper, which is
-  why the procedure appendix and every table sit in the main text.
+  why every table and the full computational settings (Section 6.2) sit in
+  the main text.
 * Author-date citations, `elsarticle-harv`.
 
 ## Reproducible scripts, in the repository root `code/`

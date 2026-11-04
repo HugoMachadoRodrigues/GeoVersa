@@ -182,8 +182,10 @@ for it in zin.infolist():
             n=int(lvl.group(1)); txt=re.sub(r"<[^>]+>","",body)
             pre=None
             if n==1:
-                if txt.startswith("Full computational specification"):
-                    appendix=True; pre="Appendix A. "
+                # The back matter (availability, declarations) is unnumbered
+                # in the source; numbering stops at its first heading.
+                if txt.startswith("Data and code availability"):
+                    appendix=True
                 elif not appendix:
                     h1+=1; h2=0; pre=f"{h1}. "
             elif n==2 and not appendix:
@@ -210,7 +212,7 @@ for it in zin.infolist():
         d=x.encode("utf8")
     zout.writestr(it,d)
 zout.close(); zin.close(); shutil.move(tmp,src)
-print("  headings numbered, appendix labelled, level-4 headings demoted to 3")
+print("  headings numbered, back matter unnumbered, level-4 headings demoted to 3")
 PYN
 
 # pandoc gives every column of every table the same width: the text block
@@ -222,9 +224,16 @@ python3 - <<'PYW'
 import zipfile, re, shutil
 src="manuscript.docx"; tmp="/tmp/_docx_w.docx"
 zin=zipfile.ZipFile(src); zout=zipfile.ZipFile(tmp,"w",zipfile.ZIP_DEFLATED)
-TOTAL=9360    # twips in the portrait text block
-WIDE_TOTAL=12960  # and in the landscape one, for the two tables placed there
-WIDE=("DesignIntervalPICP", "DesignUnits/pts", "EstimandReps")
+TOTAL=9360    # twips in the portrait text block, the only orientation used
+# The three widest tables keep the portrait page and drop to a smaller type
+# size instead, in half-points: the ten-column sensitivity table to 8 pt, the
+# coverage and estimand tables to 9 pt. A landscape section was tried before
+# and is not wanted: every page of the manuscript is portrait.
+WIDE={"DesignUnits/pts": 16, "DesignIntervalPICP": 18, "EstimandReps": 18}
+def shrink(tb, hp):
+    tb=re.sub(r"<w:rPr>", '<w:rPr><w:sz w:val="%d"/><w:szCs w:val="%d"/>' % (hp, hp), tb)
+    tb=re.sub(r"<w:r>(?!<w:rPr>)", '<w:r><w:rPr><w:sz w:val="%d"/><w:szCs w:val="%d"/></w:rPr>' % (hp, hp), tb)
+    return tb
 for it in zin.infolist():
     d=zin.read(it.filename)
     if it.filename=="word/document.xml":
@@ -247,28 +256,52 @@ for it in zin.infolist():
             n=len(widths)
             if n==0: return tb
             hdr=re.sub(r"<[^>]+>","", rows[0])
-            total = WIDE_TOTAL if any(hdr.startswith(w) for w in WIDE) else TOTAL
+            hp = next((v for k,v in WIDE.items() if hdr.startswith(k)), None)
+            total = TOTAL
             # Width from what the cell has to hold, not from its share of the
             # character count. A pure proportion starved the sample-size column,
             # whose longest entry is three digits, until Word broke "200" after
             # the second digit. CHAR is a conservative advance width at the
             # table's type size and PAD covers the cell margins on both sides.
             CHAR, PAD = 115, 300
+            if hp:
+                tb = shrink(tb, hp)
+                # capitals, digits and bold set wider than the average glyph
+                CHAR, PAD = int(135 * hp / 22), 300
             need=[w*CHAR + PAD for w in widths]
             tot=sum(need)
-            if tot <= total:
+            if hp and tot < total:
+                # a wide table uses the whole measure, so no column is starved
+                cols=[int(total*nw/tot) for nw in need]
+            elif tot <= total:
                 # It fits, so leave it at the width it needs. Distributing the
                 # slack in proportion handed the widest column most of it and
                 # stretched a six-centimetre text column to fourteen.
                 cols=list(need)
             else:
                 cols=[max(int(total*nw/tot), 620) for nw in need]
+            if hp:
+                # a four-letter header in capitals (MPIW) needs more than its
+                # character count says; the floor comes out of the widest column
+                fl=int(860 * hp / 18)
+                raised=[max(c, fl) for c in cols]
+                over=sum(raised)-total
+                if over > 0:
+                    # taken back from the columns above the floor, in
+                    # proportion to their slack, so no column is starved
+                    slack=[max(c-fl, 0) for c in raised]
+                    tot_s=sum(slack) or 1
+                    raised=[c - int(over*sl/tot_s) for c,sl in zip(raised, slack)]
+                cols=raised
             gi=iter(cols)
             tb=re.sub(r'<w:gridCol w:w="\d+"', lambda q: '<w:gridCol w:w="%d"'%next(gi, 800), tb)
+            # Wide tables keep the widths set here (fixed layout): autofit let
+            # the renderer shrink a numeric column until its header wrapped.
+            lay = "fixed" if hp else "autofit"
             if "<w:tblLayout" in tb:
-                tb=re.sub(r'<w:tblLayout w:type="\w+"/>', '<w:tblLayout w:type="autofit"/>', tb)
+                tb=re.sub(r'<w:tblLayout w:type="\w+"/>', '<w:tblLayout w:type="%s"/>' % lay, tb)
             else:
-                tb=tb.replace("</w:tblPr>", '<w:tblLayout w:type="autofit"/></w:tblPr>', 1)
+                tb=tb.replace("</w:tblPr>", '<w:tblLayout w:type="%s"/></w:tblPr>' % lay, 1)
             return tb
         x=re.sub(r"<w:tbl>.*?</w:tbl>", fix, x, flags=re.S)
         d=x.encode("utf8")
@@ -322,49 +355,6 @@ zout.close(); zin.close(); shutil.move(tmp,src)
 print("  %d astral-plane math characters folded to BMP equivalents" % n_fold)
 PYU
 
-# The coverage table and the sensitivity table are seven and ten columns wide.
-# Proportional widths stopped the worst of the breaking but Word still stacks
-# "n=200" and ".915" vertically in the ten-column one, and the reviewer was
-# right that shrinking the font further is not the answer. Both are placed in
-# their own landscape section, caption included, which is the ordinary
-# typographic remedy for a table that does not fit the measure.
-python3 - <<'PYL'
-import zipfile, re, shutil
-src="manuscript.docx"; tmp="/tmp/_docx_ls.docx"
-PORT = ('<w:pgSz w:w="12240" w:h="15840"/>'
-        '<w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"'
-        ' w:header="720" w:footer="720" w:gutter="0"/>')
-LAND = ('<w:pgSz w:w="15840" w:h="12240" w:orient="landscape"/>'
-        '<w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"'
-        ' w:header="720" w:footer="720" w:gutter="0"/>')
-def brk(sect):
-    return '<w:p><w:pPr><w:sectPr>%s</w:sectPr></w:pPr></w:p>' % sect
-# a table is chosen by the text of its header row, so renumbering cannot
-# silently move the landscape to the wrong one
-WIDE = ("DesignIntervalPICP", "DesignUnits/pts", "EstimandReps")
-zin=zipfile.ZipFile(src); zout=zipfile.ZipFile(tmp,"w",zipfile.ZIP_DEFLATED)
-for it in zin.infolist():
-    d=zin.read(it.filename)
-    if it.filename=="word/document.xml":
-        x=d.decode("utf8")
-        n=0
-        for tb in re.findall(r"<w:tbl>.*?</w:tbl>", x, re.S):
-            hdr=re.sub(r"<[^>]+>","", re.search(r"<w:tr[ >].*?</w:tr>", tb, re.S).group(0))
-            if not any(hdr.startswith(w) for w in WIDE): continue
-            i=x.find(tb)
-            # take the caption paragraph that precedes the table along with it
-            pre=x.rfind("<w:p>", 0, i)
-            pre2=x.rfind("<w:p ", 0, i)
-            start=max(pre, pre2)
-            if start < 0: start=i
-            j=i+len(tb)
-            x = x[:start] + brk(PORT) + x[start:j] + brk(LAND) + x[j:]
-            n+=1
-        d=x.encode("utf8")
-    zout.writestr(it,d)
-zout.close(); zin.close(); shutil.move(tmp,src)
-print("  %d wide tables placed in landscape sections" % n)
-PYL
 
 python3 - <<'PYZ'
 import zipfile, re, shutil
@@ -388,13 +378,9 @@ for it in zin.infolist():
                 first=first.replace("<w:trPr>", "<w:trPr><w:tblHeader/>", 1)
             return body[:i]+first+body[j:]
         x=re.sub(r'<w:tbl>.*?</w:tbl>', hdr, x, flags=re.S)
-        # No keepNext inside the tables. It was added when the sensitivity
-        # table sat in portrait and ended with one row alone on a page, and it
-        # solved that. Once the wide tables moved to landscape they fit their
-        # page with room to spare, and the binding stopped earning its cost:
-        # combined with a bound caption it made caption and table one
-        # indivisible block, so the coverage table took a page of its own and
-        # left its caption on the page before. cantSplit still stops a single
+        # No keepNext inside the tables. Binding every row made caption and
+        # table one indivisible block, so a long table took a page of its own
+        # and left its caption on the page before. cantSplit still stops a single
         # row breaking across pages, and the header row still repeats.
         # Binding the rows made each table a rigid block, and a rigid block that
         # does not fit the space left after its caption moves to the next page

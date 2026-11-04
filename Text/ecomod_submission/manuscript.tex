@@ -601,6 +601,9 @@ extrapolation regime resembling the one the map faces.
 \section{Experimental design}
 \label{sec:case}
 
+\subsection{Benchmark, designs and campaigns}
+\label{sec:designs}
+
 We use the public materials of \citet{wadoux2021}: above-ground live woody
 biomass surface of \citet{baccini2012} over a 928 by 1642 km Amazonian rectangle at 1 km
 resolution, 1{,}310{,}143 cells, with 28 covariates known over the whole grid.
@@ -613,34 +616,121 @@ property. Nothing in the derivation is particular to soil, but neither have we
 demonstrated it on a pedological survey, and Section~\ref{sec:limits} says so. The surface is itself a remote-sensing
 estimate carrying its own error rather than field-measured biomass, so the results below concern how well a
 mapping procedure reconstructs this benchmark pseudo-population.
+
 Calibration samples of $n = 500$ are drawn under the same three designs
-\citet{wadoux2021} used: simple random, systematic on a randomly located grid, and two-stage
-clustered random, the last drawing 20 primary units and 25 points within each so
-that the sample covers a small fraction of the domain and most of the map is an
-extrapolation. Each map is evaluated on an independent simple random validation
-sample of 500 cells, drawn independently of the calibration sample, with 30
-repetitions
-per design and a fixed seed. Calibration and validation sizes are therefore both
-$n = 500$ for these three headline campaigns. Two further sets are introduced
-where they are used: Section~\ref{sec:sizes} sweeps the calibration size from
-200 to 800, on the clustered design along two axes, the number of primary units
-and the points drawn within each, with the validation draw held at 500
-throughout and 30 repetitions per cell; and Section~\ref{sec:distance} re-runs
-three of those designs for 10 repetitions each, recording every validation
-point's distance to the nearest calibration point together with the interval it
-received. Comparators are the untuned default
+\citet{wadoux2021} used. Simple random sampling draws cells without
+replacement; the systematic design draws a regular grid at a random origin; the
+clustered design is two-stage, drawing 20 primary units from 100 $k$-means
+centres of the coordinates and 25 points within each, so that the sample covers
+a small fraction of the domain and most of the map is an extrapolation. Primary
+units are drawn with replacement, so the realised number of distinct units is
+smaller than the nominal one: 18.2 in expectation for 20, and 7.7 and 27.5 for
+the 8 and 32 used in Section~\ref{sec:sizes}. Each map is evaluated on an
+independent simple random validation sample of 500 cells, with 30 repetitions
+per design and a fixed seed.
+
+Two further sets of campaigns are reported where they are used.
+Section~\ref{sec:sizes} varies the calibration size over 200, 500 and 800, with
+30 repetitions per cell. Under the random design the size is the number of
+cells drawn; under the clustered design it is the product of the primary units
+and the points within each, varied separately as 20 units by 10, 25 and 40
+points and as 8, 20 and 32 units by 25 points, the shared 20 by 25 cell
+reported once. The validation draw stays at 500 throughout, set independently of
+the calibration size so that the precision of the measurement does not move
+with the quantity measured. Section~\ref{sec:distance} re-runs three of these
+designs for 10 repetitions each and records, for every validation point, its
+coordinates, its distance to the nearest calibration point, the observation,
+the prediction and both interval bounds.
+
+Comparators are the untuned default
 forest exactly as in the reference study, a default Cubist, and a transparency
 model we label RF-tuned, the selected base forest with no correction applied,
 which separates the effect of tuning the forest from the effect of the
-correction. Forests use \texttt{ranger} \citep{wright2017} and all variogram
-work uses \texttt{gstat} \citep{pebesma2004}; every forest receives an explicit
-seed. The estimator is implemented in the \texttt{GeoVersa} package for R.
-Fig.~\ref{fig:schematic} summarises the procedure. We refer to the predictor
+correction. Fig.~\ref{fig:schematic} summarises the procedure. We refer to the predictor
 as TARF, a targeted adaptive residual forest, the estimator the \texttt{GeoVersa}
 package names DB-TARF, and deliberately keep
 ``design-based'' out of that name: the learner is fitted by ordinary means,
 with no Horvitz-Thompson estimator and no design-weighted objective. What is
 design-based here is the assessment protocol, not the model.
+
+\subsection{Model and interval settings}
+\label{sec:settings}
+
+All values are the defaults of the released code unless noted.
+
+\paragraph{Selection} Two fold partitions are used and they are not the same.
+The selection folds are $K=5$ assigned by \texttt{caret::createFolds}, which
+stratifies on the response; that is acceptable because those folds only rank
+candidate configurations. The calibration partition of the nested CV+ of
+Section~\ref{sec:intervals} is a plain random permutation into $K=5$ blocks,
+drawn independently of the response, because the exchangeability the bound needs
+would not survive response-stratified assignment. The shrinkage grid is
+$\lambda \in [-0.25, 0.60]$ in steps of $0.05$, 18 values including $\lambda=0$,
+for $n \ge 300$, with narrower grids at smaller $n$. Six base-forest profiles are
+compared on identical folds, spanning 500 to 2000 trees, \texttt{mtry} in
+$\{5,9,14\}$ for $p=28$, minimum node size 1 or 5 and sample fraction 0.632, 0.8
+or 1; residual forests use 300 or 500 trees. The residual Cubist uses 10
+committees and no neighbours, and the radial basis places its centres by
+$k$-means on the coordinates, their number derived from the domain area, the
+practical range and the nugget ratio and clamped to $[8,48]$.
+
+\paragraph{Variogram} The default empirical variogram uses the robust estimator
+with a cutoff at half the maximum pairwise distance and 15 lags. The four
+families are fitted by weighted least squares, and the parsimony rule of
+Section~\ref{sec:geohyper} keeps the simplest family within a relative
+tolerance of 0.05 of the best weighted residual sum of squares. The practical
+range is the distance at which the fitted model first reaches 95 per cent of its
+sill, evaluated numerically so that it means the same thing for every family.
+Three variogram configurations join the default: cutoff 0.35 with 15 lags,
+cutoff 0.65 with 20 lags, and the classical estimator at the default binning.
+The range multiplier takes $m_b \in \{0.25,0.5,1.0\}$. The anisotropic variant
+is offered for the two leading profiles, over angles $\{0,22.5,\dots,157.5\}$
+degrees crossed with ratios $\{1,0.75,0.55,0.40,0.25\}$, scored by 5-fold
+out-of-fold error of a kernel smoother with bandwidth 0.15 times the median
+pairwise distance in the transformed space, and accepted only on an improvement
+above 3 per cent. That threshold is a parsimony rule rather than a test: the
+geometry costs two parameters, and the margin keeps it out unless its gain
+exceeds the run-to-run variation observed in isotropic fits.
+
+\paragraph{Gate, intervals and protocols} The gate length multiplier is chosen
+by spatially blocked cross-validation on four $k$-means blocks, the candidate set
+including the value that disables the gate. Intervals use $K=5$ and
+$\alpha=0.10$. The covariate-shift variant estimates density ratios with a
+forest classifier separating calibration points from a sample of the population
+covariates and clips the weights at 20; the spatial-block variant refits on five
+$k$-means blocks; the quantile regression forest uses \texttt{ranger} with
+\texttt{quantreg = TRUE} and the same predictors. The spatial block
+cross-validation of Section~\ref{sec:protocols} cuts a complete-linkage
+clustering of the coordinates at 350 km.
+
+\paragraph{Data handling and seeds} Covariates and response enter
+untransformed. Rows with a non-finite response or coordinate are dropped before
+variogram fitting, and constant or duplicated predictor columns before model
+fitting. Every \texttt{ranger} call receives an explicit seed, and
+\texttt{ranger} 0.18 and later is reproducible across thread counts. The
+estimand campaign draws repetition $i$ with seed $123 + 1000(i-1)$; the
+30-repetition campaigns seed the stream once with 123 and draw the repetitions
+in sequence. The estimator restores the caller's random state on exit.
+
+\subsection{Software and reproducibility}
+\label{sec:software}
+
+The analysis runs in R 4.6.0 with \texttt{ranger} \citep{wright2017},
+\texttt{gstat} \citep{pebesma2004}, \texttt{caret}, \texttt{Cubist},
+\texttt{nnet} and \texttt{withr}, and the estimator is the \texttt{GeoVersa}
+package. The campaigns are driven by \file{run_all_campaigns.sh} for the three
+headline designs, \file{run_size_sweep.sh} for Section~\ref{sec:sizes} and
+\file{run_point_dump.sh} for Section~\ref{sec:distance}, each calling
+\file{run_dbtarf_wadoux_comparison.R}; the estimand comparison is
+\file{run_dbtarf_protocols_comparison.R} and the simulations
+\file{simulations.R}. Every table is written by \file{tables_manuscript.R}
+and every figure by a \file{figures_*.R} script or, for the maps,
+\file{maps_compute.R} and \file{maps_plot.R}. A pre-flight,
+\file{freeze_check.sh}, refuses to launch a campaign from a working tree with
+uncommitted changes. Each campaign directory records the git commit, whether
+the tree was clean, the R version, a timestamp and the sampling parameters that
+governed it, and the table generator drops any campaign that lacks a commit or
+whose recorded calibration size differs from the one its table claims.
 
 \begin{figure}[!htbp]
 \centering
@@ -795,6 +885,7 @@ a statement about two learners and not evidence that the geostatistical
 information was unnecessary.
 
 \subsection{The advantage is not specific to the scoring protocol}
+\label{sec:protocols}
 
 We drew 10 further calibration samples under simple random sampling and scored
 each under three additional protocols (Table~\ref{tab:estimands}): a large
@@ -1084,11 +1175,10 @@ ones. The interval is not miscalibrated for its own calibration sample. It is
 miscalibrated for the domain, and only a design that samples the domain can
 reveal the difference.
 
-Two qualifications. Primary units are drawn with replacement from one hundred
-candidate clusters, so the realised number of distinct clusters is 7.7, 18.2 and
-27.5 rather than 8, 20 and 32; the parenthesised figures in
-Table~\ref{tab:sizes} are the realised expectations. The same mechanism means
-the wider arm also densifies slightly as it widens, by about 12 per cent in
+One qualification. Because primary units are drawn with replacement
+(Section~\ref{sec:designs}), the parenthesised figures in Table~\ref{tab:sizes}
+are the expected numbers of distinct units, and the wider arm also densifies
+slightly as it widens, by about 12 per cent in
 points per distinct cluster, which acts against the effect reported and makes
 $+0.067$ a conservative bound rather than an inflated one.
 
@@ -1403,136 +1493,6 @@ reward, and it lets a modeller state that the conventional recipe was adequate
 rather than assume it. The corrector the model finally prefers is a
 forest, but it is a forest that sees the landscape through a variogram.
 
-\appendix
-\section{Full computational specification}
-\label{app:spec}
-
-Every setting needed to reproduce the experiments is stated here; all values are
-the defaults in the released code unless noted.
-
-\paragraph{Cross-fitting and selection} Two fold partitions are used and they
-are not the same. The selection folds are $K=5$ assigned by
-\texttt{caret::createFolds}, which stratifies on the response; fold membership
-there depends on $y_i$, which is acceptable because those folds only rank
-candidate configurations. The calibration partition used by the nested CV+ of
-Section~\ref{sec:intervals} is a plain random permutation into $K=5$ blocks,
-drawn independently of the response, because the exchangeability the bound needs
-would not survive response-stratified assignment. The shrinkage grid is
-$\lambda \in [-0.25, 0.60]$ in steps of $0.05$, 18 values, for $n \ge 300$;
-narrower grids apply at smaller $n$. Selection minimises Eq.~(8) over the
-correction library crossed with that grid, with $\lambda=0$ included.
-
-\paragraph{Base forest profiles} Six fixed profiles are compared on identical
-folds: \file{default_rf}, \file{more_trees}, \file{deeper_trees},
-\file{subsample}, \file{wide_mtry}, \file{wide_deep_subsample}. Across
-them the number of trees takes values in $\{500,1000,1500,2000\}$,
-\texttt{mtry} in $\{5,9,14\}$ for $p=28$, minimum node size in $\{1,5\}$ and
-sample fraction in $\{0.632,0.8,1\}$; residual forests use 300 or 500 trees.
-Where explicit grid tuning is enabled instead, the base grid is capped at 18
-candidates and the residual grid at 12, scored out of bag.
-
-\paragraph{Correction library} Residual random forest; residual Cubist with 10
-committees and 0 neighbours; a single-hidden-layer network; ordinary kriging of
-residuals; a radial basis or kernel smoother; the unweighted mean of the
-residual learners; and bias, linear, quadratic and stacked recalibrations. The
-radial basis places centres by $k$-means on the coordinates, their number
-derived from the domain area, the practical range and the nugget ratio and
-clamped to $[8,48]$, with bandwidth $b=m_b\rho$.
-
-\paragraph{Variogram} Empirical variogram with the robust estimator of
-\citet{cressie1980}, cutoff at half the maximum pairwise distance, 15 lags.
-Exponential, spherical, Gaussian and Mat\'ern models are each fitted by weighted
-least squares to the same empirical variogram, and the simplest family within a
-relative tolerance of $0.05$ of the best weighted residual sum of squares is
-retained. The practical range is the distance at which the fitted model first
-reaches 95 per cent of its sill, evaluated numerically so that it means the same
-thing for every family.
-
-\paragraph{Search axes} Three variogram configurations join the default: cutoff
-$0.35$ with 15 lags, cutoff $0.65$ with 20 lags, and the classical
-\citet{matheron1963} estimator at the default binning. The range multiplier
-takes $m_b \in \{0.25,0.5,1.0\}$, with $0.5$ the default arm. The anisotropic
-variant is offered for the two leading profiles; candidate geometries are angles
-$\{0,22.5,\dots,157.5\}$ degrees crossed with ratios
-$\{1,0.75,0.55,0.40,0.25\}$, scored by 5-fold out-of-fold error of a kernel
-smoother whose bandwidth is $0.15$ times the median pairwise distance in the
-transformed space, and accepted only on an improvement exceeding 3 per cent. The
-threshold is a parsimony rule rather than a test: the anisotropic geometry costs
-two extra parameters, and a margin of this size keeps it out unless the
-out-of-fold gain is larger than the run-to-run variation we observed in the
-isotropic fits.
-
-\paragraph{Gate and intervals} The gate length multiplier is chosen by spatially
-blocked cross-validation with four $k$-means blocks, the candidate set including
-the value that disables the gate. Intervals are formed with $K=5$ and $\alpha=0.10$ over the calibration partition
-described above, which is drawn independently of the selection folds and of the
-response; the selection is re-run inside each of those folds, as
-Section~\ref{sec:intervals} sets out. The covariate-shift variant estimates density ratios with a forest
-classifier separating calibration points from a sample of the population
-covariates, clipping weights at 20; the spatial-block variant refits on five
-$k$-means blocks. The quantile regression forest baseline uses \texttt{ranger}
-with \texttt{quantreg = TRUE} and the same predictors.
-
-\paragraph{Sampling designs} Simple random sampling draws $n=500$ cells without
-replacement; the systematic design draws a regular grid; the clustered design is
-two-stage with 20 primary units chosen over 100 $k$-means centres and 25 points
-each. Primary units are drawn with replacement, so the realised number of
-distinct units is smaller than the nominal one, 18.2 in expectation for 20 and
-7.7 and 27.5 for the 8 and 32 used in Section~\ref{sec:sizes}. The validation
-sample is an independent simple random sample of $n=500$ drawn from the same
-frame without excluding calibration cells, an overlap of about one cell in
-2600 at that size. The 20{,}000-cell estimand of Table~\ref{tab:estimands} is a fresh simple
-random sample in each repetition, drawn from the cells not used for
-calibration. Spatial
-block cross-validation uses complete-linkage clustering of coordinates cut at
-350 km.
-
-\paragraph{The sensitivity campaigns} Section~\ref{sec:sizes} varies the
-calibration size over 200, 500 and 800 with 30 repetitions per cell and the
-validation draw fixed at 500, which the runner takes from a separate setting so
-that the precision of the measurement does not move with the quantity measured.
-Under the random design the size is the number of cells drawn. Under the
-clustered design it is the product of the primary-unit count and the points
-within each, and the two are varied separately: 20 units by 10, 25 and 40
-points, and 8, 20 and 32 units by 25 points. The 20 by 25 cell is shared by both
-arms and is reported once. Section~\ref{sec:distance} re-runs three of these
-designs with 10 repetitions each and an additional per-point record: the
-coordinates of every validation point, its distance to the nearest calibration
-point, the observation, the prediction and both interval bounds. That record is
-written only when explicitly requested, since it is three orders of magnitude
-larger than the aggregated outputs.
-
-\paragraph{Preprocessing, missing data, seeds} Covariates and response enter
-untransformed. Rows with non-finite response or coordinates are dropped before
-variogram fitting, and constant or duplicated predictor columns are removed
-before fitting. Every \texttt{ranger} call receives an explicit seed and
-\texttt{ranger} 0.18 and later is reproducible across thread counts; the
-estimand campaign draws repetition $i$ with seed $123 + 1000(i-1)$, while the
-30-repetition campaigns seed the stream once with $123$ and draw the
-repetitions in sequence. The internal
-random state is restored on exit with \texttt{withr}, so calling the estimator
-does not alter the user's stream.
-
-\paragraph{Software and scripts} R 4.6.0 with \texttt{ranger}
-\citep{wright2017}, \texttt{gstat} \citep{pebesma2004}, \texttt{caret},
-\texttt{Cubist} and \texttt{nnet}. The estimator is the \texttt{GeoVersa}
-package. Every table and figure in this paper is produced by
-\file{run_dbtarf_wadoux_comparison.R} (accuracy campaigns),
-\file{run_dbtarf_protocols_comparison.R} (estimands),
-\file{simulations.R} (Section~\ref{sec:sims}), \file{tables_manuscript.R}
-(all tables), \file{maps_compute.R} with \file{maps_plot.R} (the maps),
-\file{figures_schematic.R}, \file{figures_protocols.R},
-\file{figures_uncertainty.R} and \file{figures_distance.R} (the remaining
-figures). The campaign sets are driven by \file{run_all_campaigns.sh} for the
-headline designs, \file{run_size_sweep.sh} for Section~\ref{sec:sizes} and
-\file{run_point_dump.sh} for Section~\ref{sec:distance}; \file{freeze_check.sh}
-is the pre-flight that gates a launch, and refuses to run against a working tree
-with uncommitted changes. Every campaign directory records the git commit,
-whether the tree was dirty, the R version, a timestamp and the sampling
-parameters that governed it, and the table generator drops any campaign whose
-recorded calibration size is not the size the table claims for it.
-
-
 \section*{Data and code availability}
 
 No new primary data were collected for this study.
@@ -1566,14 +1526,8 @@ rather than take the enumeration on trust.
 \paragraph{Derived results} The campaign outputs behind every table and figure,
 comprising thirteen campaigns of thirty repetitions and three of ten, amount to
 roughly 833 MB and are not distributed. They are reproducible from the sources
-above: \file{code/run_all_campaigns.sh} produces the three headline designs,
-\file{code/run_size_sweep.sh} the size and geometry sweep of
-Section~\ref{sec:sizes}, and \file{code/run_point_dump.sh} the per-point records
-behind Fig.~\ref{fig:distance}. Every results directory records the git commit,
-whether the working tree was clean, the R version, a timestamp and the sampling
-parameters that governed the run, and the table generator refuses any campaign
-whose configuration lacks a commit. Complete computational settings, including
-seeds, are given in Appendix~A.
+above with the scripts and settings of Sections~\ref{sec:settings}
+and~\ref{sec:software}.
 
 \section*{Declaration of generative AI and AI-assisted technologies in the
 manuscript preparation process}
