@@ -55,7 +55,7 @@ local({
   source(hit[1L])
 })
 setwd(gv_root())
-suppressPackageStartupMessages({ library(ggplot2); library(patchwork) })
+source("code/figure_theme.R")
 
 out_png <- "Text/ecomod_submission/figures/fig8_distance.png"
 out_csv <- gv_results("fig8_curves.csv")
@@ -63,9 +63,9 @@ B <- 1000L                      # bootstrap replicates, resampling repetitions
 set.seed(20260814L)
 
 DESIGNS <- list(
-  list(dir = "pts_random",    lab = "Simple random, 500",        col = "#668B5A"),
-  list(dir = "pts_clus_mid",  lab = "Clustered 20/25, 500",      col = "#BE9058"),
-  list(dir = "pts_clus_wide", lab = "Clustered 8/25, 200",       col = "#8C5A24")
+  list(dir = "pts_random",    lab = "Simple random",        col = COL_SRS),
+  list(dir = "pts_clus_mid",  lab = "Clustered 20 \u00d7 25", col = COL_CLUS),
+  list(dir = "pts_clus_wide", lab = "Clustered 8 \u00d7 25",  col = COL_CLUSW)
 )
 
 # ---- load, with the assertions the dump cannot make for itself --------------
@@ -217,90 +217,99 @@ for (i in seq_len(nrow(slopes))) {
 }
 
 # ---- plot -------------------------------------------------------------------
-theme_d <- function() {
-  theme_minimal(base_size = 11) +
-    theme(panel.grid.minor = element_blank(),
-          plot.title = element_text(face = "bold", size = 11),
-          legend.position = "bottom", legend.title = element_blank())
-}
 XLIM <- range(GRID)
-xsc <- function() scale_x_log10(
+xsc <- function(title = NULL) scale_x_log10(
   breaks = c(2, 5, 10, 25, 50, 100, 200, 400),
   labels = c("2", "5", "10", "25", "50", "100", "200", "400"),
-  limits = XLIM)
+  limits = XLIM, name = title)
+med <- vapply(LEV, function(L) stats::median(dat$d_km[dat$design == L]), 0)
+far <- vapply(LEV, function(L) mean(dat$d_km[dat$design == L] > 100), 0)
 
-# Only the line layers carry the design legend. Ribbons and points repeat it,
-# which is how the first draft acquired three identical entries.
+# a: exposure, directly labelled at each design's median distance
+lab_a <- data.frame(design = factor(LEV, levels = LEV), d_km = med,
+                    frac = 0.5,
+                    txt = sprintf("%.0f km", med),
+                    hj = c(1.25, 0.5, 0.5)[seq_along(LEV)],
+                    vj = c(0.5, 2.0, -1.0)[seq_along(LEV)])
 p_a <- ggplot(curves, aes(d_km, frac, colour = design, fill = design)) +
-  geom_ribbon(aes(ymin = frac_lo, ymax = frac_hi), alpha = 0.18, colour = NA,
-              show.legend = FALSE) +
-  geom_line(linewidth = 0.7) +
-  scale_colour_manual(values = PAL) + scale_fill_manual(values = PAL) +
-  xsc() + scale_y_continuous(limits = c(0, 1)) +
-  labs(title = expression(bold("a  How much of the map lies beyond ") * bold(delta)),
-       x = NULL, y = "fraction of domain") +
-  theme_d() + guides(colour = "none", fill = "none")
+  geom_ribbon(aes(ymin = frac_lo, ymax = frac_hi), alpha = 0.18, colour = NA) +
+  geom_line(linewidth = 0.9) +
+  geom_point(data = lab_a, size = 2.2, shape = 21, fill = "white", stroke = 1) +
 
-# Long form so the two quantities are a mapped aesthetic with a legend, rather
-# than two anonymous line types the reader has to guess at.
+  scale_colour_manual(values = PAL) + scale_fill_manual(values = PAL) +
+  xsc("Distance (km)") +
+  scale_y_continuous(limits = c(0, 1), labels = function(b) sprintf("%.0f%%", 100 * b)) +
+  labs(title = "a  Distance to the sample",
+       subtitle = sprintf("Share of the domain farther than a given\ndistance; circles: medians, %s km",
+                          paste(sprintf("%.0f", med), collapse = ", ")),
+       y = "Share of domain") +
+  theme_paper() + guides(colour = "none", fill = "none")
+
+# b: error against the half-width the interval issued, eight-unit design
+# annotated because it spans the widest range of distance
+w8 <- dec[dec$design == LEV[length(LEV)], ]
+rise_e <- 100 * (w8$rmse[nrow(w8)] / w8$rmse[1] - 1)
+rise_w <- 100 * (w8$w[nrow(w8)] / w8$w[1] - 1)
+message(sprintf("[fig8] 8x25: error +%.1f%%, half-width +%.1f%%", rise_e, rise_w))
 dec_long <- rbind(
-  data.frame(dec[c("design", "d_km")], quantity = "realised error (RMSE)", value = dec$rmse),
-  data.frame(dec[c("design", "d_km")], quantity = "interval half-width",   value = dec$w))
-dec_long$quantity <- factor(dec_long$quantity,
-                            levels = c("realised error (RMSE)", "interval half-width"))
-
-p_b <- ggplot(dec_long, aes(d_km, value, colour = design, linetype = quantity)) +
-  geom_line(linewidth = 0.7) +
-  geom_point(size = 1.2, show.legend = FALSE) +
+  data.frame(dec[c("design", "d_km")], quantity = "error", value = dec$rmse),
+  data.frame(dec[c("design", "d_km")], quantity = "width", value = dec$w))
+p_b <- ggplot(dec_long, aes(d_km, value, colour = design,
+                            linetype = quantity, group = interaction(design, quantity))) +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 1.5, show.legend = FALSE) +
+  annotate("text", x = 2.2, y = 59, label = "Half-width issued (dashed)",
+           hjust = 0, vjust = 1, size = pt2mm(PT_SMALL), family = FONT,
+           colour = INK, fontface = "bold") +
+  annotate("text", x = 2.2, y = 21, label = "Realised RMSE (solid)",
+           hjust = 0, vjust = 0, size = pt2mm(PT_SMALL), family = FONT,
+           colour = INK, fontface = "bold") +
+  annotate("text", x = 2.2, y = 44, hjust = 0, vjust = 0.5,
+           label = sprintf("8 \u00d7 25 design: error +%.0f%%,\nhalf-width +%.0f%%",
+                           rise_e, rise_w),
+           size = pt2mm(PT_SMALL - 1), family = FONT, colour = COL_CLUSW,
+           fontface = "bold", lineheight = 0.95) +
   scale_colour_manual(values = PAL) +
-  scale_linetype_manual(values = c("solid", "22")) +
-  xsc() + expand_limits(y = 0) +
-  labs(title = "b  The error responds to distance and the interval does not",
-       x = NULL, y = expression("Mg ha"^-1)) +
-  theme_d() +
-  # colour legend suppressed here: panel b maps linetype as well, so its colour
-  # key carries a different glyph and patchwork will not merge it with the other
-  # two, producing the same three designs twice
-  guides(colour = "none",
-         linetype = guide_legend(order = 2, override.aes = list(colour = "grey30")))
+  scale_linetype_manual(values = c(error = "solid", width = "22")) +
+  xsc("Distance (km)") +
+  scale_y_continuous(limits = c(20, 59), breaks = seq(20, 55, 5)) +
+  labs(title = "b  Error grows, width does not",
+       subtitle = "Mean in each distance band, pooled over\nten repetitions",
+       y = expression("Mg ha"^-1)) +
+  theme_paper() + guides(colour = "none", linetype = "none")
 
-# Local coverage is the primary here. The cumulative curve answers a different
-# question, "everything beyond delta", and because each design integrates over
-# its own distance distribution the three cumulative curves cannot coincide even
-# when the designs behave identically at matched distance. Showing it as the
-# heavy line hid exactly the comparison the panel exists to make.
-p_c <- ggplot(dec, aes(d_km, cover, colour = design, fill = design)) +
-  geom_line(data = curves, aes(y = cov), linewidth = 0.4, alpha = 0.45,
-            show.legend = FALSE) +
-  geom_errorbar(aes(ymin = cov_lo, ymax = cov_hi), width = 0.04,
-                linewidth = 0.5, show.legend = FALSE) +
-  geom_line(linewidth = 0.8) +
-  geom_point(size = 1.6, shape = 21, fill = "white", stroke = 0.8,
-             show.legend = FALSE) +
-  geom_hline(yintercept = 0.90, linetype = "dashed", colour = "#B03A2E",
-             linewidth = 0.7) +
-  annotate("text", x = 2.2, y = 0.907, label = "nominal 0.90", hjust = 0,
-           vjust = 0, size = 3, colour = "#B03A2E", fontface = "bold") +
-  annotate("text", x = 2.2, y = 0.625,
-           label = "circles: coverage within a distance band, 95% CI over repetitions\nfaint line: coverage of everything beyond delta",
-           hjust = 0, vjust = 0, size = 2.7, colour = "grey35", lineheight = 1.1) +
-  scale_colour_manual(values = PAL) + scale_fill_manual(values = PAL) +
-  xsc() + coord_cartesian(ylim = c(0.60, 1.0)) +
+# c: coverage within shared distance bands
+p_c <- ggplot(dec, aes(d_km, cover, colour = design)) +
+  geom_hline(yintercept = 0.90, colour = INK, linewidth = 0.5, linetype = "22") +
+  annotate("text", x = 2.1, y = 0.905, label = "nominal 0.90", hjust = 0,
+           vjust = 0, size = pt2mm(PT_SMALL), family = FONT, colour = INK,
+           fontface = "bold") +
+  geom_errorbar(aes(ymin = cov_lo, ymax = cov_hi), width = 0.05,
+                linewidth = 0.6) +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 2.2, shape = 21, fill = "white", stroke = 1) +
+  scale_colour_manual(values = PAL) +
+  xsc("Distance to the nearest calibration point (km)") +
+  scale_y_continuous(limits = c(0.70, 1.0), breaks = seq(0.7, 1, 0.05),
+                     labels = c(".70", ".75", ".80", ".85", ".90", ".95", "1")) +
   labs(title = "c  At the same distance, the designs cover the same",
-       x = "Distance to the nearest calibration point (km)",
-       y = "coverage") +
-  theme_d() +
-  # the only design key in the composition: panel a suppresses its own and
-  # panel b maps linetype as well, so neither merges cleanly with this one
-  guides(fill = "none", colour = guide_legend(order = 1))
+       subtitle = paste0("Coverage of the CV+ interval within each distance band; bars are 95% intervals from a\n",
+                         "bootstrap over whole repetitions. What differs between designs is how much of the map\n",
+                         "lies at each distance (a), not how the interval behaves there."),
+       y = "Coverage") +
+  theme_paper() +
+  theme(legend.position = "bottom") +
+  guides(colour = guide_legend(override.aes = list(linewidth = 0.9)))
 
-fig <- (p_a / p_b / p_c) + plot_layout(guides = "collect", heights = c(0.85, 1, 1.25)) &
-  theme(legend.position = "bottom", legend.box = "vertical",
-        legend.margin = margin(0, 0, 0, 0))
+fig <- ((p_a | p_b) / p_c) +
+  plot_layout(heights = c(1, 1), guides = "collect") +
+  plot_annotation(
+    title = "Where the interval fails: distance from the calibration sample",
+    subtitle = paste0("Calibration designs: simple random, n = 500; clustered, 20 units \u00d7 25 points, n = 500;\n",
+                      "clustered, 8 \u00d7 25, n = 200. Ten repetitions each, scored on 500 validation points apiece."),
+    theme = theme_paper()) &
+  theme(legend.position = "bottom")
 
-# Kept wider than tall. At width = textwidth an aspect ratio above about 1.1
-# makes the float taller than the text block, and LaTeX defers it to the end
-# of the document; this one was landing after the bibliography.
-ggsave(out_png, fig, width = 9.2, height = 8.4, dpi = 300, bg = "white")
+save_fig(fig, out_png, height_mm = 148)
 write.csv(curves, out_csv, row.names = FALSE)
 cat(sprintf("wrote %s\nwrote %s\n", out_png, out_csv))

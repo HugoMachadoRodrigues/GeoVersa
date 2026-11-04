@@ -642,14 +642,18 @@ package names DB-TARF, and deliberately keep
 with no Horvitz-Thompson estimator and no design-weighted objective. What is
 design-based here is the assessment protocol, not the model.
 
-\begin{figure}[!ht]
+\begin{figure}[!htbp]
 \centering
-\includegraphics[width=0.8\textwidth]{figures/fig1_schematic.png}
-\caption{The procedure. Cross-fitting on the calibration sample produces
-leakage-free out-of-fold predictions and residual candidates; the profile,
-correction, shrinkage and gate are selected by out-of-fold RMSE and accepted
-only if they beat the RF-only baseline; the winners are refitted on the full
-sample and the map is scored on an independent probability sample.}
+\includegraphics[width=\textwidth]{figures/fig1_schematic.png}
+\caption{How the map and its interval are built from one calibration sample
+and judged on another. Left, the point map: every configuration is scored out of
+fold, the uncorrected forest ($\lambda = 0$) is always among the candidates,
+and the winner is refitted on the whole calibration sample. Right, the CV+
+interval: the selection is repeated inside each fold, so every conformity score
+comes from a model that neither saw its point nor chose its configuration on
+it; the interval is therefore not a band around the map. Bottom, the only step
+that carries the design-based argument of Section~\ref{sec:ht}: both
+products are scored on an independent probability sample.}
 \label{fig:schematic}
 \end{figure}
 
@@ -670,7 +674,12 @@ sample of 20{,}000 cells, which is a precise estimate of population accuracy but
 not the population quantity itself. That quantity is available here, because the
 benchmark surface is fully known: computed over all 1{,}310{,}143 cells, the root mean squared error is 31.655 \Mgha{} for the default
 forest and 31.219 for the corrected map, with bias falling from $+0.378$ to
-$+0.146$ (Fig.~\ref{fig:maps}).
+$+0.146$ (Fig.~\ref{fig:maps}). Scored cell by cell, the error grows with
+distance from the calibration sample even under simple random sampling, from
+29.8 \Mgha{} within 10 km of a calibration point to 33.1 between 40 and 60 km
+for the default forest, and the correction lowers it in every distance band
+(Fig.~\ref{fig:maps}c,d): the population counterpart of what
+Section~\ref{sec:distance} measures on validation samples.
 
 \begin{table}[!ht]
 \centering
@@ -709,13 +718,18 @@ RMSE in \Mgha{}.}
 \input{tables/paired}
 \end{table}
 
-\begin{figure}[!ht]
+\begin{figure}[!htbp]
 \centering
 \includegraphics[width=\textwidth]{figures/fig7_maps.png}
-\caption{Observed biomass, the two predicted surfaces and their error fields for
-one calibration sample of $n=500$. Panels (a) to (c) share one colour scale and
-panels (d) and (e) share one symmetric scale, so that every comparison is visual
-as well as numerical. Red circles in (a) mark the calibration points.}
+\caption{One simple random calibration sample of $n=500$, with the corrected
+map scored against the default forest over all 1{,}310{,}143 cells of the
+benchmark rather than on a validation sample. (a) The reference surface of
+\citet{baccini2012} with the calibration points. (b) Where the correction
+changes the error: the difference in RMSE between TARF and the default forest
+in 10 km blocks, blue where TARF is closer to the reference. (c) Population RMSE
+in bands of distance to the nearest calibration point. (d) The change in RMSE
+in each band, labelled with the share of the map the band holds; the overall
+difference of $-0.44$ \Mgha{} is close to their share-weighted mean.}
 \label{fig:maps}
 \end{figure}
 
@@ -809,15 +823,16 @@ simple random calibration design. RMSE in \Mgha{}.}
 \input{tables/estimands}
 \end{table}
 
-\begin{figure}[!ht]
+\begin{figure}[!htbp]
 \centering
-\includegraphics[width=0.88\textwidth]{figures/fig4_protocols.png}
-\caption{Comparison under four validation estimands, simple random calibration
-design. The two simple random samples estimate map accuracy; the two
-cross-validation estimands are reported for model comparison only and are not
-valid map-accuracy estimates. The cross-validation bars train on subsets of the
-calibration sample, so their absolute heights are not comparable with the first
-two.}
+\includegraphics[width=\textwidth]{figures/fig4_protocols.png}
+\caption{Paired difference in RMSE between TARF and the default forest under
+four estimands, simple random calibration. Each dot is one repetition; the
+diamond and bar are the mean and its 95 per cent confidence interval, and the
+right-hand column gives the mean and the number of repetitions TARF won. The
+two simple random samples estimate map accuracy. The two cross-validation
+protocols are reported for model comparison only: they are not valid estimators
+of map accuracy and train on subsets of the calibration sample.}
 \label{fig:protocols}
 \end{figure}
 
@@ -921,14 +936,18 @@ Estimating coverage as a population parameter on a probability sample is what
 identifies it, and it does so without sharing any assumption with the method
 under test.
 
-\begin{figure}[!ht]
+\begin{figure}[!htbp]
 \centering
 \includegraphics[width=\textwidth]{figures/fig6_uncertainty.png}
-\caption{Design-based interval assessment. Left, coverage with the nominal 0.90
-level marked; right, mean interval width. The plain conformal calibration is
-empirically well calibrated and sharpest under representative sampling but
-under-covers under clustering. Two intervals hold up there, the spatial-block calibration and the
-quantile regression forest, both at the cost of width.}
+\caption{Design-based assessment of five interval constructions, the rows of
+Table~\ref{tab:coverage}, at a nominal 0.90 level. Each small dot is one of the
+30 repetitions, scored on its own simple random validation sample of 500 cells;
+the large dot and bar are the mean and its 95 per cent confidence interval.
+Colour is the calibration design. (a) Coverage: the deployed CV+ interval sits
+at the nominal level under representative sampling and below it under
+clustering, where the whole distribution shifts down and spreads out. (b) Mean
+width: the spatial-block calibration and the quantile regression forest hold
+their coverage under clustering at the cost of width.}
 \label{fig:uncertainty}
 \end{figure}
 
@@ -986,19 +1005,18 @@ inherits the optimism. Clustering therefore acts twice and in the same
 direction: it moves the target population away from the calibration sample, and
 it makes that sample understate the error.
 
-\begin{figure}[!ht]
+\begin{figure}[!htbp]
 \centering
 \includegraphics[width=\textwidth]{figures/fig8_distance.png}
-\caption{Where the interval fails. (a) The fraction of the mapped domain lying
-farther than $\delta$ from any calibration point, estimated design-unbiasedly
+\caption{Where the interval fails, for three calibration designs with ten
+repetitions each. (a) The fraction of the mapped domain lying farther than a
+given distance from any calibration point, with each design's median marked, estimated design-unbiasedly
 because validation is a simple random sample of the same frame in every
 repetition. (b) Conditional RMSE (solid) and the mean half-width the interval
 issued (dashed), in distance bands. (c) Coverage within each band, with 95 per
 cent intervals from a bootstrap that resamples whole repetitions, since the 500
-points of a repetition share one fitted model and one conformal calibration; the
-faint lines are the coverage of all points beyond $\delta$, which cannot
-coincide across designs because each averages over its own distance
-distribution. Distance indexes the failure and is not shown to cause it: within
+points of a repetition share one fitted model and one conformal calibration.
+Distance indexes the failure and is not shown to cause it: within
 one design, distance from the calibration sample and geographic position are the
 same variable, and the causal argument is the stationary-field simulation of
 Section~\ref{sec:sims}. Distances are geometric and say nothing directly about

@@ -1,21 +1,23 @@
 # =============================================================================
 # figures_protocols.R
 #
-# Regenerates Text/ecomod_submission/figures/fig4_protocols.png from the canonical
-# v0.3.0 result directories, so the figure cannot drift from the tables again.
+# Figure 3: the paired difference in RMSE between TARF and the default forest
+# under four estimands, one dot per repetition.
 #
-# Reads:
-#   results/rev1_random_confirm30/                 (DesignBased, 30 reps; the
-#                                                  same campaign the estimand
-#                                                  table reads, so the two agree)
-#   results/canon_v030_protocols_confirm10/        (Population / RandomKFold /
-#                                                   SpatialKFold, 10 reps each)
+# An earlier version drew two bars per estimand. Bars on an RMSE axis starting
+# at zero spend most of their height on the 30 Mg/ha both models share, show
+# the difference only as a sliver, and hide the spread between repetitions,
+# which is what tells a reader whether ten draws are enough. Plotting the
+# paired difference itself puts the quantity being compared on the axis.
+#
+# Inputs:
+#   final_random_confirm30           design-based campaign, 30 repetitions
+#   canon_v030_protocols_confirm10   the 20,000-cell sample and the two
+#                                    cross-validation protocols, 10 repetitions
 #
 # Usage:  Rscript code/figures_protocols.R
 # =============================================================================
 
-# Portable root resolution; see code/project_paths.R. Works whether the script
-# is run from the repository root or from inside code/.
 local({
   cands <- c("code/project_paths.R", "project_paths.R", "../code/project_paths.R")
   hit <- cands[file.exists(cands)]
@@ -23,91 +25,108 @@ local({
   source(hit[1L])
 })
 setwd(gv_root())
+source("code/figure_theme.R")
 
 out_png <- "Text/ecomod_submission/figures/fig4_protocols.png"
 
-# ---- DesignBased (random design, 30 reps) -----------------------------------
-
-# Read through gv_results and from the campaign the tables read, not through a
-# relative path into the repository's own results directory. Both mattered: the
-# hardcoded path bypassed the resolver that exists so that no script carries a
-# machine-specific location, and rev1_random_confirm30 is a superseded campaign
-# that predates the provenance discipline, records no git_commit, and disagrees
-# with the current one. The figure showed a design-based gain of 0.876 while
-# Table 6 showed 0.849, from what a reader would take to be one experiment.
+# ---- design-based campaign (30 reps) ----------------------------------------
 db_dir <- gv_results("final_random_confirm30")
-stopifnot(dir.exists(db_dir))
 db_cfg <- read.csv(file.path(db_dir, "dbtarf_config.csv"), stringsAsFactors = FALSE)
 if (!"git_commit" %in% names(db_cfg) || !nzchar(as.character(db_cfg$git_commit[1]))) {
   stop("campaign without provenance: ", db_dir)
 }
-db <- read.csv(file.path(db_dir, "dbtarf_summary_by_protocol.csv"),
+pd <- read.csv(file.path(db_dir, "dbtarf_paired_deltas_vs_RF.csv"),
                stringsAsFactors = FALSE)
-get_db <- function(m) db$RMSE_mean[db$model == m][1]
+pd <- pd[pd$protocol == "DesignBased", ]
 
-# ---- Population / RandomKFold / SpatialKFold (10 reps each) -----------------
-
+# ---- the other three estimands (10 reps) ------------------------------------
 pr <- read.csv(gv_results("canon_v030_protocols_confirm10",
                           "dbtarf_protocols_all_results.csv"),
                stringsAsFactors = FALSE)
-agg <- function(proto, col) mean(pr[[col]][pr$protocol == proto], na.rm = TRUE)
 
-estimands <- c("Population", "DesignBased", "RandomKFold", "SpatialKFold")
-n_reps    <- c(10, 30, 10, 10)
+ROWS <- c(Population   = "Independent SRS,\n20,000 cells",
+          DesignBased  = "Independent SRS,\n500 cells",
+          RandomKFold  = "Random 10-fold\ncross-validation",
+          SpatialKFold = "Spatial block\ncross-validation")
+GROUP <- c(Population = "map", DesignBased = "map",
+           RandomKFold = "cv", SpatialKFold = "cv")
 
-rf_rmse <- c(agg("Population", "RMSE_RF"),
-             get_db("RF"),
-             agg("RandomKFold", "RMSE_RF"),
-             agg("SpatialKFold", "RMSE_RF"))
+# Per-repetition deltas recomputed from the two RMSE columns rather than read
+# from a rounded delta column.
+pts <- rbind(
+  data.frame(est = "DesignBased", delta = pd$RMSE_DBTARF - pd$RMSE_RF),
+  do.call(rbind, lapply(c("Population", "RandomKFold", "SpatialKFold"),
+    function(p) { z <- pr[pr$protocol == p, ]
+      data.frame(est = p, delta = z$RMSE_DBTARF - z$RMSE_RF) })))
+pts$row <- factor(ROWS[pts$est], levels = rev(unname(ROWS)))
+pts$grp <- GROUP[pts$est]
 
-db_rmse <- c(agg("Population", "RMSE_DBTARF"),
-             get_db("DBTARF"),
-             agg("RandomKFold", "RMSE_DBTARF"),
-             agg("SpatialKFold", "RMSE_DBTARF"))
+smry <- do.call(rbind, lapply(names(ROWS), function(e) {
+  x <- pts$delta[pts$est == e]
+  tt <- stats::t.test(x)
+  data.frame(est = e, row = ROWS[[e]], grp = GROUP[[e]], n = length(x),
+             mean = mean(x), lo = tt$conf.int[1], hi = tt$conf.int[2],
+             wins = sum(x < 0))
+}))
+smry$row <- factor(smry$row, levels = levels(pts$row))
+print(smry[, c("est", "n", "mean", "lo", "hi", "wins")], row.names = FALSE)
 
-M <- rbind(RF = rf_rmse, DBTARF = db_rmse)
-colnames(M) <- estimands
+COLS <- c(map = COL_TARF, cv = MUTED)
+# Row positions with a gap between the two groups, so each group can carry a
+# header without touching the dots of the row beneath it.
+YPOS <- c(SpatialKFold = 1, RandomKFold = 2, DesignBased = 3.55, Population = 4.55)
+set.seed(7)
+pts$y  <- YPOS[pts$est] + stats::runif(nrow(pts), -0.17, 0.17)
+smry$y <- YPOS[smry$est]
+umin <- function(x) gsub("-", "\u2212", x, fixed = TRUE)
 
-# ---- Plot -------------------------------------------------------------------
+XL <- c(-2.6, 0.55)
+p <- ggplot() +
+  annotate("rect", xmin = -Inf, xmax = Inf, ymin = 3.1, ymax = 5.0, fill = PANEL) +
+  annotate("text", x = XL[1], y = 5.12, hjust = 0, vjust = 0,
+           label = "Map accuracy: independent probability samples",
+           size = pt2mm(PT_SMALL), family = FONT, fontface = "bold",
+           colour = COL_TARF) +
+  annotate("text", x = XL[1], y = 2.4, hjust = 0, vjust = 0,
+           label = "Model comparison only: not map accuracy",
+           size = pt2mm(PT_SMALL), family = FONT, fontface = "bold",
+           colour = INK2) +
+  geom_vline(xintercept = 0, colour = INK2, linewidth = 0.4) +
+  annotate("text", x = 0.04, y = 0.45, hjust = 0, vjust = 0,
+           label = "no difference", size = pt2mm(PT_SMALL - 1),
+           family = FONT, colour = INK2) +
+  annotate("text", x = -0.06, y = 0.45, hjust = 1, vjust = 0,
+           label = "\u2190 TARF more accurate", size = pt2mm(PT_SMALL - 1),
+           family = FONT, colour = COL_TARF, fontface = "bold") +
+  geom_point(data = pts, aes(delta, y, colour = grp), size = 1.5, alpha = 0.55,
+             shape = 16) +
+  geom_errorbar(data = smry, aes(xmin = lo, xmax = hi, y = y), width = 0,
+                linewidth = 1.1, colour = INK, orientation = "y") +
+  geom_point(data = smry, aes(mean, y), shape = 23, size = 3, fill = "white",
+             colour = INK, stroke = 0.9) +
+  # summary column outside the panel, so it never sits on a dot
+  annotate("text", x = 0.72, y = 5.12, hjust = 0, vjust = 0, label = "Mean,\nwins",
+           size = pt2mm(PT_SMALL), family = FONT, fontface = "bold", colour = INK) +
+  geom_text(data = smry, aes(x = 0.72, y = y,
+            label = umin(sprintf("%+.2f\n%d of %d", mean, wins, n))),
+            hjust = 0, size = pt2mm(PT_SMALL), family = FONT, colour = INK,
+            lineheight = 0.95) +
+  scale_colour_manual(values = COLS, guide = "none") +
+  scale_y_continuous(breaks = unname(YPOS[names(ROWS)]), labels = unname(ROWS)) +
+  scale_x_continuous(breaks = seq(-2.5, 0.5, 0.5),
+                     labels = function(b) ifelse(b == 0, "0", umin(sprintf("%+.1f", b)))) +
+  labs(title = "TARF against the default forest under four estimands",
+       subtitle = paste0("Paired RMSE difference per repetition (dots), with mean and 95%\n",
+                         "confidence interval (diamond, bar). Simple random calibration, n = 500.\n",
+                         "Cross-validation trains on subsets of the sample, so its rows are not\n",
+                         "on the same footing as the two map-accuracy estimates."),
+       x = expression("Difference in RMSE, TARF " - " RF (Mg ha"^-1 * ")"),
+       y = NULL) +
+  coord_cartesian(xlim = XL, ylim = c(0.4, 5.45), expand = FALSE, clip = "off") +
+  theme_paper() +
+  theme(panel.grid.major.y = element_blank(),
+        plot.margin = margin(4, 52, 4, 4),
+        axis.text.y = element_text(size = PT_SMALL, colour = INK, hjust = 0,
+                                   lineheight = 0.95))
 
-grDevices::png(out_png, width = 2200, height = 1250, res = 200)
-op <- par(mar = c(6.2, 5.5, 4.2, 1.5))
-
-cols <- c("grey55", "#1B7837")
-# Display names, not the runner's protocol identifiers: the paper calls the
-# first row a large independent sample precisely because it is not the
-# population quantity itself.
-shown <- c("SRS, 20,000 cells", "SRS, 500 cells", "Random 10-fold CV",
-           "Spatial block CV")
-labs <- sprintf("%s\n(%d reps)\n%s = %+.2f",
-                shown, n_reps, "Δ", db_rmse - rf_rmse)
-
-bp <- barplot(M, beside = TRUE, col = cols, border = "black",
-              ylim = c(0, 44), yaxs = "i", axisnames = FALSE,
-              ylab = expression("Estimated RMSE  (Mg ha"^-1 * ")"),
-              cex.lab = 1.2, cex.axis = 1.05,
-              main = "TARF vs the default random forest across four estimands",
-              cex.main = 1.15)
-
-text(bp, M + 1.2, sprintf("%.1f", M), cex = 1.0)
-
-# grouped x labels, with the paired delta folded in
-mtext(labs, side = 1, line = 2.6, at = colMeans(bp), cex = 1.0)
-
-# framing: only the first two estimands are map accuracy
-mtext(expression(bold("map accuracy")), side = 3, line = -0.4,
-      at = mean(colMeans(bp)[1:2]), cex = 0.95, col = "#1B5E20")
-mtext("model comparison only (not map accuracy)", side = 3, line = -0.4,
-      at = mean(colMeans(bp)[3:4]), cex = 0.95, col = "grey30")
-
-legend("topleft", inset = c(0.01, 0.02),
-       legend = c("RF (default)", "TARF"),
-       fill = cols, border = "black", bty = "n", cex = 1.1, horiz = TRUE)
-
-par(op)
-grDevices::dev.off()
-
-cat(sprintf("wrote %s\n", out_png))
-print(round(M, 3))
-cat("\ndeltas:\n")
-print(round(db_rmse - rf_rmse, 3))
+save_fig(p, out_png, height_mm = 104)

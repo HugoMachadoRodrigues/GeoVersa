@@ -18,7 +18,7 @@ Build:
 | `tables/` | ten generated tables the manuscript `\input`s |
 | `highlights.md` | required; 5 bullets, each within 85 characters |
 | `cover-letter.md` | one page; two slots to fill, editor name and date |
-| `figures/graphical_abstract.png` | encouraged; 3984 x 1593 px |
+| `figures/graphical_abstract.png` | encouraged; 3071 x 1228 px, drawn at 130 x 52 mm |
 | `elsevier-harv-expanded.csl` | needed by `make_docx.sh`, not uploaded |
 
 The manuscript carries eleven tables: the ten generated ones plus a descriptive
@@ -37,6 +37,8 @@ inline.
 
 ## Reproducible scripts, in the repository root `code/`
 
+* `figure_theme.R` the shared visual system every figure generator sources:
+  print-size fonts, one colour per calibration design, one per method.
 * `project_paths.R` resolves the repository, the benchmark data and the campaign
   outputs without any absolute path. Every other script bootstraps it.
 * `tables_manuscript.R` all ten generated tables, built from the campaign CSVs
