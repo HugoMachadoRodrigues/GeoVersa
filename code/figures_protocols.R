@@ -74,14 +74,19 @@ grDevices::png(out_png, width = 2200, height = 1250, res = 200)
 op <- par(mar = c(6.2, 5.5, 4.2, 1.5))
 
 cols <- c("grey55", "#1B7837")
-labs <- sprintf("%s\n(n = %d)\n%s = %+.2f",
-                estimands, n_reps, "Δ", db_rmse - rf_rmse)
+# Display names, not the runner's protocol identifiers: the paper calls the
+# first row a large independent sample precisely because it is not the
+# population quantity itself.
+shown <- c("SRS, 20,000 cells", "SRS, 500 cells", "Random 10-fold CV",
+           "Spatial block CV")
+labs <- sprintf("%s\n(%d reps)\n%s = %+.2f",
+                shown, n_reps, "Δ", db_rmse - rf_rmse)
 
 bp <- barplot(M, beside = TRUE, col = cols, border = "black",
               ylim = c(0, 44), yaxs = "i", axisnames = FALSE,
               ylab = expression("Estimated RMSE  (Mg ha"^-1 * ")"),
               cex.lab = 1.2, cex.axis = 1.05,
-              main = "DB-TARF vs the Wadoux default RF across four validation estimands",
+              main = "TARF vs the default random forest across four estimands",
               cex.main = 1.15)
 
 text(bp, M + 1.2, sprintf("%.1f", M), cex = 1.0)
@@ -96,7 +101,7 @@ mtext("model comparison only (not map accuracy)", side = 3, line = -0.4,
       at = mean(colMeans(bp)[3:4]), cex = 0.95, col = "grey30")
 
 legend("topleft", inset = c(0.01, 0.02),
-       legend = c("RF (Wadoux default)", "DB-TARF"),
+       legend = c("RF (default)", "TARF"),
        fill = cols, border = "black", bty = "n", cex = 1.1, horiz = TRUE)
 
 par(op)

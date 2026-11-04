@@ -113,11 +113,11 @@ p_truth <- p_truth + labs(subtitle = sprintf(
 
 p_rf <- map_panel("rf", "b  RF (Wadoux default)",
                   sprintf("population RMSE %.2f Mg ha⁻¹", rmse(d$err_rf)))
-p_db <- map_panel("dbtarf", "c  DB-TARF",
+p_db <- map_panel("dbtarf", "c  TARF",
                   sprintf("population RMSE %.2f Mg ha⁻¹", rmse(d$err_dbtarf)))
 
 p_erf <- map_panel("err_rf", "d  RF error", "prediction - truth", diverging = TRUE)
-p_edb <- map_panel("err_dbtarf", "e  DB-TARF error", "prediction - truth", diverging = TRUE)
+p_edb <- map_panel("err_dbtarf", "e  TARF error", "prediction - truth", diverging = TRUE)
 
 fig <- (p_truth | p_rf | p_db) / (plot_spacer() | p_erf | p_edb) +
   plot_layout(guides = "collect", heights = c(1, 1)) &

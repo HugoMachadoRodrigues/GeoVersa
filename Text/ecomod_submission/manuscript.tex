@@ -162,7 +162,7 @@ Section~\ref{sec:ablation} separates two things the phrase runs together. The
 variogram-derived representation does help: removing it costs $0.172$ \Mgha{},
 a fifth of the total gain, in 26 of 30 repetitions. Selecting the
 variogram's parameters rather than fixing them does not: it is worth $0.008$
-\Mgha{}, with a paired 95 per cent interval of $[-0.038, +0.023]$ that contains
+\Mgha{}, with a paired 95 per cent interval of $[-0.023, +0.038]$ that contains
 zero, and it wins in only 8 of 30 repetitions. What it does deliver is that the null
 correction is in the candidate library, so the selection never returns something
 worse on its own out-of-fold criterion,
@@ -548,8 +548,11 @@ Eq.~(12). That bound is conservative in practice, and
 Section~\ref{sec:sims} measures how much.
 
 When calibration and target cells are drawn by simple random sampling from the
-same population, exchangeability holds and the coverage statement is one about
-the population, which is design-based coverage in the sense of Eq.~(4).
+same population, exchangeability holds and the guarantee concerns a target cell
+drawn uniformly from that population. It then bounds the realised population
+coverage averaged over calibration samples, the second quantity of
+Section~\ref{sec:targets}, which Eq.~(4) estimates without bias once averaged
+in the same way.
 
 Simple random sampling of the calibration points makes them exchangeable with a
 uniformly drawn target cell in the sense the guarantee needs: sampling without
@@ -607,11 +610,11 @@ rather than digital soil mapping specifically: the argument is about how any
 map built from a point sample of a spatial variable should have its intervals
 assessed, and the benchmark is above-ground biomass rather than a soil
 property. Nothing in the derivation is particular to soil, but neither have we
-demonstrated it on a pedological survey, and Section~\ref{sec:limits} says so. It is itself a remote-sensing estimate carrying its own
-error rather than field-measured biomass, so the results below concern how well a
+demonstrated it on a pedological survey, and Section~\ref{sec:limits} says so. The surface is itself a remote-sensing
+estimate carrying its own error rather than field-measured biomass, so the results below concern how well a
 mapping procedure reconstructs this benchmark pseudo-population.
-Calibration samples of $n = 500$ are drawn under the same three designs they
-used: simple random, systematic on a randomly located grid, and two-stage
+Calibration samples of $n = 500$ are drawn under the same three designs
+\citet{wadoux2021} used: simple random, systematic on a randomly located grid, and two-stage
 clustered random, the last drawing 20 primary units and 25 points within each so
 that the sample covers a small fraction of the domain and most of the map is an
 extrapolation. Each map is evaluated on an independent simple random validation
@@ -666,8 +669,8 @@ the improvement is the residual correction and not a better forest. One estimand
 sample of 20{,}000 cells, which is a precise estimate of population accuracy but
 not the population quantity itself. That quantity is available here, because the
 benchmark surface is fully known: computed over all 1{,}310{,}143 cells, the root mean squared error is 31.655 \Mgha{} for the default
-forest and 31.079 for the corrected map, with bias falling from $+0.378$ to
-$+0.127$ (Fig.~\ref{fig:maps}).
+forest and 31.219 for the corrected map, with bias falling from $+0.378$ to
+$+0.146$ (Fig.~\ref{fig:maps}).
 
 \begin{table}[!ht]
 \centering
@@ -780,9 +783,9 @@ information was unnecessary.
 \subsection{The advantage is not specific to the scoring protocol}
 
 We drew 10 further calibration samples under simple random sampling and scored
-each under three additional protocols (Table~\ref{tab:estimands}): a Population
-estimand, an independent simple random sample of 20{,}000 cells excluding the
-calibration cells; random 10-fold cross-validation; and spatial block
+each under three additional protocols (Table~\ref{tab:estimands}): a large
+independent simple random sample of 20{,}000 cells excluding the calibration
+cells, drawn afresh in each repetition; random 10-fold cross-validation; and spatial block
 cross-validation at 350 km, a distance chosen because it exceeds the practical
 range fitted to these residuals, so that held-out blocks fall beyond the
 correlation the model can exploit.
@@ -794,8 +797,8 @@ reported for model comparison only. They are, moreover, aligned with the
 internal selection criteria of the method, since corrections are accepted on
 random-fold out-of-fold risk and the gate is chosen by spatial
 cross-validation, which makes them the least independent of the four checks
-rather than the most adversarial. The Population row carries the evidential
-weight.
+rather than the most adversarial. The large independent sample carries the
+evidential weight.
 
 \begin{table}[!ht]
 \centering
@@ -810,7 +813,7 @@ simple random calibration design. RMSE in \Mgha{}.}
 \centering
 \includegraphics[width=0.88\textwidth]{figures/fig4_protocols.png}
 \caption{Comparison under four validation estimands, simple random calibration
-design. Population and Design-based estimate map accuracy; the two
+design. The two simple random samples estimate map accuracy; the two
 cross-validation estimands are reported for model comparison only and are not
 valid map-accuracy estimates. The cross-validation bars train on subsets of the
 calibration sample, so their absolute heights are not comparable with the first
@@ -1116,7 +1119,7 @@ selection of its parameters.
 
 The second answer is no. Selecting the family, practical range, binning,
 estimator and anisotropy rather than fixing them at the conventional values is
-worth $0.008$ \Mgha{}. The paired 95 per cent interval, $[-0.038, +0.023]$,
+worth $0.008$ \Mgha{}. The paired 95 per cent interval, $[-0.023, +0.038]$,
 contains zero, and the selected recipe wins in only 8 of the 30 repetitions:
 when it wins it wins by more than it loses by, which is how a mean this small
 survives a minority of wins, but nothing here separates it from the conventional
@@ -1126,7 +1129,7 @@ The two together are the honest description of what the geostatistics does
 here. Encoding spatial structure through a variogram earns its place in the
 model. Choosing the variogram's parameters from the data does not earn its
 place in the accuracy, and we do not claim it does. What that selection buys is
-stated in Section~\ref{sec:ablation}: it costs nothing on the criterion it is
+stated at the end of this section: it costs nothing on the criterion it is
 run against, it changes the fitted model in a little under half the
 repetitions, and it lets us report that the conventional recipe was adequate
 for these data rather than assume it.
@@ -1366,12 +1369,13 @@ Coverage is a population parameter of the same kind as the mean squared error,
 and it inherits the same design-unbiased estimator. Saying so requires no new
 theory and
 reveals something: cross-fitted conformal intervals that are calibrated and
-sharp under representative sampling under-cover badly once the calibration
-sample is clustered, a failure no exchangeability-assuming check can detect, and
+sharp under representative sampling fall short of nominal once the
+calibration sample is clustered, a failure no exchangeability-assuming check can detect, and
 a spatial-block calibration returns coverage above nominal in this experiment.
-Enlarging the calibration sample does not help, and spent inside a fixed set of
-primary units it hurts while the map improves, because what the interval lacks
-is not data but reach: the error grows with distance from the calibration sample and the
+Enlarging the calibration sample does not by itself repair this: spent inside a
+fixed set of primary units it hurts while the map improves, and spent on new
+units it helps without restoring the nominal level, because what the interval
+lacks is not data but reach: the error grows with distance from the calibration sample and the
 interval width does not follow it. Map uncertainty, like map accuracy, should be
 confronted with the sampling design, and a campaign that wants believable
 intervals should buy locations rather than points.
@@ -1464,8 +1468,9 @@ distinct units is smaller than the nominal one, 18.2 in expectation for 20 and
 7.7 and 27.5 for the 8 and 32 used in Section~\ref{sec:sizes}. The validation
 sample is an independent simple random sample of $n=500$ drawn from the same
 frame without excluding calibration cells, an overlap of about one cell in
-2600 at that size. The Population estimand scores a fixed 20{,}000-cell
-reference subset drawn once with its own seed, also without exclusion. Spatial
+2600 at that size. The 20{,}000-cell estimand of Table~\ref{tab:estimands} is a fresh simple
+random sample in each repetition, drawn from the cells not used for
+calibration. Spatial
 block cross-validation uses complete-linkage clustering of coordinates cut at
 350 km.
 
