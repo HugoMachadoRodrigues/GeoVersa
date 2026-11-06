@@ -92,9 +92,9 @@ the published numbers have not drifted apart.
 
 ## Left to the corresponding author
 
-1. **Author order** is Hugo Rodrigues then Golmar Golmohammadi, with Hugo
-   Rodrigues as corresponding author. This journal does not permit authorship
-   changes after acceptance, so confirm with the co-author before submitting.
+1. **Authorship:** Hugo Rodrigues is the sole author and corresponding author
+   (rodrigues.h@ufl.edu). This journal does not permit authorship changes after
+   acceptance.
 2. **The generative-AI declaration** is the one section whose wording is still
    open. It currently describes the tools actually used. The recommendation is
    to leave it until the journal is fixed, then match that journal's required
